@@ -1,14 +1,13 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Inventario</title>
+  <title>Cuadre de Ventas</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
   <link rel="stylesheet" href="../assets/css/cuadre_de_ventas.css">
 </head>
 <body>
-  <!-- Barra de navegación -->
   <nav class="navbar">
     <div class="navbar-container">
       <div class="logo">
@@ -17,83 +16,85 @@
       <div class="menu">
         <ul>
           <li><a href="../public/Inicio.html"><i class="fas fa-home"></i> Inicio</a></li>
-          <li><a href="inventario.html" class="app-button" style="color: white;text-decoration: none; float: right;"><i
-                class="fas fa-box"></i> Inventario</a>
-          <li><a href="punto_de_venta.html" class="app-button"
-              style="color: white;text-decoration: none; float: right;"><i class="fas fa-chart-line"></i>Punto de Ventas</a></li>
+          <li><a href="inventario.html" class="app-button"><i class="fas fa-box"></i> Inventario</a></li>
+          <li><a href="punto_de_venta.html" class="app-button"><i class="fas fa-cash-register"></i> Punto de Ventas</a></li>
           <li><a href="#" onclick="openCerrarSesionPopup()"><i class="fas fa-sign-out-alt"></i> Cerrar Sesión</a></li>
-          </li>
         </ul>
       </div>
     </div>
   </nav>
+
   <div class="container">
     <h1>Cuadre de Ventas</h1>
     <table id="product-table">
-        <tbody>
-            <td>Empleado:</td>
-            <td id="empleado"></td>
+      <tbody>
+        <tr>
+          <td>Empleado:</td>
+          <td id="empleado"></td>
         </tr>
         <tr>
-            <td>Nota:</td>
-            <td id="nota"></td>
+          <td>Nota:</td>
+          <td id="nota"></td>
         </tr>
-            <tr>
-                <td>Fecha de apertura:</td>
-                <td id="fecha_apertura"></td>
-            </tr>
-            <tr>
-                <td>Fecha de cierre:</td>
-                <td id="fecha_cierre"></td>
-            </tr>
-            <tr>
-                <td>Monto de apertura:</td>
-                <td id="monto_apertura"></td>
-            </tr>
-            <tr>
-            <tr>
-                <td>Efectivo:</td>
-                <td id="efectivo"></td>
-            </tr>
-            <tr>
-                <td>Tarjeta:</td>
-                <td id="tarjeta"></td>
-            </tr>
-            <tr>
-                <td>Transferencia:</td>
-                <td id="transferencia"></td>
-            </tr>
-            <tr>
-                <td>Cigarros efectivo:</td>
-                <td id="cigarros_efectivo"></td>
-            </tr>
-            <tr>
-                <td>Cigarros tarjeta:</td>
-                <td id="cigarros_tarjeta"></td>
-            </tr>
-            <tr>
-                <td>Monto total:</td>
-                <td id="monto_total"></td>
-            </tr>
-            <tr>
-                <td id="diferencia1">Diferencia:<input type="number" id="inputDiferencia" name="diferencia" ></td>
-                <td id="diferencia"></td>
-            </tr>
-        </tbody>
+        <tr>
+          <td>Estado caja:</td>
+          <td id="estado_caja"></td>
+        </tr>
+        <tr>
+          <td>Fecha de apertura:</td>
+          <td id="fecha_apertura"></td>
+        </tr>
+        <tr>
+          <td>Fecha de cierre:</td>
+          <td id="fecha_cierre"></td>
+        </tr>
+        <tr>
+          <td>Monto de apertura:</td>
+          <td id="monto_apertura"></td>
+        </tr>
+        <tr>
+          <td>Efectivo:</td>
+          <td id="efectivo"></td>
+        </tr>
+        <tr>
+          <td>Tarjeta:</td>
+          <td id="tarjeta"></td>
+        </tr>
+        <tr>
+          <td>Transferencia:</td>
+          <td id="transferencia"></td>
+        </tr>
+        <tr>
+          <td>Monto total:</td>
+          <td id="monto_total"></td>
+        </tr>
+        <tr>
+          <td id="monto-real-label">
+            <label for="monto_real">Monto Real en Caja *</label>
+          </td>
+          <td>
+            <input type="number" id="monto_real" name="monto_real" min="0" step="1">
+          </td>
+        </tr>
+        <tr>
+          <td>Diferencia:</td>
+          <td id="diferencia"></td>
+        </tr>
+      </tbody>
     </table>
+  </div>
+
+  <div id="cerrar-sesion-popup" class="popup" style="display: none;">
+    <div class="popup-content">
+      <span class="close-btn" onclick="CloseSesionPopUp()">&times;</span>
+      <h2>Cerrar Sesión</h2>
+      <p id="p-cerrar-sesion">¿Está seguro de que desea cerrar sesión?</p>
+      <div class="popup-buttons">
+        <button onclick="cerrarSesion()">Cerrar Sesión</button>
+      </div>
     </div>
   </div>
-    <!-- Pop-up para cerrar sesión -->
-    <div id="cerrar-sesion-popup" class="popup" style="display: none;">
-        <div class="popup-content">
-          <span class="close-btn" onclick="CloseSesionPopUp()">&times;</span>
-          <h2>Cerrar Sesión</h2>
-          <p id="p-cerrar-sesion">¿Está seguro de que desea cerrar sesión?</p>
-          <div class="popup-buttons">
-            <button onclick="cerrarSesion()">Cerrar Sesión</button>
-          </div>
-        </div>
-      </div>
+
   <script src="../assets/js/cuadre_de_ventas.js"></script>
 </body>
 </html>

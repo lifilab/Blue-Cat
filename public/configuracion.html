@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Configuracion</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+  <link rel="stylesheet" href="../assets/css/configuracion.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="navbar-container">
+      <div class="logo">
+        <a href="#">Blue Cat</a>
+      </div>
+      <div class="menu">
+        <ul>
+          <li><a href="Inicio.html"><i class="fas fa-home"></i> Inicio</a></li>
+          <li><a href="punto_de_venta.html"><i class="fas fa-cash-register"></i> Punto de Venta</a></li>
+          <li><a href="ventas.html"><i class="fas fa-shopping-cart"></i> Ventas</a></li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <main class="config-container">
+    <section class="config-header">
+      <h1>Configuracion</h1>
+      <p id="estado_config">--</p>
+    </section>
+
+    <section class="config-panel">
+      <h2>Plantilla de Boletas</h2>
+      <form id="boleta-form">
+        <div class="form-grid">
+          <label>
+            Empresa
+            <input type="text" id="nombre_empresa" name="nombre_empresa" required>
+          </label>
+          <label>
+            RUT
+            <input type="text" id="rut_empresa" name="rut_empresa">
+          </label>
+          <label>
+            Direccion
+            <input type="text" id="direccion" name="direccion">
+          </label>
+          <label>
+            Telefono
+            <input type="text" id="telefono" name="telefono">
+          </label>
+          <label>
+            Email
+            <input type="email" id="email" name="email">
+          </label>
+          <label>
+            IVA %
+            <input type="number" id="iva_porcentaje" name="iva_porcentaje" min="0" max="100" step="0.01">
+          </label>
+        </div>
+
+        <label>
+          Mensaje de pie
+          <textarea id="mensaje_pie" name="mensaje_pie"></textarea>
+        </label>
+
+        <label>
+          Mensaje de agradecimiento
+          <textarea id="mensaje_agradecimiento" name="mensaje_agradecimiento"></textarea>
+        </label>
+
+        <div class="options-row">
+          <label><input type="checkbox" id="mostrar_rut_cliente"> Mostrar RUT cliente</label>
+          <label><input type="checkbox" id="mostrar_desglose_iva"> Mostrar desglose IVA</label>
+          <label><input type="checkbox" id="mostrar_descuento"> Mostrar descuento</label>
+        </div>
+
+        <div class="logo-row">
+          <div>
+            <label for="logo_file">Logo</label>
+            <input type="file" id="logo_file" accept="image/png,image/jpeg,image/webp,image/gif">
+            <button type="button" id="quitar_logo">Quitar Logo</button>
+          </div>
+          <img id="logo_preview" alt="">
+        </div>
+
+        <div class="actions">
+          <button type="submit"><i class="fas fa-save"></i> Guardar</button>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <script src="../assets/js/configuracion.js"></script>
+</body>
+</html>

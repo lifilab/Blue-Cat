@@ -1,63 +1,45 @@
 <?php
-// Verifica si se ha enviado un POST al script
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    // Verifica si los datos requeridos están presentes en el POST
-    if (isset($_POST["monto"]) && isset($_POST["empleado"])) {
-        // Captura los datos del POST
-        $monto = $_POST["monto"];
-        $empleado = $_POST["empleado"];
-        // Verifica si se ha enviado una nota, si no, establece un valor predeterminado
-        $nota = isset($_POST["nota"]) ? $_POST["nota"] : "";
+require_once __DIR__ . '/_db.php';
 
-        // Realiza la conexión a la base de datos
-        $servername = "localhost";
-        $username = "root";
-        $password = "";
-        $database = "erp";
-
-        $conn = new mysqli($servername, $username, $password, $database);
-
-        // Verifica si la conexión fue exitosa
-        if ($conn->connect_error) {
-            die("Error de conexión a la base de datos: " . $conn->connect_error);
-        }
-
-        // Prepara la consulta SQL para insertar los datos de apertura de sesión
-        $sql = "INSERT INTO sesion (id_user, fecha_ingreso, monto_apertura, empleado, nota) VALUES (?, NOW(), ?, ?, ?)";
-
-        // Prepara la sentencia SQL
-        $stmt = $conn->prepare($sql);
-
-        // Verifica si la preparación de la sentencia SQL fue exitosa
-        if ($stmt === false) {
-            die("Error al preparar la consulta: " . $conn->error);
-        }
-
-        // Vincula los parámetros a la sentencia SQL
-        $stmt->bind_param("iiss", $id_user, $monto, $empleado, $nota);
-
-        // Aquí deberías establecer el id del usuario autenticado
-        // Puedes obtenerlo desde tu sistema de autenticación o desde la sesión, por ejemplo
-        $id_user = 1; // Esto es solo un ejemplo, deberías establecer el id del usuario autenticado correctamente
-
-        // Ejecuta la sentencia SQL
-        if ($stmt->execute()) {
-            // Si la ejecución de la consulta fue exitosa, muestra un mensaje de éxito
-            echo "Apertura de sesión realizada con éxito";
-        } else {
-            // Si hubo un error al ejecutar la consulta, muestra un mensaje de error
-            echo "Error al abrir la sesión: " . $stmt->error;
-        }
-
-        // Cierra la conexión y libera los recursos
-        $stmt->close();
-        $conn->close();
-    } else {
-        // Si no se proporcionaron los datos requeridos en el POST, muestra un mensaje de error
-        echo "Error: Se requieren el monto y el empleado para abrir la sesión";
-    }
-} else {
-    // Si la solicitud no es un POST, muestra un mensaje de error
-    echo "Error: Método de solicitud no permitido";
+if ($_SERVER["REQUEST_METHOD"] !== "POST") {
+    responderJson(respuestaError('Error: Método de solicitud no permitido.'), 405);
+    exit();
 }
-?>
+
+if (!isset($_POST["monto"], $_POST["empleado"])) {
+    responderJson(respuestaError('Error: Se requieren el monto y el empleado para abrir la sesión.'), 400);
+    exit();
+}
+
+$idUser = requerirUsuarioAutenticado();
+$monto = (int) $_POST["monto"];
+$empleado = trim($_POST["empleado"]);
+$nota = isset($_POST["nota"]) ? trim($_POST["nota"]) : "";
+
+$conn = conectarBaseDeDatos();
+
+if (!usuarioTienePermiso($conn, $idUser, 'pos', 'abrir_caja')) {
+    $conn->close();
+    responderJson(respuestaError('No tiene permiso para abrir caja.'), 403);
+    exit();
+}
+
+$sql = "INSERT INTO sesion (id_user, fecha_ingreso, monto_apertura, empleado, nota) VALUES (?, NOW(), ?, ?, ?)";
+$stmt = $conn->prepare($sql);
+
+if (!$stmt) {
+    responderJson(respuestaError('Error al preparar la apertura de sesión.'), 500);
+    $conn->close();
+    exit();
+}
+
+$stmt->bind_param("iiss", $idUser, $monto, $empleado, $nota);
+
+if ($stmt->execute()) {
+    responderJson(respuestaOk('Apertura de sesión realizada con éxito.'));
+} else {
+    responderJson(respuestaError('Error al abrir la sesión.'), 500);
+}
+
+$stmt->close();
+$conn->close();

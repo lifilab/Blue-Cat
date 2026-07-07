@@ -1,144 +1,134 @@
 <?php
-session_start();
+require_once __DIR__ . '/_db.php';
 
-// Database connection parameters
-$servername = "localhost";
-$username = "root";
-$password = "";
-$dbname = "erp";
+$idUser = requerirUsuarioAutenticado();
+$conn = conectarBaseDeDatos();
 
-// Create connection
-$conn = new mysqli($servername, $username, $password, $dbname);
-
-// Check connection
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+if (!usuarioTienePermiso($conn, $idUser, 'ventas', 'cuadre')) {
+    $conn->close();
+    responderJson(respuestaError('No tiene permiso para ver el cuadre de caja.'), 403);
+    exit();
 }
 
-// Obtener el ID de usuario de la sesión actual
-$id_user = isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : 0;
-
-if ($id_user === 0) {
-    die("User ID is not set in the session.");
-}
-
-// Consulta para obtener los datos de la última sesión del usuario
-$sql_sesion = $conn->prepare("SELECT id_sesion, monto_apertura, empleado, nota, fecha_ingreso FROM sesion WHERE id_user = ? ORDER BY fecha_ingreso DESC LIMIT 1");
-$sql_sesion->bind_param("i", $id_user);
-$sql_sesion->execute();
-$result_sesion = $sql_sesion->get_result();
-
-if ($result_sesion->num_rows > 0) {
-    $row_sesion = $result_sesion->fetch_assoc();
-    $id_sesion = (int) $row_sesion['id_sesion'];
-    $monto_apertura = (float) $row_sesion['monto_apertura'];
-    $empleado = $row_sesion['empleado'];
-    $nota = $row_sesion['nota'];
-    $fecha_apertura = $row_sesion['fecha_ingreso'];
-} else {
-    $id_sesion = 0;
-    $monto_apertura = 0;
-    $empleado = "No disponible";
-    $nota = "No disponible";
-    $fecha_apertura = "No disponible";
-}
-
-// Consulta para obtener los datos de ventas desde la última sesión del usuario
-$sql_ventas = $conn->prepare("SELECT SUM(precio_total) AS monto_total FROM detalle_pedido WHERE id_pedido IN (SELECT id_pedido FROM pedido WHERE id_sesion = ?)");
-$sql_ventas->bind_param("i", $id_sesion);
-$sql_ventas->execute();
-$result_ventas = $sql_ventas->get_result();
-
-if ($result_ventas->num_rows > 0) {
-    $row_ventas = $result_ventas->fetch_assoc();
-    $monto_ventas = (float) $row_ventas['monto_total'];
-} else {
-    $monto_ventas = 0; // Si no hay ventas, el monto total de ventas es cero
-}
-
-// Calcular el monto total sumando el monto de apertura y el monto de ventas
-$monto_total = $monto_apertura + $monto_ventas;
-
-// Consulta para obtener los datos de métodos de pago desde la última sesión del usuario
-$sql_metodos_pago = $conn->prepare("
-SELECT 
-    SUM(CASE WHEN m.nombre_metodo_pago = 'Efectivo' THEN m.monto - COALESCE(p.diferencia, 0) ELSE 0 END) AS efectivo,
-    SUM(CASE WHEN m.nombre_metodo_pago = 'Tarjeta' THEN m.monto ELSE 0 END) AS tarjeta,
-    SUM(CASE WHEN m.nombre_metodo_pago = 'Transferencia' THEN m.monto ELSE 0 END) AS transferencia
-FROM metodo_de_pago AS m
-INNER JOIN (
-    SELECT 
-        id_pedido,
-        diferencia
-    FROM pedido
-    WHERE id_sesion = ?
-) AS p ON m.id_pedido = p.id_pedido;
+$sqlSesion = $conn->prepare("
+    SELECT
+        s.id_sesion,
+        s.monto_apertura,
+        s.empleado,
+        s.nota,
+        s.fecha_ingreso,
+        s.fecha_cierre AS sesion_fecha_cierre,
+        c.id_caja,
+        c.estado AS estado_caja,
+        c.monto_actual,
+        c.monto_cierre,
+        c.fecha_cierre AS caja_fecha_cierre
+    FROM sesion s
+    LEFT JOIN pos_caja c ON c.id_sesion = s.id_sesion
+    WHERE s.id_user = ?
+    ORDER BY
+        CASE WHEN c.estado = 'ABIERTA' THEN 0 ELSE 1 END,
+        s.id_sesion DESC
+    LIMIT 1
 ");
-$sql_metodos_pago->bind_param("i", $id_sesion);
-$sql_metodos_pago->execute();
-$result_metodos_pago = $sql_metodos_pago->get_result();
 
-if ($result_metodos_pago->num_rows > 0) {
-    $row_metodos_pago = $result_metodos_pago->fetch_assoc();
-    $efectivo = (float) $row_metodos_pago['efectivo'];
-    $tarjeta = (float) $row_metodos_pago['tarjeta'];
-    $transferencia = (float) $row_metodos_pago['transferencia'];
-} else {
-    $efectivo = 0;
-    $tarjeta = 0;
-    $transferencia = 0;
+if (!$sqlSesion) {
+    responderJson(respuestaError('Error al preparar la consulta de sesión de caja.'), 500);
+    $conn->close();
+    exit();
 }
 
-// Inicializar los montos para cigarros
-$cigarros_efectivo = 0;
-$cigarros_tarjeta = 0;
+$sqlSesion->bind_param("i", $idUser);
+$sqlSesion->execute();
+$resultSesion = $sqlSesion->get_result();
+$rowSesion = $resultSesion->fetch_assoc();
+$sqlSesion->close();
 
-// Consulta adicional para obtener detalles de productos de la categoría 'CIGARROS'
-$sql_cigarros = $conn->prepare("
-SELECT 
-    dp.id_detalle_pedido, 
-    dp.id_pedido, 
-    dp.id_producto, 
-    dp.precio_total, 
-    p.categoria, 
-    -- Selecting only one payment method per order
-    (SELECT MIN(nombre_metodo_pago) FROM metodo_de_pago WHERE id_pedido = dp.id_pedido) AS nombre_metodo_pago
-FROM detalle_pedido dp
-JOIN producto p ON dp.id_producto = p.id_producto
-WHERE dp.id_pedido IN (SELECT id_pedido FROM pedido WHERE id_sesion = ?) 
-AND p.categoria = 'CIGARROS';
+if (!$rowSesion) {
+    $conn->close();
+    responderJson(array(
+        'ok' => true,
+        'empleado' => 'No disponible',
+        'nota' => 'No disponible',
+        'fecha_apertura' => 'No disponible',
+        'fecha_cierre' => null,
+        'monto_apertura' => 0,
+        'efectivo' => 0,
+        'tarjeta' => 0,
+        'transferencia' => 0,
+        'ventas_total' => 0,
+        'monto_total' => 0,
+        'monto_actual_caja' => 0,
+        'estado_caja' => 'SIN_CAJA',
+    ));
+    exit();
+}
 
+$idSesion = (int) $rowSesion['id_sesion'];
+$montoApertura = (float) $rowSesion['monto_apertura'];
+$empleado = $rowSesion['empleado'] !== '' ? $rowSesion['empleado'] : 'No disponible';
+$nota = $rowSesion['nota'] !== '' ? $rowSesion['nota'] : 'No disponible';
+$fechaApertura = $rowSesion['fecha_ingreso'];
+$fechaCierre = $rowSesion['caja_fecha_cierre'] ?: $rowSesion['sesion_fecha_cierre'];
+$idCaja = isset($rowSesion['id_caja']) ? (int) $rowSesion['id_caja'] : 0;
+$estadoCaja = $rowSesion['estado_caja'] ?: 'SIN_CAJA';
+$montoActualCaja = isset($rowSesion['monto_actual']) ? (float) $rowSesion['monto_actual'] : 0;
+
+$efectivo = 0;
+$tarjeta = 0;
+$transferencia = 0;
+$ventasTotal = 0;
+
+$sqlTotales = $conn->prepare("
+    SELECT
+        COALESCE(SUM(p.precio_total), 0) AS ventas_total,
+        COALESCE(SUM(mp.efectivo), 0) AS efectivo,
+        COALESCE(SUM(mp.tarjeta), 0) AS tarjeta,
+        COALESCE(SUM(mp.transferencia), 0) AS transferencia
+    FROM pedido p
+    LEFT JOIN (
+        SELECT
+            m.id_pedido,
+            SUM(CASE WHEN m.nombre_metodo_pago = 'Efectivo' THEN m.monto - COALESCE(p2.diferencia, 0) ELSE 0 END) AS efectivo,
+            SUM(CASE WHEN m.nombre_metodo_pago = 'Tarjeta' THEN m.monto ELSE 0 END) AS tarjeta,
+            SUM(CASE WHEN m.nombre_metodo_pago = 'Transferencia' THEN m.monto ELSE 0 END) AS transferencia
+        FROM metodo_de_pago m
+        INNER JOIN pedido p2 ON p2.id_pedido = m.id_pedido
+        GROUP BY m.id_pedido
+    ) mp ON mp.id_pedido = p.id_pedido
+    WHERE p.id_sesion = ?
+      AND COALESCE(p.anulado, 0) = 0
 ");
-$sql_cigarros->bind_param("i", $id_sesion);
-$sql_cigarros->execute();
-$result_cigarros = $sql_cigarros->get_result();
 
-if ($result_cigarros->num_rows > 0) {
-    while ($row_cigarros = $result_cigarros->fetch_assoc()) {
-        if ($row_cigarros['nombre_metodo_pago'] == 'Efectivo') {
-            $cigarros_efectivo += (float) $row_cigarros['precio_total'];
-        } elseif ($row_cigarros['nombre_metodo_pago'] == 'Tarjeta') {
-            $cigarros_tarjeta += (float) $row_cigarros['precio_total'];
-        }
-    }
+if ($sqlTotales) {
+    $sqlTotales->bind_param("i", $idSesion);
+    $sqlTotales->execute();
+    $rowTotales = $sqlTotales->get_result()->fetch_assoc();
+    $ventasTotal = (float) $rowTotales['ventas_total'];
+    $efectivo = (float) $rowTotales['efectivo'];
+    $tarjeta = (float) $rowTotales['tarjeta'];
+    $transferencia = (float) $rowTotales['transferencia'];
+    $sqlTotales->close();
 }
 
-// Mostrar los datos obtenidos en la respuesta
-$response = array(
-    'empleado' => $empleado,
-    'nota' => $nota,
-    'fecha_apertura' => $fecha_apertura,
-    'monto_apertura' => $monto_apertura,
-    'efectivo' => $efectivo,
-    'tarjeta' => $tarjeta,
-    'transferencia' => $transferencia,
-    'cigarros_efectivo' => $cigarros_efectivo,
-    'cigarros_tarjeta' => $cigarros_tarjeta,
-    'monto_total' => $monto_total
-);
+$montoTotal = $montoApertura + $efectivo + $tarjeta + $transferencia;
 
 $conn->close();
 
-// Imprimir la respuesta JSON
-echo json_encode($response);
-?>
+responderJson(array(
+    'ok' => true,
+    'id_sesion' => $idSesion,
+    'id_caja' => $idCaja,
+    'estado_caja' => $estadoCaja,
+    'empleado' => $empleado,
+    'nota' => $nota,
+    'fecha_apertura' => $fechaApertura,
+    'fecha_cierre' => $fechaCierre,
+    'monto_apertura' => $montoApertura,
+    'efectivo' => $efectivo,
+    'tarjeta' => $tarjeta,
+    'transferencia' => $transferencia,
+    'ventas_total' => $ventasTotal,
+    'monto_total' => $montoTotal,
+    'monto_actual_caja' => $montoActualCaja,
+));

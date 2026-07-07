@@ -1,47 +1,49 @@
 <?php
-session_start();
+require_once __DIR__ . '/_db.php';
 
-// Database connection parameters
-$servername = "localhost";
-$username = "root";
-$password = "";
-$dbname = "erp";
+$idUser = requerirUsuarioAutenticado();
 
-// Create connection
-$conn = new mysqli($servername, $username, $password, $dbname);
-
-// Check connection
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+if ($_SERVER["REQUEST_METHOD"] !== "POST") {
+    responderJson(respuestaError('Error: Método de solicitud no permitido.'), 405);
+    exit();
 }
 
-// Now you can proceed with your SQL operations
+if (!isset($_POST['nombre_producto'], $_POST['precio_venta'], $_POST['codigo_de_barras'], $_POST['cantidad'], $_POST['categoria'])) {
+    responderJson(respuestaError('Error: Se esperaban datos de nombre, precio de venta, código de barras, cantidad y categoría.'), 400);
+    exit();
+}
 
-$id_user = $_SESSION['user_id'];
+$nombreProducto = trim($_POST['nombre_producto']);
+$precioVenta = (int) $_POST['precio_venta'];
+$codigoBarras = trim($_POST['codigo_de_barras']);
+$cantidad = (int) $_POST['cantidad'];
+$categoria = trim($_POST['categoria']);
 
-// Verificar si se han recibido los datos esperados
-if (isset($_POST['nombre_producto'], $_POST['precio_venta'], $_POST['codigo_de_barras'], $_POST['cantidad'], $_POST['categoria'])) {
-    // Recibir los datos del formulario
-    $nombre_producto = $_POST['nombre_producto'];
-    $precio_venta = $_POST['precio_venta'];
-    $codigo_de_barras = $_POST['codigo_de_barras'];
-    $cantidad = $_POST['cantidad'];
-    $categoria = $_POST['categoria'];
-    $id_user = $_SESSION['user_id'];
+if ($nombreProducto === '' || $precioVenta < 0 || $cantidad < 0) {
+    responderJson(respuestaError('Error: Producto, precio y cantidad son obligatorios y no pueden ser negativos.'), 400);
+    exit();
+}
 
-    // Preparar la consulta SQL para insertar el nuevo producto
-    $sql = "INSERT INTO producto (nombre_producto, precio_venta, codigo_de_barras, cantidad, categoria, id_user) VALUES ('$nombre_producto', '$precio_venta', '$codigo_de_barras', '$cantidad', '$categoria', '$id_user')";
+$conn = conectarBaseDeDatos();
+$sql = "INSERT INTO producto (nombre_producto, precio_venta, codigo_de_barras, cantidad, categoria, id_user)
+        VALUES (?, ?, ?, ?, ?, ?)";
+$stmt = $conn->prepare($sql);
 
-    // Ejecutar la consulta SQL y manejar errores si es necesario
-    if ($conn->query($sql) === TRUE) {
-        // Redireccionar a la página de inventario después de insertar el producto
-        header("Location: http://localhost/Mi_ERP/public/inventario.html");
-        exit();
-    } else {
-        echo "Error al agregar el producto: " . $conn->error;
-    }
+if (!$stmt) {
+    responderJson(respuestaError('Error al preparar el registro del producto.'), 500);
+    $conn->close();
+    exit();
+}
+
+$stmt->bind_param("sisisi", $nombreProducto, $precioVenta, $codigoBarras, $cantidad, $categoria, $idUser);
+
+if ($stmt->execute()) {
+    responderJson(respuestaOk('Producto agregado exitosamente.', array(
+        'id_producto' => $conn->insert_id,
+    )));
 } else {
-    // Si no se reciben los datos esperados, mostrar un mensaje de error
-    echo "Error: Se esperaban datos de nombre, precio de venta, código de barras, cantidad y categoría.";
+    responderJson(respuestaError('Error al agregar el producto.'), 500);
 }
-?>
+
+$stmt->close();
+$conn->close();

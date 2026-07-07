@@ -47,6 +47,29 @@ button:hover {
   background-color: #385f9e;
 }
 
+.inventory-actions {
+  white-space: nowrap;
+}
+
+.table-action {
+  padding: 7px 10px;
+  margin-right: 6px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.stock-action {
+  background-color: #2563df;
+}
+
+.price-action {
+  background-color: #2f855a;
+}
+
+.price-action:hover {
+  background-color: #276749;
+}
+
 #search-input {
   width: 50%;
   padding: 8px;

@@ -1,53 +1,39 @@
 <?php
-session_start(); // Iniciar o reanudar la sesión
+require_once __DIR__ . '/_db.php';
 
-$servername = "localhost";
-$username = "root";
-$password = "";
-$database = "erp";
+$idUser = requerirUsuarioAutenticado();
+$conn = conectarBaseDeDatos();
 
-// Establecer conexión con la base de datos
-$conn = new mysqli($servername, $username, $password, $database);
+$sql = "SELECT validar_sesion FROM usuario WHERE id_user = ?";
+$stmt = $conn->prepare($sql);
 
-// Verificar si hay errores de conexión
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+if (!$stmt) {
+    responderJson(respuestaError('Error al preparar la consulta de sesión.'), 500);
+    $conn->close();
+    exit();
 }
 
-// Verificar si se ha iniciado sesión y si existe el id_user en la sesión
-if (isset($_SESSION['user_id'])) {
-    // Obtener el id_user de la sesión
-    $id_user = $_SESSION['user_id'];
-    
-    // Preparar y ejecutar la consulta SQL para obtener el valor de validar_sesion
-    $sql = "SELECT validar_sesion FROM usuario WHERE id_user = ?";
-    $stmt = $conn->prepare($sql);
+$stmt->bind_param("i", $idUser);
 
-    if ($stmt === false) {
-        die("Error al preparar la consulta: " . $conn->error);
-    }
-
-    // Vincular el parámetro a la sentencia SQL
-    $stmt->bind_param("i", $id_user);
-
-    // Ejecutar la consulta
-    if ($stmt->execute()) {
-        // Obtener el resultado de la consulta
-        $result = $stmt->get_result();
-        $row = $result->fetch_assoc();
-        
-        // Enviar el resultado como JSON
-        echo json_encode($row);
-    } else {
-        // Si hay un error al ejecutar la consulta, enviar un mensaje de error
-        echo json_encode(array("error" => "Error al ejecutar la consulta"));
-    }
-
-    // Cerrar la sentencia y la conexión
+if (!$stmt->execute()) {
+    responderJson(respuestaError('Error al ejecutar la consulta de sesión.'), 500);
     $stmt->close();
     $conn->close();
-} else {
-    // Si no se ha iniciado sesión, enviar un mensaje de error
-    echo json_encode(array("error" => "No se ha iniciado sesión"));
+    exit();
 }
-?>
+
+$result = $stmt->get_result();
+$row = $result->fetch_assoc();
+
+$stmt->close();
+$conn->close();
+
+if (!$row) {
+    responderJson(respuestaError('No se encontró el usuario de la sesión.'), 404);
+    exit();
+}
+
+responderJson(array(
+    'ok' => true,
+    'validar_sesion' => (int) $row['validar_sesion'],
+));

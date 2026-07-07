@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ventas</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+  <link rel="stylesheet" href="../assets/css/ventas.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="navbar-container">
+      <div class="logo">
+        <a href="#">Blue Cat</a>
+      </div>
+      <div class="menu">
+        <ul>
+          <li><a href="Inicio.html"><i class="fas fa-home"></i> Inicio</a></li>
+          <li><a href="inventario.html"><i class="fas fa-box"></i> Inventario</a></li>
+          <li><a href="punto_de_venta.html"><i class="fas fa-cash-register"></i> Punto de Venta</a></li>
+          <li><a href="cuadre_de_ventas.html"><i class="fas fa-clipboard-check"></i> Cuadre</a></li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <main class="ventas-container">
+    <section class="ventas-header">
+      <div>
+        <h1>Ventas</h1>
+        <p id="alcance_ventas">--</p>
+      </div>
+      <div class="toolbar">
+        <select id="periodo_ventas" aria-label="Periodo de ventas">
+          <option value="siempre" selected>Todas</option>
+          <option value="hoy">Hoy</option>
+          <option value="semana">Ultimos 7 dias</option>
+          <option value="mes">Ultimo mes</option>
+        </select>
+        <input type="search" id="buscar_venta" placeholder="Buscar venta">
+        <button type="button" id="recargar_ventas"><i class="fas fa-sync-alt"></i> Recargar</button>
+      </div>
+    </section>
+
+    <section class="summary-grid" aria-label="Resumen de ventas">
+      <div class="summary-item">
+        <span>Total ventas</span>
+        <strong id="total_ventas">--</strong>
+      </div>
+      <div class="summary-item">
+        <span>Monto vendido</span>
+        <strong id="monto_vendido">--</strong>
+      </div>
+      <div class="summary-item">
+        <span>Efectivo</span>
+        <strong id="efectivo_total">--</strong>
+      </div>
+      <div class="summary-item">
+        <span>Tarjeta</span>
+        <strong id="tarjeta_total">--</strong>
+      </div>
+      <div class="summary-item">
+        <span>Transferencia</span>
+        <strong id="transferencia_total">--</strong>
+      </div>
+    </section>
+
+    <section class="table-panel">
+      <div class="table-meta">
+        <span id="estado_carga">Cargando ventas...</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Folio</th>
+              <th>Empleado</th>
+              <th>Caja</th>
+              <th>Documento</th>
+              <th>Cliente</th>
+              <th>Total</th>
+              <th>Pagado</th>
+              <th>Cambio</th>
+              <th>Metodos</th>
+            </tr>
+          </thead>
+          <tbody id="ventas_body"></tbody>
+        </table>
+      </div>
+      <div id="ventas_empty" class="empty-state">No hay ventas para mostrar.</div>
+    </section>
+  </main>
+
+  <script src="../assets/js/ventas.js"></script>
+</body>
+</html>

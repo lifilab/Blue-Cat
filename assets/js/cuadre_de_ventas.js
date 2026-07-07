@@ -1,106 +1,103 @@
-document.addEventListener("DOMContentLoaded", function() {
-    // Obtener la fecha y hora actual
-    var fechaHoraActual = new Date();
-    var fechaCierre = formatDate(fechaHoraActual);
+var montoTotalEsperado = 0;
 
-    // Mostrar la fecha y hora actual en el campo de fecha de cierre
-    document.getElementById("fecha_cierre").textContent = fechaCierre;
-
-    // Realizar una solicitud HTTP para obtener los datos del cuadre de ventas
-    var xhr = new XMLHttpRequest();
-    xhr.open("GET", "../assets/PHP/cuadre_de_ventas.php", true);
-    xhr.onload = function() {
-        if (xhr.status == 200) {
-            var data = JSON.parse(xhr.responseText);
-            // Actualizar los campos con los datos recibidos
-            document.getElementById("empleado").textContent = data.empleado;
-            document.getElementById("nota").textContent = data.nota;
-            document.getElementById("fecha_apertura").textContent = data.fecha_apertura;
-            document.getElementById("monto_apertura").textContent = data.monto_apertura;
-            document.getElementById("efectivo").textContent = data.efectivo;
-            document.getElementById("tarjeta").textContent = data.tarjeta;
-            document.getElementById("transferencia").textContent = data.transferencia;
-            document.getElementById("cigarros_efectivo").textContent = data.cigarros_efectivo;
-            document.getElementById("cigarros_tarjeta").textContent = data.cigarros_tarjeta;
-            document.getElementById("monto_total").textContent = data.monto_total;
-        } else {
-            console.error("Error al realizar la solicitud:", xhr.statusText);
-        }
-    };
-    xhr.onerror = function() {
-        console.error("Error de red");
-    };
-    xhr.send();
-});
-
-// Función para formatear la fecha y hora en formato legible
 function formatDate(date) {
     var options = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' };
     return date.toLocaleDateString('es-ES', options);
 }
 
+function formatAmount(value) {
+    var number = Number(value || 0);
+    return '$' + number.toLocaleString('es-CL');
+}
+
+function setText(id, value) {
+    var element = document.getElementById(id);
+    if (element) {
+        element.textContent = value == null || value === '' ? '--' : value;
+    }
+}
+
+function calcularDiferencia() {
+    var inputMontoReal = document.getElementById("monto_real");
+    var tdDiferencia = document.getElementById("diferencia");
+    var montoReal = Number(inputMontoReal.value || 0);
+    var diferencia = montoReal - montoTotalEsperado;
+
+    tdDiferencia.textContent = formatAmount(diferencia);
+}
 
 document.addEventListener("DOMContentLoaded", function() {
-    // Obtener el elemento del input y el elemento del td para el monto total y la diferencia
-    var inputDiferencia = document.getElementById("inputDiferencia");
-    var tdMontoTotal = document.getElementById("monto_total");
-    var tdDiferencia = document.getElementById("diferencia");
+    setText("fecha_cierre", formatDate(new Date()));
 
-    // Agregar un evento de escucha para el evento input al input
-    inputDiferencia.addEventListener("input", function() {
-        // Obtener el valor introducido en el input
-        var valorInput = parseInt(inputDiferencia.value);
-        
-        // Obtener el valor del monto total mostrado en el td
-        var valorMontoTotal = parseInt(tdMontoTotal.textContent);
-        
-        // Calcular la diferencia (siempre positiva)
-        var diferencia = (valorInput - valorMontoTotal);
-        
-        // Mostrar la diferencia en el td correspondiente
-        tdDiferencia.textContent = diferencia;
-    });
+    var xhr = new XMLHttpRequest();
+    xhr.open("GET", "../assets/PHP/cuadre_de_ventas.php", true);
+    xhr.onload = function() {
+        if (xhr.status === 200) {
+            var data = JSON.parse(xhr.responseText);
+
+            if (!data.ok) {
+                alert(data.mensaje || "No se pudo cargar el cuadre.");
+                return;
+            }
+
+            montoTotalEsperado = Number(data.monto_total || 0);
+
+            setText("empleado", data.empleado);
+            setText("nota", data.nota);
+            setText("estado_caja", data.estado_caja);
+            setText("fecha_apertura", data.fecha_apertura);
+            setText("fecha_cierre", data.fecha_cierre || formatDate(new Date()));
+            setText("monto_apertura", formatAmount(data.monto_apertura));
+            setText("efectivo", formatAmount(data.efectivo));
+            setText("tarjeta", formatAmount(data.tarjeta));
+            setText("transferencia", formatAmount(data.transferencia));
+            setText("monto_total", formatAmount(data.monto_total));
+
+            calcularDiferencia();
+        } else {
+            alert("Error al cargar el cuadre de ventas.");
+        }
+    };
+    xhr.onerror = function() {
+        alert("Error de red al cargar el cuadre de ventas.");
+    };
+    xhr.send();
+
+    document.getElementById("monto_real").addEventListener("input", calcularDiferencia);
 });
 
-// Función para abrir el popup de cerrar sesión
 function openCerrarSesionPopup() {
     document.getElementById("cerrar-sesion-popup").style.display = "block";
 }
-// Función para cerrar sesión
-function cerrarSesion() {
-    // Crear un objeto FormData vacío para enviar los datos
-    var formData = new FormData();
 
-    // Crear una instancia de XMLHttpRequest
+function cerrarSesion() {
     var xhr = new XMLHttpRequest();
 
-    // Definir la función de retorno de llamada para la solicitud AJAX
     xhr.onreadystatechange = function () {
         if (xhr.readyState === XMLHttpRequest.DONE) {
             if (xhr.status === 200) {
-                // Manejar la respuesta del servidor
-                alert(xhr.responseText); // Muestra la respuesta del servidor en una alerta
-                // Cierra la ventana actual después de cerrar sesión
-                if (xhr.responseText.includes('Sesión cerrada correctamente.')) {
-                    window.location.href = 'http://localhost/Mi_ERP/public/punto_de_venta.html'; 
+                var data;
+                try {
+                    data = JSON.parse(xhr.responseText);
+                } catch (error) {
+                    data = { ok: false, mensaje: xhr.responseText };
+                }
+
+                alert(data.mensaje || xhr.responseText);
+                if (data.ok || xhr.responseText.includes('Sesión cerrada correctamente.')) {
+                    window.location.href = 'punto_de_venta.html';
                 }
             } else {
-                // Manejar errores de la solicitud
-                console.error('Error al enviar la solicitud:', xhr.status);
+                alert('Error al cerrar sesión.');
             }
         }
     };
 
     xhr.open('POST', '../assets/PHP/cerrar_sesion.php', true);
-
-    // Enviar la solicitud AJAX con el objeto FormData vacío
-    xhr.send(formData);
-
-    // Prevenir el envío del formulario por defecto
+    xhr.send(new FormData());
     return false;
 }
 
-// Función para cerrar el popup
 function CloseSesionPopUp() {
     document.getElementById("cerrar-sesion-popup").style.display = "none";
 }

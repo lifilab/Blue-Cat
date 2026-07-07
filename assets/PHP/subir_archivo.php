@@ -1,87 +1,93 @@
 <?php
-session_start(); // Iniciar o reanudar la sesión
+require_once __DIR__ . '/_db.php';
 
-$id_user = $_SESSION['user_id'];
-// Verificar si se recibió un archivo
-if(isset($_FILES["file"])) {
-    $file = $_FILES["file"];
+$idUser = requerirUsuarioAutenticado();
 
-    // Verificar si no hay errores en la subida del archivo
-    if($file["error"] === UPLOAD_ERR_OK) {
-        // Obtener información sobre el archivo
-        $fileName = $file["name"];
-        $fileTmpName = $file["tmp_name"];
-
-        // Verificar si el archivo es un CSV
-        $fileType = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
-        if($fileType === "csv") {
-            // Mover el archivo temporal al directorio deseado
-            $uploadDir = "../uploads/"; // Directorio donde se almacenarán los archivos subidos
-            $uploadPath = $uploadDir . $fileName;
-            if(move_uploaded_file($fileTmpName, $uploadPath)) {
-                echo "¡El archivo se subió correctamente!<br>";
-
-                // Abrir el archivo CSV
-                $fileHandle = fopen($uploadPath, "r");
-                if($fileHandle !== false) {
-                    // Establecer conexión con la base de datos
-                    $servername = "localhost";
-                    $username = "root";
-                    $password = "";
-                    $dbname = "erp";
-                    $conn = new mysqli($servername, $username, $password, $dbname);
-
-                    // Verificar la conexión
-                    if ($conn->connect_error) {
-                        die("Conexión fallida: " . $conn->connect_error);
-                    }
-
-                    // Omitir la primera línea (encabezados)
-                    fgetcsv($fileHandle);
-
-                    // Contador de filas
-                    $row = 1;
-
-                    // Leer el archivo línea por línea
-                    while(($data = fgetcsv($fileHandle)) !== false) {
-                        // Procesar cada línea de datos e insertar en la base de datos
-                        $nombre = $conn->real_escape_string($data[0]);
-                        $precio = $conn->real_escape_string($data[1]);
-                        $codigoBarras = $conn->real_escape_string($data[2]);
-                        $cantidad = $conn->real_escape_string($data[3]);
-                        $categoria = isset($data[4]) ? "'" . $conn->real_escape_string($data[4]) . "'" : "NULL";
-
-                        // Query de inserción
-                        $sql = "INSERT INTO producto (id_user, nombre_producto, precio_venta, codigo_de_barras, cantidad, categoria) VALUES ('$id_user', '$nombre', '$precio', '$codigoBarras', '$cantidad', $categoria)";
-
-                        // Ejecutar consulta
-                        echo "Ejecutando consulta para fila $row: $sql<br>";
-                        if ($conn->query($sql) === TRUE) {
-                            echo "Registro insertado correctamente para fila $row: $nombre, $precio, $codigoBarras, $cantidad, $categoria<br>";
-                        } else {
-                            echo "Error al insertar registro para fila $row: " . $conn->error . "<br>";
-                        }
-
-                        // Incrementar el contador de filas
-                        $row++;
-                    }
-
-                    // Cerrar la conexión
-                    $conn->close();
-                    fclose($fileHandle);
-                } else {
-                    echo "Error al abrir el archivo CSV.";
-                }
-            } else {
-                echo "Error al subir el archivo.";
-            }
-        } else {
-            echo "El archivo debe ser un CSV.";
-        }
-    } else {
-        echo "Error en la subida del archivo: " . $file["error"];
-    }
-} else {
-    echo "No se recibió ningún archivo.";
+if (!isset($_FILES["file"])) {
+    responderJson(respuestaError('No se recibió ningún archivo.'), 400);
+    exit();
 }
-?>
+
+$file = $_FILES["file"];
+
+if ($file["error"] !== UPLOAD_ERR_OK) {
+    responderJson(respuestaError('Error en la subida del archivo.', array(
+        'codigo_error' => $file["error"],
+    )), 400);
+    exit();
+}
+
+$fileType = strtolower(pathinfo($file["name"], PATHINFO_EXTENSION));
+if ($fileType !== "csv") {
+    responderJson(respuestaError('El archivo debe ser un CSV.'), 400);
+    exit();
+}
+
+$uploadDir = __DIR__ . "/../uploads/";
+if (!is_dir($uploadDir)) {
+    mkdir($uploadDir, 0775, true);
+}
+
+$safeName = 'import_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.csv';
+$uploadPath = $uploadDir . $safeName;
+
+if (!move_uploaded_file($file["tmp_name"], $uploadPath)) {
+    responderJson(respuestaError('Error al subir el archivo.'), 500);
+    exit();
+}
+
+$fileHandle = fopen($uploadPath, "r");
+if ($fileHandle === false) {
+    responderJson(respuestaError('Error al abrir el archivo CSV.'), 500);
+    exit();
+}
+
+$conn = conectarBaseDeDatos();
+$sql = "INSERT INTO producto (id_user, nombre_producto, precio_venta, codigo_de_barras, cantidad, categoria)
+        VALUES (?, ?, ?, ?, ?, ?)";
+$stmt = $conn->prepare($sql);
+
+if (!$stmt) {
+    fclose($fileHandle);
+    $conn->close();
+    responderJson(respuestaError('Error al preparar la importación de productos.'), 500);
+    exit();
+}
+
+fgetcsv($fileHandle);
+$insertados = 0;
+$errores = array();
+$fila = 1;
+
+while (($data = fgetcsv($fileHandle)) !== false) {
+    $fila++;
+
+    $nombre = isset($data[0]) ? trim($data[0]) : '';
+    $precio = isset($data[1]) && is_numeric($data[1]) ? (int) $data[1] : 0;
+    $codigoBarras = isset($data[2]) ? trim($data[2]) : '';
+    $cantidad = isset($data[3]) && is_numeric($data[3]) ? (int) $data[3] : 0;
+    $categoria = isset($data[4]) ? trim($data[4]) : null;
+
+    if ($nombre === '' || $precio < 0 || $cantidad < 0) {
+        $errores[] = array('fila' => $fila, 'mensaje' => 'Datos inválidos');
+        continue;
+    }
+
+    $stmt->bind_param("isisis", $idUser, $nombre, $precio, $codigoBarras, $cantidad, $categoria);
+
+    if ($stmt->execute()) {
+        $insertados++;
+    } else {
+        $errores[] = array('fila' => $fila, 'mensaje' => 'No se pudo insertar el producto');
+    }
+}
+
+$stmt->close();
+$conn->close();
+fclose($fileHandle);
+
+responderJson(respuestaOk('Archivo importado correctamente.', array(
+    'archivo' => $safeName,
+    'insertados' => $insertados,
+    'errores' => $errores,
+)));

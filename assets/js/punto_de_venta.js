@@ -8,9 +8,37 @@ var change = 0;
 var paymentRecords = []
 // nombre y precio de cada producto agregado al carrito
 var cartItemsArray = [];
+var posPermissions = { cambiar_precios: false };
+var priceModificationListenerAttached = false;
 
-// Llamar a loadProducts para cargar los productos inicialmente
+loadPosPermissions();
 loadProducts();
+
+function parseJsonResponse(text) {
+    try {
+        return JSON.parse(text);
+    } catch (error) {
+        return { ok: false, mensaje: text || 'Respuesta invalida del servidor.' };
+    }
+}
+
+function loadPosPermissions() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '../assets/PHP/obtener_permisos_usuario.php', true);
+    xhr.onreadystatechange = function () {
+        if (xhr.readyState === 4 && xhr.status === 200) {
+            var data = parseJsonResponse(xhr.responseText);
+            if (data.ok && data.permisos && data.permisos.pos) {
+                posPermissions = data.permisos.pos;
+            }
+        }
+    };
+    xhr.send();
+}
+
+function canChangePrices() {
+    return posPermissions && posPermissions.cambiar_precios === true;
+}
 
 
 // Agregar un event listener para el evento click al botón pagar
@@ -58,8 +86,15 @@ document.querySelector('.pagar-btn').addEventListener('click', function () {
         xhr.open('POST', '../assets/PHP/pedidos.php', true);
         xhr.setRequestHeader('Content-Type', 'application/json');
         xhr.onreadystatechange = function () {
-            if (xhr.readyState == 4 && xhr.status == 200) {
+            if (xhr.readyState == 4) {
                 // La solicitud se completó y la respuesta está lista
+                var response = parseJsonResponse(xhr.responseText);
+
+                if (xhr.status !== 200 || !response.ok) {
+                    alert(response.mensaje || 'No se pudo registrar la venta.');
+                    return;
+                }
+
                 console.log(xhr.responseText);
 
                 // Crear el contenido del recibo
@@ -666,6 +701,12 @@ function handleShortcut(event) {
 }
 
 function modifyProductPrice() {
+    if (priceModificationListenerAttached) {
+        return;
+    }
+
+    priceModificationListenerAttached = true;
+
     // Obtener referencia al carrito de compras
     var cart = document.getElementById('cart-items');
 
@@ -673,6 +714,11 @@ function modifyProductPrice() {
     cart.addEventListener('click', function (event) {
         // Verificar si el clic se originó en un elemento de producto
         if (event.target.tagName === 'LI') {
+            if (!canChangePrices()) {
+                alert('No tiene permiso para cambiar precios en POS.');
+                return;
+            }
+
             // Obtener el texto del elemento de lista
             var itemText = event.target.innerText;
 
@@ -713,6 +759,11 @@ function modifyProductPrice() {
 document.addEventListener('keydown', function (event) {
     // Manejar el atajo de teclado solo si la tecla presionada es "|"
     if (event.key === '*') {
+        if (!canChangePrices()) {
+            alert('No tiene permiso para cambiar precios en POS.');
+            return;
+        }
+
         // Obtener referencia al último elemento agregado al carrito
         var lastCartItem = document.getElementById('cart-items').lastElementChild;
         // Verificar si hay un elemento en el carrito

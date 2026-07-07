@@ -39,7 +39,7 @@ padding: 15px;
 background-color: rgb(23, 22, 26);
 }
 
-td#diferencia1{
+td#monto-real-label{
   color: #ffffff;
   background-color: #27235f;
   padding: 2%;
@@ -47,7 +47,7 @@ td#diferencia1{
   padding-bottom: 1%;
   padding-right: 0%;
 }
-input#inputDiferencia{
+input#monto_real{
   margin-right: 2%;
   margin-left: 30%;
   width: 40%;

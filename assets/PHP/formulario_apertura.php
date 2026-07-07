@@ -1,54 +1,95 @@
 <?php
-session_start(); // Iniciar o reanudar la sesión
+require_once __DIR__ . '/_db.php';
 
-$servername = "localhost";
-$username = "root";
-$password = "";
-$database = "erp";
-
-// Establecer conexión con la base de datos
-$conn = new mysqli($servername, $username, $password, $database);
-
-// Verificar si hay errores de conexión
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+if ($_SERVER["REQUEST_METHOD"] !== "POST") {
+    responderJson(respuestaError('Error: No se recibieron datos del formulario.'), 405);
+    exit();
 }
 
-// Verificar si se han recibido datos del formulario mediante POST
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    // Recoger los datos del formulario
-    $monto = $_POST['monto'];
-    $empleado = $_POST['empleado'];
-    $nota = $_POST['nota'];
-    $fecha_hora = $_POST['fecha_hora'];
+$idUser = requerirUsuarioAutenticado();
 
-    // Aquí podrías realizar operaciones adicionales, como guardar los datos en una base de datos
+$monto = isset($_POST['monto']) ? (int) $_POST['monto'] : 0;
+$empleado = isset($_POST['empleado']) ? trim($_POST['empleado']) : '';
+$nota = isset($_POST['nota']) ? trim($_POST['nota']) : '';
+$fechaHora = isset($_POST['fecha_hora']) ? trim($_POST['fecha_hora']) : date('Y-m-d H:i:s');
 
-    // Simplemente imprimir un mensaje de éxito como respuesta
-    echo "Apertura realizada exitosamente. Monto: $monto, Empleado: $empleado, Nota: $nota, Fecha y Hora: $fecha_hora";
+if ($monto < 0) {
+    responderJson(respuestaError('El monto de apertura no puede ser negativo.'), 400);
+    exit();
+}
 
-    // Verificar si hay una sesión iniciada
-    if (isset($_SESSION['user_id'])) {
-        $id_user = $_SESSION['user_id'];
+$conn = conectarBaseDeDatos();
 
-        // Insertar los datos de apertura de sesión en la tabla sesion
-        $sql_insert = "INSERT INTO sesion (id_user, fecha_ingreso, monto_apertura, empleado, nota) VALUES (?, ?, ?, ?, ?)";
-        $stmt_insert = $conn->prepare($sql_insert);
-        $stmt_insert->bind_param("issss", $id_user, $fecha_hora, $monto, $empleado, $nota);
-        $stmt_insert->execute();
-        $stmt_insert->close();
+if (!usuarioTienePermiso($conn, $idUser, 'pos', 'abrir_caja')) {
+    $conn->close();
+    responderJson(respuestaError('No tiene permiso para abrir caja.'), 403);
+    exit();
+}
 
-        // Actualizar el campo validar_sesion en la tabla usuario a 2
-        $sql_update = "UPDATE usuario SET validar_sesion = 2 WHERE id_user = ?";
-        $stmt_update = $conn->prepare($sql_update);
-        $stmt_update->bind_param("i", $id_user);
-        $stmt_update->execute();
-        $stmt_update->close();
+$conn->begin_transaction();
+
+try {
+    $sqlInsert = "INSERT INTO sesion (id_user, fecha_ingreso, monto_apertura, empleado, nota) VALUES (?, ?, ?, ?, ?)";
+    $stmtInsert = $conn->prepare($sqlInsert);
+
+    if (!$stmtInsert) {
+        throw new Exception('Error al preparar la apertura de caja.');
     }
-} else {
-    // Si no se recibieron datos mediante POST, mostrar un mensaje de error
-    echo "Error: No se recibieron datos del formulario.";
-}
 
-$conn->close();
-?>
+    $stmtInsert->bind_param("isiss", $idUser, $fechaHora, $monto, $empleado, $nota);
+    if (!$stmtInsert->execute()) {
+        throw new Exception('Error al registrar la apertura de caja.');
+    }
+
+    $idSesion = $conn->insert_id;
+    $stmtInsert->close();
+
+    $codigoCaja = 'CAJA-' . str_pad((string) $idSesion, 4, '0', STR_PAD_LEFT);
+    $nombreCaja = 'Caja Principal';
+    $estadoCaja = 'ABIERTA';
+    $sucursal = 'Principal';
+
+    $sqlCaja = "INSERT INTO pos_caja (id_user, codigo, nombre, sucursal, estado, monto_apertura, monto_actual, fecha_apertura, id_sesion)
+                VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?)";
+    $stmtCaja = $conn->prepare($sqlCaja);
+
+    if (!$stmtCaja) {
+        throw new Exception('Error al preparar la caja POS.');
+    }
+
+    $stmtCaja->bind_param("issssiii", $idUser, $codigoCaja, $nombreCaja, $sucursal, $estadoCaja, $monto, $monto, $idSesion);
+    if (!$stmtCaja->execute()) {
+        throw new Exception('Error al crear la caja POS.');
+    }
+    $idCaja = $conn->insert_id;
+    $stmtCaja->close();
+
+    $sqlUpdate = "UPDATE usuario SET validar_sesion = 2 WHERE id_user = ?";
+    $stmtUpdate = $conn->prepare($sqlUpdate);
+
+    if (!$stmtUpdate) {
+        throw new Exception('Error al preparar el estado de sesión del usuario.');
+    }
+
+    $stmtUpdate->bind_param("i", $idUser);
+    if (!$stmtUpdate->execute()) {
+        throw new Exception('Error al actualizar el estado de sesión del usuario.');
+    }
+    $stmtUpdate->close();
+
+    $conn->commit();
+    $conn->close();
+
+    responderJson(respuestaOk('Apertura realizada exitosamente.', array(
+        'id_sesion' => $idSesion,
+        'id_caja' => $idCaja,
+        'monto' => $monto,
+        'empleado' => $empleado,
+        'nota' => $nota,
+        'fecha_hora' => $fechaHora,
+    )));
+} catch (Exception $e) {
+    $conn->rollback();
+    $conn->close();
+    responderJson(respuestaError($e->getMessage()), 500);
+}

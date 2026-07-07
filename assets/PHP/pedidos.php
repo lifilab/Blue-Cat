@@ -1,154 +1,301 @@
 <?php
-// Datos de conexión a la base de datos
-$servername = "localhost";
-$username = "root";
-$password = "";
-$database = "erp";
+require_once __DIR__ . '/_db.php';
 
-// Crear conexión
-$conn = new mysqli($servername, $username, $password, $database);
+function decodificarCampoJson($requestBody, $key)
+{
+    if (!isset($requestBody[$key])) {
+        return null;
+    }
 
-// Verificar la conexión
-if ($conn->connect_error) {
-    die("Error de conexión: " . $conn->connect_error);
+    if (is_array($requestBody[$key])) {
+        return $requestBody[$key];
+    }
+
+    if (is_string($requestBody[$key])) {
+        $decoded = json_decode($requestBody[$key], true);
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    return null;
 }
 
-// Obtener los datos de la solicitud POST
+if ($_SERVER["REQUEST_METHOD"] !== "POST") {
+    responderJson(respuestaError('Método de solicitud no permitido.'), 405);
+    exit();
+}
+
+$idUser = requerirUsuarioAutenticado();
 $requestBody = json_decode(file_get_contents("php://input"), true);
 
-// Obtener los datos de venta, paymentRecords y cartItemsArray
-$saleData = json_decode($requestBody['saleData'], true);
-$paymentRecords = json_decode($requestBody['paymentRecords'], true);
-$cartItemsArray = json_decode($requestBody['cartItemsArray'], true);
-
-// Debug: Ver el array de paymentRecords
-echo "Debug: paymentRecords antes de la inserción:<br>";
-print_r($paymentRecords);
-print_r($cartItemsArray);
-echo "<br><br>";
-
-// Obtener la fecha actual
-$date = date("Y-m-d");
-
-// Consultar el valor más alto del campo id_sesion en la tabla sesion
-$sql_max_id = "SELECT MAX(id_sesion) AS max_id FROM sesion";
-
-$result = $conn->query($sql_max_id);
-
-if ($result->num_rows > 0) {
-    // Obtener el resultado de la consulta
-    $row = $result->fetch_assoc();
-    $max_id_sesion = $row["max_id"];
-    echo "ID de sesión máximo: " . $max_id_sesion . "<br>";
-} else {
-    // Si no hay resultados, asignar un valor predeterminado
-    $max_id_sesion = 1; // O cualquier valor predeterminado que desees
-    echo "No se encontraron sesiones. Se asigna el valor predeterminado: " . $max_id_sesion . "<br>";
+if (!is_array($requestBody)) {
+    responderJson(respuestaError('Solicitud inválida.'), 400);
+    exit();
 }
 
-// Insertar los datos en la tabla de pedidos
-$sql_insert_pedido = "INSERT INTO pedido (id_sesion, precio_total, pago_total, diferencia, fecha)
-                      VALUES (?, ?, ?, ?, ?)";
+$saleData = decodificarCampoJson($requestBody, 'saleData');
+$paymentRecords = decodificarCampoJson($requestBody, 'paymentRecords');
+$cartItemsArray = decodificarCampoJson($requestBody, 'cartItemsArray');
 
-// Preparar la declaración
-$stmt = $conn->prepare($sql_insert_pedido);
+if (!is_array($saleData) || !is_array($paymentRecords) || !is_array($cartItemsArray) || count($cartItemsArray) === 0) {
+    responderJson(respuestaError('Datos de venta incompletos.'), 400);
+    exit();
+}
 
-// Vincular parámetros
-$stmt->bind_param("iddds", $max_id_sesion, $totalPrice, $totalPayment, $change, $date);
+$totalPrice = isset($saleData['totalPrice']) ? (int) round((float) $saleData['totalPrice']) : 0;
+$totalPayment = isset($saleData['totalPayment']) ? (int) round((float) $saleData['totalPayment']) : 0;
+$change = isset($saleData['change']) ? (int) round((float) $saleData['change']) : 0;
 
-// Obtener los datos de la venta
-$totalPrice = $saleData['totalPrice'];
-$totalPayment = $saleData['totalPayment'];
-$change = $saleData['change'];
+if ($totalPrice <= 0 || $totalPayment < 0) {
+    responderJson(respuestaError('Totales de venta inválidos.'), 400);
+    exit();
+}
 
-// Ejecutar la declaración
-if ($stmt->execute()) {
-    echo "Pedido insertado correctamente.<br>";
+$conn = conectarBaseDeDatos();
 
-    // Obtener el ID del pedido recién insertado
-    $last_insert_id = $conn->insert_id;
+if (!usuarioTienePermiso($conn, $idUser, 'pos', 'realizar_venta')) {
+    $conn->close();
+    responderJson(respuestaError('No tiene permiso para realizar ventas.'), 403);
+    exit();
+}
 
-    // Iterar sobre los elementos del carrito y los registros de métodos de pago simultáneamente
-    foreach ($cartItemsArray as $item) {
-        $id_producto = $item['id_producto'];
-        $cantidad_pedida = $item['quantity'];
-        $precio_total = $item['price'];
+$puedeCambiarPrecios = usuarioTienePermiso($conn, $idUser, 'pos', 'cambiar_precios');
+$conn->begin_transaction();
 
-        // Obtener la cantidad actual del producto desde la base de datos
-        $sql_get_current_quantity = "SELECT cantidad FROM producto WHERE id_producto = ?";
-        $stmt_current_quantity = $conn->prepare($sql_get_current_quantity);
-        $stmt_current_quantity->bind_param("i", $id_producto);
-        $stmt_current_quantity->execute();
-        $stmt_current_quantity->store_result();
-        $stmt_current_quantity->bind_result($current_quantity);
-        $stmt_current_quantity->fetch();
-        $stmt_current_quantity->close();
-
-        // Calcular la nueva cantidad
-        $new_quantity = $current_quantity - $cantidad_pedida;
-
-        // Actualizar la cantidad en la tabla de productos
-        $sql_update_quantity = "UPDATE producto SET cantidad = ? WHERE id_producto = ?";
-        $stmt_update_quantity = $conn->prepare($sql_update_quantity);
-        $stmt_update_quantity->bind_param("ii", $new_quantity, $id_producto);
-        $stmt_update_quantity->execute();
-        $stmt_update_quantity->close();
-
-        // Insertar los detalles del pedido en la tabla detalle_pedido
-        $sql_insert_detalle_pedido = "INSERT INTO detalle_pedido (id_pedido, id_producto, cantidad_pedida, precio_total)
-                                      VALUES (?, ?, ?, ?)";
-
-        // Preparar la declaración
-        $stmt_detalle = $conn->prepare($sql_insert_detalle_pedido);
-
-        // Vincular parámetros
-        $stmt_detalle->bind_param("iiid", $last_insert_id, $id_producto, $cantidad_pedida, $precio_total);
-
-        // Ejecutar la declaración
-        if ($stmt_detalle->execute()) {
-            echo "Detalle del pedido insertado correctamente para el producto con ID: $id_producto<br>";
-        } else {
-            echo "Error al insertar detalle del pedido: " . $stmt_detalle->error;
-        }
-
-        // Cerrar la declaración
-        $stmt_detalle->close();
+try {
+    $sqlSesion = "SELECT id_sesion FROM sesion WHERE id_user = ? AND fecha_cierre IS NULL ORDER BY id_sesion DESC LIMIT 1 FOR UPDATE";
+    $stmtSesion = $conn->prepare($sqlSesion);
+    if (!$stmtSesion) {
+        throw new Exception('Error al preparar la sesión de caja.');
     }
 
-    // Insertar los registros de métodos de pago en la tabla metodo_de_pago si hay datos disponibles
-    if ($paymentRecords !== null) {
-        foreach ($paymentRecords as $record) {
-            $nombre_metodo_pago = $record['name'];
-            $monto = $record['value'];
+    $stmtSesion->bind_param("i", $idUser);
+    if (!$stmtSesion->execute()) {
+        throw new Exception('Error al consultar la sesión de caja.');
+    }
 
-            // Insertar registros de métodos de pago en la tabla metodo_de_pago
-            $sql_insert_metodo_de_pago = "INSERT INTO metodo_de_pago (id_pedido, nombre_metodo_pago, monto)
-                                          VALUES (?, ?, ?)";
+    $resultSesion = $stmtSesion->get_result();
+    $rowSesion = $resultSesion->fetch_assoc();
+    $stmtSesion->close();
 
-            // Preparar la declaración
-            $stmt_metodo = $conn->prepare($sql_insert_metodo_de_pago);
+    if (!$rowSesion) {
+        throw new Exception('No hay sesión de caja abierta para el usuario.');
+    }
 
-            // Vincular parámetros
-            $stmt_metodo->bind_param("isd", $last_insert_id, $nombre_metodo_pago, $monto);
+    $idSesion = (int) $rowSesion['id_sesion'];
+    $idCaja = null;
 
-            // Ejecutar la declaración
-            if ($stmt_metodo->execute()) {
-                echo "Registro de método de pago insertado correctamente: $nombre_metodo_pago<br>";
-            } else {
-                echo "Error al insertar registro de método de pago: " . $stmt_metodo->error;
+    $sqlCaja = "SELECT id_caja FROM pos_caja WHERE id_user = ? AND id_sesion = ? AND estado = 'ABIERTA' ORDER BY id_caja DESC LIMIT 1 FOR UPDATE";
+    $stmtCaja = $conn->prepare($sqlCaja);
+    if ($stmtCaja) {
+        $stmtCaja->bind_param("ii", $idUser, $idSesion);
+        if ($stmtCaja->execute()) {
+            $resultCaja = $stmtCaja->get_result();
+            $rowCaja = $resultCaja->fetch_assoc();
+            if ($rowCaja) {
+                $idCaja = (int) $rowCaja['id_caja'];
             }
-
-            // Cerrar la declaración
-            $stmt_metodo->close();
         }
-    } else {
-        echo "No hay registros de métodos de pago disponibles.";
+        $stmtCaja->close();
     }
-} else {
-    echo "Error al insertar pedido: " . $stmt->error;
-}
 
-// Cerrar la conexión
-$stmt->close();
-$conn->close();
-?>
+    if ($idCaja !== null) {
+        $sqlPedido = "INSERT INTO pedido (id_sesion, id_caja, precio_total, pago_total, diferencia, fecha)
+                      VALUES (?, ?, ?, ?, ?, NOW())";
+        $stmtPedido = $conn->prepare($sqlPedido);
+        if (!$stmtPedido) {
+            throw new Exception('Error al preparar el pedido.');
+        }
+        $stmtPedido->bind_param("iiiii", $idSesion, $idCaja, $totalPrice, $totalPayment, $change);
+    } else {
+        $sqlPedido = "INSERT INTO pedido (id_sesion, precio_total, pago_total, diferencia, fecha)
+                      VALUES (?, ?, ?, ?, NOW())";
+        $stmtPedido = $conn->prepare($sqlPedido);
+        if (!$stmtPedido) {
+            throw new Exception('Error al preparar el pedido.');
+        }
+        $stmtPedido->bind_param("iiii", $idSesion, $totalPrice, $totalPayment, $change);
+    }
+
+    if (!$stmtPedido->execute()) {
+        throw new Exception('Error al insertar el pedido.');
+    }
+
+    $idPedido = $conn->insert_id;
+    $stmtPedido->close();
+
+    $sqlStock = "SELECT nombre_producto, precio_venta, cantidad FROM producto WHERE id_producto = ? AND id_user = ? FOR UPDATE";
+    $stmtStock = $conn->prepare($sqlStock);
+    if (!$stmtStock) {
+        throw new Exception('Error al preparar la consulta de stock.');
+    }
+
+    $sqlActualizarStock = "UPDATE producto SET cantidad = ? WHERE id_producto = ? AND id_user = ?";
+    $stmtActualizarStock = $conn->prepare($sqlActualizarStock);
+    if (!$stmtActualizarStock) {
+        throw new Exception('Error al preparar la actualización de stock.');
+    }
+
+    $sqlDetalle = "INSERT INTO detalle_pedido (id_pedido, id_producto, cantidad_pedida, precio_total)
+                   VALUES (?, ?, ?, ?)";
+    $stmtDetalle = $conn->prepare($sqlDetalle);
+    if (!$stmtDetalle) {
+        throw new Exception('Error al preparar el detalle del pedido.');
+    }
+
+    $totalDetalle = 0;
+
+    foreach ($cartItemsArray as $item) {
+        $idProducto = isset($item['id_producto']) ? (int) $item['id_producto'] : 0;
+        $cantidadPedida = isset($item['quantity']) ? (float) $item['quantity'] : 0;
+        $precioTotalProducto = isset($item['price']) ? (int) round((float) $item['price']) : 0;
+
+        if ($idProducto <= 0 || $cantidadPedida <= 0 || $precioTotalProducto < 0) {
+            throw new Exception('Producto inválido en el carrito.');
+        }
+
+        $stmtStock->bind_param("ii", $idProducto, $idUser);
+        if (!$stmtStock->execute()) {
+            throw new Exception('Error al consultar stock del producto.');
+        }
+
+        $resultStock = $stmtStock->get_result();
+        $rowStock = $resultStock->fetch_assoc();
+
+        if (!$rowStock) {
+            throw new Exception('Producto no encontrado o no pertenece al usuario.');
+        }
+
+        $cantidadActual = (float) $rowStock['cantidad'];
+        $precioVenta = (int) $rowStock['precio_venta'];
+        $precioEsperado = (int) round($precioVenta * $cantidadPedida);
+
+        if (!$puedeCambiarPrecios && $precioTotalProducto !== $precioEsperado) {
+            throw new Exception('No tiene permiso para cambiar precios en POS.');
+        }
+
+        if ($cantidadActual < $cantidadPedida) {
+            throw new Exception('Stock insuficiente para ' . $rowStock['nombre_producto'] . '.');
+        }
+
+        $totalDetalle += $precioTotalProducto;
+        $nuevaCantidad = $cantidadActual - $cantidadPedida;
+        $stmtActualizarStock->bind_param("dii", $nuevaCantidad, $idProducto, $idUser);
+        if (!$stmtActualizarStock->execute()) {
+            throw new Exception('Error al actualizar stock del producto.');
+        }
+
+        $stmtDetalle->bind_param("iidi", $idPedido, $idProducto, $cantidadPedida, $precioTotalProducto);
+        if (!$stmtDetalle->execute()) {
+            throw new Exception('Error al insertar detalle del pedido.');
+        }
+    }
+
+    $stmtStock->close();
+    $stmtActualizarStock->close();
+    $stmtDetalle->close();
+
+    if ($totalDetalle !== $totalPrice) {
+        throw new Exception('El total de la venta no coincide con el detalle.');
+    }
+
+    $sqlMetodo = "INSERT INTO metodo_de_pago (id_pedido, nombre_metodo_pago, monto)
+                  VALUES (?, ?, ?)";
+    $stmtMetodo = $conn->prepare($sqlMetodo);
+    if (!$stmtMetodo) {
+        throw new Exception('Error al preparar métodos de pago.');
+    }
+
+    $stmtMovimiento = null;
+    if ($idCaja !== null) {
+        $sqlMovimiento = "INSERT INTO pos_movimiento_caja (id_caja, id_user, tipo, concepto, monto, metodo, referencia, id_pedido)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+        $stmtMovimiento = $conn->prepare($sqlMovimiento);
+        if (!$stmtMovimiento) {
+            throw new Exception('Error al preparar movimiento de caja.');
+        }
+    }
+
+    $totalPagos = 0;
+
+    foreach ($paymentRecords as $record) {
+        $nombreMetodoPago = isset($record['name']) ? trim($record['name']) : '';
+        $monto = isset($record['value']) ? (int) round((float) $record['value']) : 0;
+
+        if ($nombreMetodoPago === '' || $monto < 0) {
+            throw new Exception('Método de pago inválido.');
+        }
+
+        $totalPagos += $monto;
+
+        $stmtMetodo->bind_param("isi", $idPedido, $nombreMetodoPago, $monto);
+        if (!$stmtMetodo->execute()) {
+            throw new Exception('Error al insertar método de pago.');
+        }
+
+        if ($stmtMovimiento !== null) {
+            $tipoMovimiento = 'VENTA';
+            $concepto = 'Venta POS';
+            $referencia = 'PEDIDO-' . $idPedido;
+            $stmtMovimiento->bind_param("iississi", $idCaja, $idUser, $tipoMovimiento, $concepto, $monto, $nombreMetodoPago, $referencia, $idPedido);
+            if (!$stmtMovimiento->execute()) {
+                throw new Exception('Error al registrar movimiento de caja.');
+            }
+        }
+    }
+
+    $stmtMetodo->close();
+
+    if ($totalPagos !== $totalPayment) {
+        throw new Exception('El total pagado no coincide con los métodos de pago.');
+    }
+
+    if ($stmtMovimiento !== null) {
+        $stmtMovimiento->close();
+
+        $sqlActualizarCaja = "UPDATE pos_caja SET monto_actual = monto_actual + ? WHERE id_caja = ?";
+        $stmtActualizarCaja = $conn->prepare($sqlActualizarCaja);
+        if (!$stmtActualizarCaja) {
+            throw new Exception('Error al preparar actualización de caja.');
+        }
+        $stmtActualizarCaja->bind_param("ii", $totalPayment, $idCaja);
+        if (!$stmtActualizarCaja->execute()) {
+            throw new Exception('Error al actualizar monto de caja.');
+        }
+        $stmtActualizarCaja->close();
+    }
+
+    $valorNuevo = json_encode(array(
+        'id_pedido' => $idPedido,
+        'id_sesion' => $idSesion,
+        'id_caja' => $idCaja,
+        'total' => $totalPrice,
+        'pagado' => $totalPayment,
+    ), JSON_UNESCAPED_UNICODE);
+    $accion = 'CREAR';
+    $entidad = 'pedido';
+    $ip = isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '';
+    $userAgent = isset($_SERVER['HTTP_USER_AGENT']) ? substr($_SERVER['HTTP_USER_AGENT'], 0, 255) : '';
+
+    $sqlAuditoria = "INSERT INTO core_auditoria (id_user, accion, entidad, id_entidad, valor_nuevo, resultado, ip, user_agent, nivel)
+                     VALUES (?, ?, ?, ?, ?, 'OK', ?, ?, 'INFO')";
+    $stmtAuditoria = $conn->prepare($sqlAuditoria);
+    if ($stmtAuditoria) {
+        $stmtAuditoria->bind_param("ississs", $idUser, $accion, $entidad, $idPedido, $valorNuevo, $ip, $userAgent);
+        $stmtAuditoria->execute();
+        $stmtAuditoria->close();
+    }
+
+    $conn->commit();
+    $conn->close();
+
+    responderJson(respuestaOk('Pedido registrado correctamente.', array(
+        'id_pedido' => $idPedido,
+        'id_sesion' => $idSesion,
+        'id_caja' => $idCaja,
+    )));
+} catch (Exception $e) {
+    $conn->rollback();
+    $conn->close();
+    $statusCode = $e->getMessage() === 'No tiene permiso para cambiar precios en POS.' ? 403 : 500;
+    responderJson(respuestaError($e->getMessage()), $statusCode);
+}

@@ -1,56 +1,68 @@
 <?php
-// Verificar si se reciben los datos esperados
-if (isset($_POST['columnIndex'], $_POST['newValue'], $_POST['productId'])) {
-    // Conectar a la base de datos (ajusta estos valores según tu configuración)
-    $servername = "localhost";
-    $username = "root";
-    $password = "";
-    $database = "erp";
+require_once __DIR__ . '/_db.php';
 
-    // Crear conexión
-    $conn = new mysqli($servername, $username, $password, $database);
+$idUser = requerirUsuarioAutenticado();
+$conn = conectarBaseDeDatos();
 
-    // Verificar la conexión
-    if ($conn->connect_error) {
-        die("Conexión fallida: " . $conn->connect_error);
-    }
+requerirPermiso($conn, $idUser, 'inventario', 'editar', 'No tiene permiso para editar productos.');
 
-    // Obtener los datos enviados por el cliente
-    $newValue = $_POST['newValue']; // Nuevo valor
-    $columnIndex = $_POST['columnIndex']; // Índice de la columna
-    $productId = $_POST['productId']; // ID del producto
-
-    // Definir los nombres de las columnas en la tabla (ajusta estos valores según tu esquema de base de datos)
-    $columnNames = array('id_producto','nombre_producto', 'codigo_de_barras', 'precio_venta', 'cantidad', 'categoria');
-
-    // Verificar si el índice de la columna es válido
-    if ($columnIndex >= 0 && $columnIndex < count($columnNames)) {
-        // Escapar los datos para evitar inyección de SQL
-        $newValue = $conn->real_escape_string($newValue);
-        $column = $columnNames[$columnIndex];
-
-        // Si el nuevo valor es vacío, establecerlo como NULL
-        if ($newValue === '') {
-            $newValue = 'NULL';
-        } else {
-            $newValue = "'$newValue'";
-        }
-        
-        // Preparar y ejecutar la consulta de actualización
-        $sql = "UPDATE producto SET $column = $newValue WHERE id_producto = $productId";
-
-        if ($conn->query($sql) === TRUE) {
-            echo "¡Datos actualizados correctamente!";
-        } else {
-            echo "Error al actualizar los datos: " . $conn->error;
-        }
-    } else {
-        echo "Índice de columna no válido.";
-    }
-
-    // Cerrar la conexión
+if (!isset($_POST['columnIndex'], $_POST['newValue'], $_POST['productId'])) {
+    responderJson(respuestaError('Datos insuficientes recibidos.'), 400);
     $conn->close();
-} else {
-    echo "Datos insuficientes recibidos.";
+    exit();
 }
-?>
+
+$columnIndex = (int) $_POST['columnIndex'];
+$newValue = trim((string) $_POST['newValue']);
+$productId = (int) $_POST['productId'];
+
+if ($columnIndex === 3 || $columnIndex === 4) {
+    responderJson(respuestaError('Stock y precio deben actualizarse desde sus funciones dedicadas.'), 400);
+    $conn->close();
+    exit();
+}
+
+$columnNames = array(
+    1 => 'nombre_producto',
+    2 => 'codigo_de_barras',
+    5 => 'categoria',
+);
+
+if (!isset($columnNames[$columnIndex]) || $productId <= 0) {
+    responderJson(respuestaError('Indice de columna o producto no valido.'), 400);
+    $conn->close();
+    exit();
+}
+
+$column = $columnNames[$columnIndex];
+
+if ($newValue === '') {
+    $sql = "UPDATE producto SET $column = NULL WHERE id_producto = ? AND id_user = ?";
+    $stmt = $conn->prepare($sql);
+    if ($stmt) {
+        $stmt->bind_param("ii", $productId, $idUser);
+    }
+} else {
+    $sql = "UPDATE producto SET $column = ? WHERE id_producto = ? AND id_user = ?";
+    $stmt = $conn->prepare($sql);
+    if ($stmt) {
+        $stmt->bind_param("sii", $newValue, $productId, $idUser);
+    }
+}
+
+if (!$stmt) {
+    responderJson(respuestaError('Error al preparar la actualizacion del producto.'), 500);
+    $conn->close();
+    exit();
+}
+
+if ($stmt->execute()) {
+    responderJson(respuestaOk('Datos actualizados correctamente.', array(
+        'filas_afectadas' => $stmt->affected_rows,
+    )));
+} else {
+    responderJson(respuestaError('Error al actualizar los datos.'), 500);
+}
+
+$stmt->close();
+$conn->close();

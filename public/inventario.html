@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,27 +8,26 @@
   <link rel="stylesheet" href="../assets/css/inventario.css">
 </head>
 <body>
-    <!-- Barra de navegación -->
-    <nav class="navbar">
-      <div class="navbar-container">
-        <div class="logo">
-          <a href="#"></a>
-        </div>
-        <div class="menu">
-          <ul>
-            <li><a href="../public/Inicio.html"><i class="fas fa-home"></i> Inicio</a></li>
-            <li><a href="punto_de_venta.html" ><i class="fas fa-cash-register"></i> Punto de Ventas</a>
-            </li>
-          </ul>
-        </div>
+  <nav class="navbar">
+    <div class="navbar-container">
+      <div class="logo">
+        <a href="#"></a>
       </div>
-    </nav>
+      <div class="menu">
+        <ul>
+          <li><a href="../public/Inicio.html"><i class="fas fa-home"></i> Inicio</a></li>
+          <li><a href="punto_de_venta.html"><i class="fas fa-cash-register"></i> Punto de Ventas</a></li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
   <div class="container">
-    <h2>Gestión de Inventario</h2>
-    <button id="open-popup-btn" onclick="openPopup()">Añadir Producto</button>
+    <h2>Gestion de Inventario</h2>
+    <button id="open-popup-btn" onclick="openPopup()">Anadir Producto</button>
     <button onclick="openImportPopup()">Importar</button>
     <button>Exportar</button>
-    <!-- Popup de importación -->
+
     <div class="popup" id="import-popup">
       <div class="popup-content">
         <span class="close" onclick="closeImportPopup()">&times;</span>
@@ -38,49 +37,83 @@
         <button onclick="uploadFile()">Subir Archivo</button>
       </div>
     </div>
-    <!-- Fin del popup de importación -->
+
     <div class="popup" id="create-product-popup">
       <div class="popup-content">
         <span class="close" onclick="closePopup()">&times;</span>
-        <h4>Añadir nuevo Producto</h4>
+        <h4>Anadir nuevo Producto</h4>
         <form id="add-product-form" action="../assets/PHP/agregar_productos.php" method="post">
           <label for="nombre_producto">Nombre:</label>
           <input type="text" id="nombre_producto" name="nombre_producto" required>
-          <label for="codigo_de_barras">Código de Barras:</label>
+          <label for="codigo_de_barras">Codigo de Barras:</label>
           <input type="text" id="codigo_de_barras" name="codigo_de_barras" required>
           <label for="precio_venta">Precio:</label>
           <input type="number" id="precio_venta" name="precio_venta" min="0" step="1" required>
           <label for="cantidad">Cantidad:</label>
           <input type="number" id="cantidad" name="cantidad" min="0" required>
-          <label for="categoria">Categoría:</label>
-          <input type="text" id="categoria" name="categoria" >
+          <label for="categoria">Categoria:</label>
+          <input type="text" id="categoria" name="categoria">
           <button type="submit">Agregar Producto</button>
-          <button onclick="closePopup()">Cancelar</button> 
-      </form>
-      
+          <button type="button" onclick="closePopup()">Cancelar</button>
+        </form>
       </div>
     </div>
+
+    <div class="popup" id="stock-popup">
+      <div class="popup-content">
+        <span class="close" onclick="closeStockPopup()">&times;</span>
+        <h4>Actualizar Stock</h4>
+        <form id="stock-form">
+          <input type="hidden" id="stock-product-id" name="productId">
+          <p id="stock-product-name"></p>
+          <label for="stock-current">Stock actual:</label>
+          <input type="text" id="stock-current" disabled>
+          <label for="stock-new">Nuevo stock:</label>
+          <input type="number" id="stock-new" name="stock" min="0" step="1" required>
+          <button type="submit">Guardar Stock</button>
+          <button type="button" onclick="closeStockPopup()">Cancelar</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="popup" id="price-popup">
+      <div class="popup-content">
+        <span class="close" onclick="closePricePopup()">&times;</span>
+        <h4>Actualizar Precio</h4>
+        <form id="price-form">
+          <input type="hidden" id="price-product-id" name="productId">
+          <p id="price-product-name"></p>
+          <label for="price-current">Precio actual:</label>
+          <input type="text" id="price-current" disabled>
+          <label for="price-new">Nuevo precio:</label>
+          <input type="number" id="price-new" name="precio" min="0" step="1" required>
+          <button type="submit">Guardar Precio</button>
+          <button type="button" onclick="closePricePopup()">Cancelar</button>
+        </form>
+      </div>
+    </div>
+
     <div class="product-list">
       <h3>Lista de Productos</h3>
-      <input type="text" id="search-input" placeholder="Buscar por Nombre, Código de Barras, Precio, Cantidad o Categoría">
+      <input type="text" id="search-input" placeholder="Buscar por nombre, codigo de barras, precio, cantidad o categoria">
       <table id="product-table">
         <thead>
           <tr>
             <th>ID producto</th>
             <th>Nombre</th>
-            <th>Código de Barras</th>
+            <th>Codigo de Barras</th>
             <th>Precio</th>
             <th>Cantidad</th>
-            <th>Categoría</th>
+            <th>Categoria</th>
+            <th>Acciones</th>
           </tr>
         </thead>
-        <tbody>
-          <!-- Aquí se mostrarán los productos -->
-        </tbody>
+        <tbody></tbody>
       </table>
     </div>
   </div>
-<script src="../assets/js/inventario.js"></script>
-<script src="../assets/js/busquedas.js"></script>
+
+  <script src="../assets/js/inventario.js"></script>
+  <script src="../assets/js/busquedas.js"></script>
 </body>
 </html>

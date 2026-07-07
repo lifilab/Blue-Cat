@@ -1,44 +1,30 @@
 <?php
-session_start(); // Iniciar o reanudar la sesión
+require_once __DIR__ . '/_db.php';
 
-$servername = "localhost";
-$username = "root";
-$password = "";
-$database = "erp";
-
-// Establecer conexión con la base de datos
-$conn = new mysqli($servername, $username, $password, $database);
-
-// Verificar si hay errores de conexión
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+if ($_SERVER["REQUEST_METHOD"] !== "POST") {
+    responderJson(respuestaError('Error: Método de solicitud no permitido.'), 405);
+    exit();
 }
 
-// Verificar si se han recibido datos del formulario mediante POST
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
+$idUser = requerirUsuarioAutenticado();
+$conn = conectarBaseDeDatos();
 
-    // Verificar si hay una sesión iniciada
-    if (isset($_SESSION['user_id'])) {
-        $id_user = $_SESSION['user_id'];
+$sqlUpdate = "UPDATE usuario SET validar_sesion = 1 WHERE id_user = ?";
+$stmtUpdate = $conn->prepare($sqlUpdate);
 
-        // Actualizar el campo validar_sesion en la tabla usuario a 1
-        $sql_update = "UPDATE usuario SET validar_sesion = 1 WHERE id_user = ?";
-        $stmt_update = $conn->prepare($sql_update);
-        $stmt_update->bind_param("i", $id_user);
-        $stmt_update->execute();
-        $stmt_update->close();
+if (!$stmtUpdate) {
+    responderJson(respuestaError('Error al preparar el cierre de sesión.'), 500);
+    $conn->close();
+    exit();
+}
 
-        // Si la actualización fue exitosa, enviar un mensaje de confirmación
-        echo "Sesión cerrada correctamente.";
-    } else {
-        // Si no hay una sesión iniciada, enviar un mensaje de error
-        echo "Error: No se encontró una sesión activa.";
-    }
+$stmtUpdate->bind_param("i", $idUser);
+
+if ($stmtUpdate->execute()) {
+    responderJson(respuestaOk('Sesión cerrada correctamente.'));
 } else {
-    // Si no se recibieron datos mediante POST, mostrar un mensaje de error
-    echo "Error: No se recibieron datos del formulario.";
+    responderJson(respuestaError('Error al cerrar la sesión.'), 500);
 }
 
-// Cerrar la conexión a la base de datos
+$stmtUpdate->close();
 $conn->close();
-?>

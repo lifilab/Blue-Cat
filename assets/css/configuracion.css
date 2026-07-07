@@ -1,0 +1,182 @@
+body {
+  margin: 0;
+  padding: 0;
+  font-family: Arial, sans-serif;
+  background-color: rgb(33, 38, 43);
+  color: #1f2937;
+}
+
+.navbar {
+  background-color: #333;
+  color: white;
+  padding: 10px 0;
+}
+
+.navbar-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.logo a {
+  font-size: 24px;
+  font-weight: bold;
+  color: white;
+  text-decoration: none;
+}
+
+.menu ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+}
+
+.menu li {
+  margin-right: 20px;
+}
+
+.menu a {
+  color: white;
+  text-decoration: none;
+}
+
+.menu a:hover {
+  font-weight: bolder;
+}
+
+.config-container {
+  width: min(980px, calc(100% - 32px));
+  margin: 32px auto;
+}
+
+.config-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.config-header h1 {
+  margin: 0;
+  color: #ffffff;
+}
+
+.config-header p {
+  margin: 0;
+  color: #dbeafe;
+}
+
+.config-panel {
+  background-color: #ffffff;
+  border-radius: 6px;
+  padding: 20px;
+}
+
+.config-panel h2 {
+  margin-top: 0;
+  color: #27235f;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+label {
+  display: block;
+  font-weight: bold;
+  color: #334155;
+  margin-bottom: 12px;
+}
+
+input[type="text"],
+input[type="email"],
+input[type="number"],
+input[type="file"],
+textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 9px;
+  margin-top: 6px;
+  border: 1px solid #b9c5d8;
+  border-radius: 5px;
+  font: inherit;
+}
+
+textarea {
+  min-height: 78px;
+  resize: vertical;
+}
+
+.options-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 12px 0;
+}
+
+.options-row label {
+  margin: 0;
+  font-weight: normal;
+}
+
+.logo-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px;
+  gap: 16px;
+  align-items: end;
+  margin-top: 12px;
+}
+
+#logo_preview {
+  display: none;
+  max-width: 160px;
+  max-height: 100px;
+  border: 1px solid #d8e0ec;
+  border-radius: 5px;
+  object-fit: contain;
+  background-color: #f8fafc;
+}
+
+button {
+  padding: 10px 16px;
+  background-color: #527ed5;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+button:hover {
+  background-color: #385f9e;
+}
+
+#quitar_logo {
+  margin-top: 8px;
+  background-color: #64748b;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
+@media (max-width: 720px) {
+  .config-header,
+  .logo-row {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+}
