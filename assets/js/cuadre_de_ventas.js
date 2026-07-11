@@ -20,10 +20,15 @@ function setText(id, value) {
 function calcularDiferencia() {
     var inputMontoReal = document.getElementById("monto_real");
     var tdDiferencia = document.getElementById("diferencia");
+    var spanDiferencia = document.getElementById("diferencia-calculada");
+    if (!inputMontoReal || !tdDiferencia) return;
     var montoReal = Number(inputMontoReal.value || 0);
     var diferencia = montoReal - montoTotalEsperado;
 
     tdDiferencia.textContent = formatAmount(diferencia);
+    if (spanDiferencia) {
+        spanDiferencia.textContent = formatAmount(diferencia);
+    }
 }
 
 document.addEventListener("DOMContentLoaded", function() {
@@ -63,7 +68,10 @@ document.addEventListener("DOMContentLoaded", function() {
     };
     xhr.send();
 
-    document.getElementById("monto_real").addEventListener("input", calcularDiferencia);
+    var inputMontoReal = document.getElementById("monto_real");
+    if (inputMontoReal) {
+        inputMontoReal.addEventListener("input", calcularDiferencia);
+    }
 });
 
 function openCerrarSesionPopup() {
@@ -85,7 +93,7 @@ function cerrarSesion() {
 
                 alert(data.mensaje || xhr.responseText);
                 if (data.ok || xhr.responseText.includes('Sesión cerrada correctamente.')) {
-                    window.location.href = 'punto_de_venta.html';
+                    window.location.href = 'pos.html';
                 }
             } else {
                 alert('Error al cerrar sesión.');

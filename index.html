@@ -1,40 +1,194 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Login</title>
-  <link rel="stylesheet" href="assets/css/style.css">
+  <title>Blue-Cat · Iniciar Sesión</title>
+  <link rel="icon" href="assets/img/Blue-Cat_logo-removebg.png" type="image/png">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+  <link rel="stylesheet" href="assets/css/blue-cat.css?v=2">
+  <style>
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #1e293b 0%, #334155 50%, #1e293b 100%);
+    }
+    .login-card {
+      background: #fff;
+      border-radius: 20px;
+      padding: 40px 36px 36px;
+      width: 380px;
+      max-width: 94%;
+      box-shadow: 0 20px 60px rgba(0,0,0,.3);
+      animation: slideUp .4s ease;
+    }
+    .login-logo {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+    .login-logo img { height: 60px; }
+    .login-logo h1 {
+      font-size: 22px;
+      font-weight: 700;
+      color: #1e293b;
+      margin-top: 12px;
+    }
+    .login-logo p {
+      color: #64748b;
+      font-size: 14px;
+      margin-top: 4px;
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    .form-group label {
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      color: #475569;
+      margin-bottom: 5px;
+    }
+    .form-group .input-icon {
+      position: relative;
+    }
+    .form-group .input-icon i {
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #94a3b8;
+    }
+    .form-group .input-icon input {
+      padding-left: 38px;
+    }
+    .login-card .btn {
+      width: 100%;
+      justify-content: center;
+      padding: 12px;
+      font-size: 15px;
+      margin-bottom: 8px;
+    }
+    .login-card .btn:last-child { margin-bottom: 0; }
+    .login-card .divider {
+      text-align: center;
+      color: #94a3b8;
+      font-size: 13px;
+      margin: 12px 0;
+      position: relative;
+    }
+    .login-card .divider::before,
+    .login-card .divider::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      width: 40%;
+      height: 1px;
+      background: #e2e8f0;
+    }
+    .login-card .divider::before { left: 0; }
+    .login-card .divider::after { right: 0; }
+    .btn-secondary {
+      background: #fff;
+      color: #4f46e5;
+      border: 1px solid #e2e8f0;
+    }
+    .btn-secondary:hover { background: #f8fafc; border-color: #4f46e5; }
+
+    .form-msg {
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 500;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .form-msg.error { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+    .form-msg.success { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; justify-content: center; }
+
+    .loader-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: rgba(15,23,42,.8);
+      backdrop-filter: blur(6px);
+      align-items: center;
+      justify-content: center;
+      animation: fadeIn .25s ease;
+    }
+    .loader-box {
+      text-align: center;
+    }
+    .loader-logo {
+      height: 80px;
+      animation: spin 1.2s ease-in-out infinite;
+    }
+    .loader-text {
+      color: #fff;
+      font-size: 20px;
+      font-weight: 600;
+      margin-top: 20px;
+      letter-spacing: 1px;
+    }
+    @keyframes spin {
+      0% { transform: perspective(400px) rotateY(0deg); }
+      100% { transform: perspective(400px) rotateY(360deg); }
+    }
+  </style>
 </head>
 <body>
-  <div class="login-container">
-    <h2>Iniciar Sesión</h2>
-    <form id="login-form">
+  <div class="login-card">
+    <div class="login-logo">
+      <img src="assets/img/Blue-Cat_logo-removebg.png" alt="Blue-Cat">
+      <h1>Blue-Cat</h1>
+      <p>ERP · Punto de Venta</p>
+    </div>
+    <div id="login-error" class="form-msg error" style="display:none;"></div>
+    <form id="login-form" onsubmit="return false;">
       <div class="form-group">
         <label for="username">Usuario</label>
-        <input type="text" id="username" name="username" required>
+        <div class="input-icon">
+          <i class="fas fa-user"></i>
+          <input type="text" id="username" name="username" class="input" placeholder="Ingrese su usuario" required>
+        </div>
       </div>
       <div class="form-group">
         <label for="password">Contraseña</label>
-        <input type="password" id="password" name="password" required>
+        <div class="input-icon">
+          <i class="fas fa-lock"></i>
+          <input type="password" id="password" name="password" class="input" placeholder="Ingrese su contraseña" required>
+        </div>
       </div>
-      <button type="button" onclick="validateLogin()">Ingresar</button>
-      <button type="button" onclick="showCreateAccountPopup()">Crear cuenta</button>
+      <button type="button" class="btn btn-primary" onclick="validateLogin()"><i class="fas fa-sign-in-alt"></i> Ingresar</button>
     </form>
+    <div class="divider">o</div>
+    <button type="button" class="btn btn-secondary" onclick="showCreateAccountPopup()"><i class="fas fa-user-plus"></i> Crear cuenta</button>
+    <div id="account-success" class="form-msg success" style="display:none;"><i class="fas fa-check-circle"></i> Cuenta creada exitosamente</div>
+  </div>
+
+  <!-- Loader -->
+  <div id="loader-overlay" class="loader-overlay">
+    <div class="loader-box">
+      <img src="assets/img/Blue-Cat_logo-removebg.png" alt="Blue-Cat" class="loader-logo">
+      <p class="loader-text">Bienvenido</p>
+    </div>
   </div>
 
   <div id="create-account-popup" class="popup">
-    <form id="create-account-form">
-      <h2>Crear cuenta</h2>
-      <div class="form-group">
-        <input type="text" id="new-username" placeholder="Ingrese un nombre de usuario" required>
-        <input type="text" id="e-mail" name="e-mail" placeholder="Ingrese su correo electrónico" required>
-        <input type="password" id="new-password" name="new-password" placeholder="Ingrese una contraseña" required>
-        <input type="password" id="confirm-password" name="confirm-password" placeholder="Confirme su contraseña" required>
-      </div>
-      <button type="button" onclick="createAccount()">Crear cuenta</button>
-      <button type="button" onclick="hideCreateAccountPopup()">Cancelar</button>
-    </form>
+    <div class="popup-content">
+      <span class="close-btn" onclick="hideCreateAccountPopup()">&times;</span>
+      <h2><i class="fas fa-user-plus"></i> Crear cuenta</h2>
+      <div id="account-error" class="form-msg error" style="display:none;margin-bottom:14px;"></div>
+      <input type="text" id="new-username" class="input" placeholder="Nombre de usuario" required>
+      <input type="text" id="e-mail" name="e-mail" class="input" placeholder="Correo electrónico" required>
+      <input type="password" id="new-password" name="new-password" class="input" placeholder="Contraseña" required>
+      <input type="password" id="confirm-password" name="confirm-password" class="input" placeholder="Confirmar contraseña" required>
+      <button type="button" class="btn btn-primary" onclick="createAccount()" style="width:100%;justify-content:center;">Crear cuenta</button>
+    </div>
   </div>
 
   <script src="assets/js/Index.js"></script>

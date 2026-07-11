@@ -55,7 +55,7 @@ function requirePermisoApi($modulo, $accion, $message) {
 // ROUTER
 // ============================================================
 if ($method === 'GET') {
-    $action = $_GET['action'] ?? '';
+    $action = $_GET['action'] ?? $_GET['accion'] ?? '';
 
     switch ($action) {
         case 'dashboard':           GET_dashboard();          break;
@@ -81,7 +81,7 @@ if ($method === 'GET') {
     if (!$data) {
         json(['error' => true, 'message' => 'Datos JSON requeridos'], 400);
     }
-    $action = $data->action ?? '';
+    $action = $data->action ?? $data->accion ?? '';
 
     switch ($action) {
         case 'caja_abrir':          POST_caja_abrir($data);       break;
@@ -401,7 +401,15 @@ function GET_caja_estado() {
     global $conn, $uid;
     $caja = getOpenCaja($conn, $uid);
     if (!$caja) {
-        json(['abierta' => false, 'caja' => null, 'movimientos' => []]);
+        json([
+            'abierta' => false,
+            'estado' => 'CERRADA',
+            'monto_actual' => 0,
+            'codigo' => null,
+            'nombre' => null,
+            'caja' => null,
+            'movimientos' => [],
+        ]);
     }
 
     $movimientos = [];
@@ -416,7 +424,15 @@ function GET_caja_estado() {
     }
     $stmt->close();
 
-    json(['abierta' => true, 'caja' => $caja, 'movimientos' => $movimientos]);
+    json([
+        'abierta' => true,
+        'estado' => $caja['estado'] ?? 'ABIERTA',
+        'monto_actual' => (int) ($caja['monto_actual'] ?? 0),
+        'codigo' => $caja['codigo'] ?? null,
+        'nombre' => $caja['nombre'] ?? null,
+        'caja' => $caja,
+        'movimientos' => $movimientos,
+    ]);
 }
 
 function GET_ventas_hoy() {
@@ -884,6 +900,7 @@ function GET_permisos_usuario() {
     $stmt->execute();
     $result = $stmt->get_result();
     $permisos = [];
+    $permisosDetalle = [];
     $modulos = [];
     while ($row = $result->fetch_assoc()) {
         $mod = $row['modulo'];
@@ -898,10 +915,13 @@ function GET_permisos_usuario() {
     $stmt->close();
 
     foreach ($modulos as $modulo => $acciones) {
-        $permisos[] = ['modulo' => $modulo, 'acciones' => $acciones];
+        $permisos[$modulo] = array_map(function ($permiso) {
+            return $permiso['accion'];
+        }, $acciones);
+        $permisosDetalle[] = ['modulo' => $modulo, 'acciones' => $acciones];
     }
 
-    json(['permisos' => $permisos]);
+    json(['permisos' => $permisos, 'permisos_detalle' => $permisosDetalle]);
 }
 
 // ============================================================
@@ -912,7 +932,7 @@ function POST_caja_abrir($data) {
     global $conn, $uid;
 
     $codigo         = $data->codigo ?? '';
-    $nombreCaja     = $data->nombre ?? 'Caja Principal';
+    $nombreCaja     = $data->nombre ?? $data->nombre_caja ?? 'Caja Principal';
     $sucursal       = $data->sucursal ?? 'Principal';
     $montoApertura  = (int) ($data->monto_apertura ?? 0);
 
@@ -932,7 +952,14 @@ function POST_caja_abrir($data) {
         $stmt->close();
 
         // Get employee name
-        $sql = "SELECT nombre FROM usuario WHERE id_user = ?";
+        $sql = "SELECT COALESCE(
+                    NULLIF(TRIM(CONCAT_WS(' ', e.nombres, e.apellidos)), ''),
+                    NULLIF(TRIM(u.nombre_completo), ''),
+                    u.nombre
+                ) AS nombre
+                FROM usuario u
+                LEFT JOIN empleado e ON e.id_user = u.id_user
+                WHERE u.id_user = ?";
         $stmt = $conn->prepare($sql);
         $stmt->bind_param('i', $uid);
         $stmt->execute();
@@ -980,7 +1007,13 @@ function POST_caja_abrir($data) {
         $caja = $result->fetch_assoc();
         $stmt->close();
 
-        json(['success' => true, 'caja' => $caja]);
+        json([
+            'success' => true,
+            'codigo' => $caja['codigo'] ?? null,
+            'estado' => $caja['estado'] ?? 'ABIERTA',
+            'monto_actual' => (int) ($caja['monto_actual'] ?? $montoApertura),
+            'caja' => $caja,
+        ]);
 
     } catch (Exception $e) {
         $conn->rollback();

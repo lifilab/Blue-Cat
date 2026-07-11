@@ -3,94 +3,245 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Configuracion</title>
+  <title>Blue-Cat · Configuración</title>
+  <link rel="icon" href="../assets/img/Blue-Cat_logo-removebg.png" type="image/png">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
-  <link rel="stylesheet" href="../assets/css/configuracion.css">
+  <link rel="stylesheet" href="../assets/css/blue-cat.css">
+  <style>
+    .page-layout { display:flex; gap:20px; }
+    .cfg-sidebar { width:200px; flex-shrink:0; background:#fff; border-radius:12px; border:1px solid #e2e8f0; overflow:hidden; }
+    .cfg-sidebar ul { list-style:none; padding:8px; margin:0; }
+    .cfg-sidebar li { display:flex; align-items:center; gap:10px; padding:9px 14px; border-radius:8px; cursor:pointer; font-size:13px; color:#475569; transition:all .12s; margin-bottom:2px; }
+    .cfg-sidebar li:hover { background:#f1f5f9; }
+    .cfg-sidebar li.active { background:#eef2ff; color:#4f46e5; font-weight:600; }
+    .cfg-sidebar li i { width:16px; text-align:center; }
+    .cfg-content { flex:1; min-width:0; }
+    #stats-bar { display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:8px; margin-bottom:16px; }
+    .stat { background:#fff; border-radius:8px; padding:12px 14px; display:flex; align-items:center; gap:10px; box-shadow:0 1px 3px rgba(0,0,0,.06); border:1px solid #e2e8f0; }
+    .stat-icon { width:32px; height:32px; border-radius:6px; display:flex; align-items:center; justify-content:center; font-size:13px; flex-shrink:0; }
+    .stat-icon.blue { background:#eef2ff; color:#4f46e5; }
+    .stat-icon.green { background:#ecfdf5; color:#059669; }
+    .stat-icon.amber { background:#fffbeb; color:#d97706; }
+    .stat-icon.red { background:#fef2f2; color:#dc2626; }
+    .stat-num { font-size:16px; font-weight:700; color:#1e293b; line-height:1.1; }
+    .stat-label { font-size:10px; color:#64748b; }
+    .section-title { display:none; }
+    .section-title.active { display:block; }
+    .table-container { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    thead th { background:#f8fafc; padding:8px 12px; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; color:#64748b; border-bottom:2px solid #e2e8f0; white-space:nowrap; text-align:left; }
+    tbody td { padding:8px 12px; vertical-align:middle; border-bottom:1px solid #f1f5f9; }
+    tbody tr:hover { background:#f8fafc; }
+    .badge-success { background:#dcfce7; color:#059669; }
+    .badge-danger { background:#fef2f2; color:#dc2626; }
+    .badge-info { background:#e0f2fe; color:#0284c7; }
+    .badge-gray { background:#f1f5f9; color:#64748b; }
+    .empty-state { text-align:center; padding:32px 20px; color:#94a3b8; }
+    .empty-state i { font-size:32px; color:#cbd5e1; display:block; margin-bottom:10px; }
+    .toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+    .perm-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:4px 12px; }
+    .perm-row { display:flex; align-items:center; gap:8px; padding:4px 8px; border-radius:6px; cursor:pointer; font-size:12px; transition:background .1s; }
+    .perm-row:hover { background:#f1f5f9; }
+    .perm-row.active { background:#eef2ff; color:#4f46e5; }
+    .perm-check { width:16px; height:16px; border-radius:4px; border:2px solid #cbd5e1; flex-shrink:0; }
+    .perm-row.active .perm-check { background:#4f46e5; border-color:#4f46e5; position:relative; }
+    .perm-row.active .perm-check::after { content:'✓'; color:#fff; font-size:10px; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); }
+    @media(max-width:800px) { .page-layout { flex-direction:column; } .cfg-sidebar { width:100%; } }
+    .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .form-grid .full { grid-column:1/-1; }
+    .form-grid label { font-size:12px; font-weight:600; color:#475569; display:block; margin-bottom:3px; }
+    .form-grid input, .form-grid select, .form-grid textarea { width:100%; padding:8px 10px; border:1px solid #e2e8f0; border-radius:6px; font-size:13px; box-sizing:border-box; }
+    .cell-editable { cursor:text; border-radius:4px; transition:background .15s; outline:none; }
+    .cell-editable:focus { background:#eef2ff; box-shadow:inset 0 0 0 2px #4f46e5; }
+    .fld { margin-bottom:10px; }
+    .fld label { font-size:12px; font-weight:600; color:#475569; display:block; margin-bottom:4px; }
+    .fld input, .fld select { width:100%; padding:8px 10px; border:1.5px solid #e2e8f0; border-radius:8px; font-size:13px; outline:none; font-family:inherit; background:#fff; box-sizing:border-box; }
+    .fld input:focus, .fld select:focus { border-color:#4f46e5; }
+  </style>
 </head>
 <body>
   <nav class="navbar">
     <div class="navbar-container">
-      <div class="logo">
-        <a href="#">Blue Cat</a>
-      </div>
-      <div class="menu">
-        <ul>
-          <li><a href="Inicio.html"><i class="fas fa-home"></i> Inicio</a></li>
-          <li><a href="punto_de_venta.html"><i class="fas fa-cash-register"></i> Punto de Venta</a></li>
-          <li><a href="ventas.html"><i class="fas fa-shopping-cart"></i> Ventas</a></li>
-        </ul>
-      </div>
+      <a href="../public/Inicio.html" class="navbar-logo">
+        <img src="../assets/img/Blue-Cat_logo-removebg.png" alt="Blue-Cat"><span>Blue-Cat</span>
+      </a>
+      <div class="menu"><ul></ul></div>
     </div>
   </nav>
 
-  <main class="config-container">
-    <section class="config-header">
-      <h1>Configuracion</h1>
-      <p id="estado_config">--</p>
-    </section>
+  <div class="page-container">
+    <div class="page-title"><i class="fas fa-cogs"></i> Configuración General</div>
+    <div class="page-layout">
+      <div class="cfg-sidebar"><ul>
+        <li class="active" data-section="dashboard" onclick="switchCfg('dashboard')"><i class="fas fa-tachometer-alt"></i> Dashboard</li>
+        <li data-section="empresas" onclick="switchCfg('empresas')"><i class="fas fa-building"></i> Empresas</li>
+        <li data-section="sucursales" onclick="switchCfg('sucursales')"><i class="fas fa-store-alt"></i> Sucursales</li>
+        <li data-section="usuarios" onclick="switchCfg('usuarios')"><i class="fas fa-users"></i> Usuarios</li>
+        <li data-section="roles" onclick="switchCfg('roles')"><i class="fas fa-shield-alt"></i> Roles y Permisos</li>
+        <li data-section="monedas" onclick="switchCfg('monedas')"><i class="fas fa-coins"></i> Monedas</li>
+        <li data-section="impuestos" onclick="switchCfg('impuestos')"><i class="fas fa-percent"></i> Impuestos</li>
+        <li data-section="numeraciones" onclick="switchCfg('numeraciones')"><i class="fas fa-sort-numeric-up"></i> Numeraciones</li>
+        <li data-section="boletas" onclick="switchCfg('boletas')"><i class="fas fa-receipt"></i> Plantilla de Boletas</li>
+        <li data-section="parametros" onclick="switchCfg('parametros')"><i class="fas fa-sliders-h"></i> Parámetros</li>
+        <li data-section="planes" onclick="switchCfg('planes')"><i class="fas fa-layer-group"></i> Planes</li>
+        <li data-section="suscripciones" onclick="switchCfg('suscripciones')"><i class="fas fa-id-card"></i> Suscripciones</li>
+        <li data-section="modulos" onclick="switchCfg('modulos')"><i class="fas fa-cubes"></i> Módulos</li>
+        <li data-section="sesiones" onclick="switchCfg('sesiones')"><i class="fas fa-plug"></i> Sesiones</li>
+        <li data-section="auditoria" onclick="switchCfg('auditoria')"><i class="fas fa-history"></i> Auditoría</li>
+      </ul></div>
 
-    <section class="config-panel">
-      <h2>Plantilla de Boletas</h2>
-      <form id="boleta-form">
-        <div class="form-grid">
-          <label>
-            Empresa
-            <input type="text" id="nombre_empresa" name="nombre_empresa" required>
-          </label>
-          <label>
-            RUT
-            <input type="text" id="rut_empresa" name="rut_empresa">
-          </label>
-          <label>
-            Direccion
-            <input type="text" id="direccion" name="direccion">
-          </label>
-          <label>
-            Telefono
-            <input type="text" id="telefono" name="telefono">
-          </label>
-          <label>
-            Email
-            <input type="email" id="email" name="email">
-          </label>
-          <label>
-            IVA %
-            <input type="number" id="iva_porcentaje" name="iva_porcentaje" min="0" max="100" step="0.01">
-          </label>
-        </div>
-
-        <label>
-          Mensaje de pie
-          <textarea id="mensaje_pie" name="mensaje_pie"></textarea>
-        </label>
-
-        <label>
-          Mensaje de agradecimiento
-          <textarea id="mensaje_agradecimiento" name="mensaje_agradecimiento"></textarea>
-        </label>
-
-        <div class="options-row">
-          <label><input type="checkbox" id="mostrar_rut_cliente"> Mostrar RUT cliente</label>
-          <label><input type="checkbox" id="mostrar_desglose_iva"> Mostrar desglose IVA</label>
-          <label><input type="checkbox" id="mostrar_descuento"> Mostrar descuento</label>
-        </div>
-
-        <div class="logo-row">
-          <div>
-            <label for="logo_file">Logo</label>
-            <input type="file" id="logo_file" accept="image/png,image/jpeg,image/webp,image/gif">
-            <button type="button" id="quitar_logo">Quitar Logo</button>
+      <div class="cfg-content">
+        <!-- DASHBOARD -->
+        <div id="cfg-dashboard" class="section-title active"><div id="cfg-stats"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div class="card"><div class="card-header"><h2><i class="fas fa-clock"></i> Últimos Accesos</h2></div><div class="card-body"><table><thead><tr><th>Usuario</th><th>Fecha</th></tr></thead><tbody id="t-ultimos-accesos"></tbody></table></div></div>
+            <div class="card"><div class="card-header"><h2><i class="fas fa-history"></i> Actividad Reciente</h2></div><div class="card-body"><table><thead><tr><th>Acción</th><th>Entidad</th><th>Fecha</th></tr></thead><tbody id="t-ultimos-logs"></tbody></table></div></div>
           </div>
-          <img id="logo_preview" alt="">
         </div>
 
-        <div class="actions">
-          <button type="submit"><i class="fas fa-save"></i> Guardar</button>
+        <!-- EMPRESAS -->
+        <div id="cfg-empresas" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-building"></i> Empresas</h2><button class="btn btn-primary btn-sm" onclick="showCfgForm('empresa')"><i class="fas fa-plus"></i> Nueva</button></div>
+          <div class="card-body"><div class="table-container"><table><thead><tr><th>RUT</th><th>Razón Social</th><th>Nombre Comercial</th><th>Ciudad</th><th>Teléfono</th><th>Estado</th><th></th></tr></thead><tbody id="t-empresas"></tbody></table></div></div></div>
         </div>
-      </form>
-    </section>
-  </main>
 
-  <script src="../assets/js/configuracion.js"></script>
+        <!-- SUCURSALES -->
+        <div id="cfg-sucursales" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-store-alt"></i> Sucursales</h2><button class="btn btn-primary btn-sm" onclick="showCfgForm('sucursal')"><i class="fas fa-plus"></i> Nueva</button></div>
+          <div class="card-body"><div class="table-container"><table><thead><tr><th>Código</th><th>Nombre</th><th>Empresa</th><th>Responsable</th><th>Estado</th><th></th></tr></thead><tbody id="t-sucursales"></tbody></table></div></div></div>
+        </div>
+
+        <!-- USUARIOS -->
+        <div id="cfg-usuarios" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-users"></i> Usuarios</h2><button class="btn btn-primary btn-sm" onclick="showCfgForm('usuario')"><i class="fas fa-plus"></i> Nuevo</button></div>
+          <div class="card-body"><div class="table-container"><table><thead><tr><th>Usuario</th><th>Nombre Completo</th><th>Correo</th><th>Teléfono</th><th>Cargo</th><th>Roles</th><th>Creación</th><th>Último Acceso</th><th>Estado</th><th>Acciones</th></tr></thead><tbody id="t-usuarios"></tbody></table></div></div></div>
+        </div>
+
+        <!-- ROLES Y PERMISOS -->
+        <div id="cfg-roles" class="section-title">
+          <div style="display:flex;gap:12px;">
+            <!-- Left: Role list -->
+            <div class="card" style="flex:0 0 240px;">
+              <div class="card-header"><h2><i class="fas fa-shield-alt"></i> Roles</h2><button class="btn btn-primary btn-sm" onclick="showCfgForm('rol')" title="Nuevo Rol"><i class="fas fa-plus"></i></button></div>
+              <div class="card-body" style="padding:8px;">
+                <div id="t-roles-list"></div>
+                <button class="btn btn-outline btn-sm" onclick="cloneRol()" style="width:100%;margin-top:8px;"><i class="fas fa-clone"></i> Clonar Rol</button>
+              </div>
+            </div>
+            <!-- Right: Permission matrix -->
+            <div class="card" style="flex:2;min-width:0;">
+              <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <h2 id="matrix-title"><i class="fas fa-key"></i> Seleccione un rol</h2>
+                <div style="display:flex;gap:6px;">
+                  <button class="btn btn-outline btn-sm" onclick="toggleAllPerms(true)" title="Asignar todos los permisos"><i class="fas fa-check-double"></i> Todos</button>
+                  <button class="btn btn-outline btn-sm" onclick="toggleAllPerms(false)" title="Quitar todos los permisos"><i class="fas fa-times"></i> Ninguno</button>
+                </div>
+              </div>
+              <div class="card-body" style="padding:4px;overflow-x:auto;">
+                <div id="t-perm-matrix">
+                  <div style="text-align:center;padding:40px;color:#94a3b8;"><i class="fas fa-arrow-left"></i> Seleccione un rol para ver sus permisos</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- MONEDAS -->
+        <div id="cfg-monedas" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-coins"></i> Monedas</h2><button class="btn btn-primary btn-sm" onclick="showCfgForm('moneda')"><i class="fas fa-plus"></i> Nueva</button></div>
+          <div class="card-body"><div class="table-container"><table><thead><tr><th>Código</th><th>Nombre</th><th>Símbolo</th><th>Decimales</th><th>Estado</th></tr></thead><tbody id="t-monedas"></tbody></table></div></div></div>
+        </div>
+
+        <!-- IMPUESTOS -->
+        <div id="cfg-impuestos" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-percent"></i> Impuestos</h2><button class="btn btn-primary btn-sm" onclick="showCfgForm('impuesto')"><i class="fas fa-plus"></i> Nuevo</button></div>
+          <div class="card-body"><div class="table-container"><table><thead><tr><th>Código</th><th>Nombre</th><th>Tasa</th><th>Tipo</th><th>Estado</th></tr></thead><tbody id="t-impuestos"></tbody></table></div></div></div>
+        </div>
+
+        <!-- NUMERACIONES -->
+        <div id="cfg-numeraciones" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-sort-numeric-up"></i> Numeraciones</h2></div>
+          <div class="card-body"><div class="table-container"><table><thead><tr><th>Documento</th><th>Prefijo</th><th>Siguiente N°</th><th>Formato</th><th>Estado</th><th></th></tr></thead><tbody id="t-numeraciones"></tbody></table></div></div></div>
+        </div>
+
+        <!-- BOLETAS -->
+        <div id="cfg-boletas" class="section-title">
+          <div class="card">
+            <div class="card-header"><h2><i class="fas fa-receipt"></i> Plantilla de Boletas</h2></div>
+            <div class="card-body">
+              <form id="form-boleta" onsubmit="guardarConfigBoleta(event)">
+                <div class="form-grid">
+                  <div class="full"><label>Nombre de Empresa *</label><input type="text" id="b-nombre-empresa" required></div>
+                  <div><label>RUT Empresa</label><input type="text" id="b-rut-empresa" placeholder="12.345.678-9"></div>
+                  <div><label>Teléfono</label><input type="text" id="b-telefono"></div>
+                  <div class="full"><label>Dirección</label><input type="text" id="b-direccion"></div>
+                  <div><label>Email</label><input type="email" id="b-email"></div>
+                  <div><label>IVA (%)</label><input type="number" id="b-iva" step="0.01" value="19"></div>
+                  <div class="full"><label>Logo (opcional)</label><input type="file" id="b-logo-file" accept="image/*" onchange="cargarLogo(event)"><div id="b-logo-preview" style="margin-top:8px;"></div></div>
+                  <div class="full"><label>Mensaje de Agradecimiento</label><textarea id="b-mensaje-agradecimiento" rows="2">¡Gracias por su compra!</textarea></div>
+                  <div class="full"><label>Mensaje Pie de Página</label><textarea id="b-mensaje-pie" rows="2"></textarea></div>
+                  <div><label><input type="checkbox" id="b-mostrar-rut-cliente"> Mostrar RUT del cliente</label></div>
+                  <div><label><input type="checkbox" id="b-mostrar-iva" checked> Mostrar desglose IVA</label></div>
+                  <div><label><input type="checkbox" id="b-mostrar-descuento" checked> Mostrar descuento</label></div>
+                </div>
+                <div style="margin-top:16px;display:flex;gap:8px;">
+                  <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Guardar Configuración</button>
+                  <button type="button" class="btn btn-outline" onclick="cargarConfigBoleta()"><i class="fas fa-sync"></i> Recargar</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <!-- PARÁMETROS -->
+        <div id="cfg-parametros" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-sliders-h"></i> Parámetros Globales</h2></div>
+          <div class="card-body"><div class="table-container"><table><thead><tr><th>Clave</th><th>Valor</th><th>Tipo</th><th>Descripción</th><th></th></tr></thead><tbody id="t-parametros"></tbody></table></div></div></div>
+        </div>
+
+        <!-- PLANES -->
+        <div id="cfg-planes" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-layer-group"></i> Planes</h2><button class="btn btn-primary btn-sm" onclick="showCfgForm('plan')"><i class="fas fa-plus"></i> Nuevo</button></div>
+          <div class="card-body"><div class="table-container"><table><thead><tr><th>Nombre</th><th>Precio</th><th>Max Empresas</th><th>Max Sucursales</th><th>Max Usuarios</th><th>Estado</th></tr></thead><tbody id="t-planes"></tbody></table></div></div></div>
+        </div>
+
+        <!-- SUSCRIPCIONES -->
+        <div id="cfg-suscripciones" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-id-card"></i> Suscripciones</h2><button class="btn btn-primary btn-sm" onclick="showCfgForm('suscripcion')"><i class="fas fa-plus"></i> Nueva</button></div>
+          <div class="card-body"><div class="table-container"><table><thead><tr><th>Empresa</th><th>Plan</th><th>Inicio</th><th>Estado</th><th></th></tr></thead><tbody id="t-suscripciones"></tbody></table></div></div></div>
+        </div>
+
+        <!-- MÓDULOS -->
+        <div id="cfg-modulos" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-cubes"></i> Módulos del Sistema</h2></div>
+          <div class="card-body"><p style="font-size:13px;color:#64748b;margin-bottom:12px;">Seleccione un plan para asignar módulos.</p>
+          <div class="toolbar"><select id="filter-plan-modulos" onchange="loadPlanModulos()"><option value="">Seleccionar plan...</option></select></div>
+          <div id="t-modulos-grid" class="perm-grid"></div></div></div>
+        </div>
+
+        <!-- SESIONES -->
+        <div id="cfg-sesiones" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-plug"></i> Sesiones Activas (24h)</h2></div>
+          <div class="card-body"><div class="table-container"><table><thead><tr><th>Usuario</th><th>Acción</th><th>IP</th><th>Fecha</th><th></th></tr></thead><tbody id="t-sesiones"></tbody></table></div></div></div>
+        </div>
+
+        <!-- AUDITORÍA -->
+        <div id="cfg-auditoria" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-history"></i> Auditoría</h2></div>
+          <div class="card-body">
+            <div class="toolbar"><select id="filter-nivel" onchange="loadCfg('auditoria')"><option value="">Todos los niveles</option><option value="INFO">INFO</option><option value="WARNING">WARNING</option><option value="ERROR">ERROR</option></select></div>
+            <div class="table-container"><table><thead><tr><th>Fecha</th><th>Usuario</th><th>Acción</th><th>Entidad</th><th>ID</th><th>Nivel</th></tr></thead><tbody id="t-auditoria"></tbody></table></div>
+          </div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="popup" id="cfg-modal"><div class="popup-content" style="max-width:600px;"><span class="close-btn" onclick="closeCfgModal()">&times;</span><div id="cfg-modal-body"></div></div></div>
+  <div id="cerrar-sesion-popup" class="popup"><div class="popup-content"><span class="close-btn" onclick="CloseSesionPopUp()">&times;</span><h2><i class="fas fa-sign-out-alt"></i> Cerrar Sesión</h2><p>¿Está seguro de que desea cerrar sesión?</p><button class="btn btn-danger" onclick="cerrarSesion()" style="width:100%;justify-content:center;">Cerrar Sesión</button></div></div>
+
+  <script src="../assets/js/configuracion.js?v=3"></script>
+  <script src="../assets/js/login_pvt.js"></script>
+  <script src="../assets/js/navbar.js"></script>
 </body>
 </html>

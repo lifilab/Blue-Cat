@@ -3,117 +3,291 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Inventario</title>
+  <title>Blue-Cat · Inventario</title>
+  <link rel="icon" href="../assets/img/Blue-Cat_logo-removebg.png" type="image/png">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
-  <link rel="stylesheet" href="../assets/css/inventario.css">
+  <link rel="stylesheet" href="../assets/css/blue-cat.css">
+  <style>
+    .page-layout { display:flex; gap:20px; }
+    .inv-sidebar { width:220px; flex-shrink:0; background:#fff; border-radius:12px; border:1px solid #e2e8f0; overflow:hidden; }
+    .inv-sidebar ul { list-style:none; padding:8px; margin:0; }
+    .inv-sidebar li { display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:8px; cursor:pointer; font-size:14px; color:#475569; transition:all .12s; margin-bottom:2px; }
+    .inv-sidebar li:hover { background:#f1f5f9; }
+    .inv-sidebar li.active { background:#eef2ff; color:#4f46e5; font-weight:600; }
+    .inv-sidebar li i { width:18px; text-align:center; font-size:14px; }
+    .inv-content { flex:1; min-width:0; }
+
+    #stats-bar { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:18px; }
+    .stat { background:#fff; border-radius:10px; padding:14px 16px; display:flex; align-items:center; gap:12px; box-shadow:0 1px 3px rgba(0,0,0,.06); border:1px solid #e2e8f0; }
+    .stat-icon { width:36px; height:36px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:15px; flex-shrink:0; }
+    .stat-icon.blue { background:#eef2ff; color:#4f46e5; }
+    .stat-icon.amber { background:#fffbeb; color:#d97706; }
+    .stat-icon.red { background:#fef2f2; color:#dc2626; }
+    .stat-icon.green { background:#ecfdf5; color:#059669; }
+    .stat-icon.purple { background:#f5f3ff; color:#7c3aed; }
+    .stat-num { font-size:18px; font-weight:700; color:#1e293b; line-height:1.1; }
+    .stat-label { font-size:11px; color:#64748b; margin-top:2px; }
+
+    .toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
+    .toolbar .search-wrapper { position:relative; flex:1; min-width:200px; max-width:360px; }
+    .toolbar .search-wrapper i { position:absolute; left:12px; top:50%; transform:translateY(-50%); color:#94a3b8; font-size:14px; }
+    .toolbar .search-wrapper input { width:100%; padding:9px 12px 9px 36px; border:1px solid #e2e8f0; border-radius:8px; font-size:14px; outline:none; transition:border .15s; box-sizing:border-box; }
+    .toolbar .search-wrapper input:focus { border-color:#4f46e5; }
+
+    .table-container { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; font-size:14px; }
+    thead th { background:#f8fafc; padding:10px 14px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; color:#64748b; border-bottom:2px solid #e2e8f0; white-space:nowrap; text-align:left; }
+    tbody td { padding:10px 14px; vertical-align:middle; border-bottom:1px solid #f1f5f9; }
+    tbody tr:hover { background:#f8fafc; }
+    tbody tr:nth-child(even) { background:#fafbfc; }
+
+    .badge-success { background:#dcfce7; color:#059669; }
+    .badge-warning { background:#fef3c7; color:#d97706; }
+    .badge-danger { background:#fef2f2; color:#dc2626; }
+    .badge-info { background:#e0f2fe; color:#0284c7; }
+    .badge-gray { background:#f1f5f9; color:#64748b; }
+    .badge-purple { background:#f5f3ff; color:#7c3aed; }
+
+    .empty-state { text-align:center; padding:48px 20px; color:#94a3b8; }
+    .empty-state i { font-size:40px; color:#cbd5e1; display:block; margin-bottom:12px; }
+
+    .section-title { display:none; }
+    .section-title.active { display:block; }
+    .section-title h2 { font-size:18px; font-weight:700; color:#1e293b; margin:0 0 4px; }
+    .section-title p { font-size:13px; color:#64748b; margin:0 0 16px; }
+
+    /* Charts placeholder */
+    .chart-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    .chart-box { background:#fff; border-radius:10px; border:1px solid #e2e8f0; padding:16px; }
+    .chart-box h3 { font-size:14px; color:#1e293b; margin:0 0 12px; font-weight:600; }
+    .chart-bar { display:flex; align-items:center; gap:8px; margin-bottom:6px; font-size:13px; }
+    .chart-bar-fill { height:18px; background:#4f46e5; border-radius:4px; min-width:4px; transition:width .4s; }
+    .chart-bar-label { color:#475569; white-space:nowrap; min-width:80px; text-align:right; }
+
+    .kpi-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(120px,1fr)); gap:10px; margin-bottom:16px; }
+    .kpi-item { background:#fff; border-radius:8px; padding:12px; text-align:center; border:1px solid #e2e8f0; }
+    .kpi-value { font-size:22px; font-weight:700; color:#1e293b; }
+    .kpi-label { font-size:11px; color:#64748b; margin-top:2px; }
+
+    .filter-bar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+    .filter-bar select, .filter-bar input { padding:7px 10px; border:1px solid #e2e8f0; border-radius:6px; font-size:13px; }
+
+    .btn-sm { padding:7px 14px; font-size:13px; border-radius:6px; }
+    .btn-xs { padding:4px 8px; font-size:11px; border-radius:4px; }
+
+    .modal-body { max-height:70vh; overflow-y:auto; }
+    .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .form-grid .full { grid-column:1/-1; }
+    .form-grid label { font-size:12px; font-weight:600; color:#475569; display:block; margin-bottom:3px; }
+    .form-grid input, .form-grid select, .form-grid textarea { width:100%; padding:8px 10px; border:1px solid #e2e8f0; border-radius:6px; font-size:13px; box-sizing:border-box; }
+
+    .tab-bar { display:flex; gap:4px; margin-bottom:16px; flex-wrap:wrap; }
+    .tab-btn { padding:7px 14px; border-radius:6px; font-size:13px; cursor:pointer; border:1px solid transparent; background:#f1f5f9; color:#475569; transition:all .12s; }
+    .tab-btn.active { background:#eef2ff; color:#4f46e5; border-color:#c7d2fe; font-weight:600; }
+    .tab-btn:hover:not(.active) { background:#e2e8f0; }
+
+    @media(max-width:900px) { .page-layout { flex-direction:column; } .inv-sidebar { width:100%; } }
+  </style>
 </head>
 <body>
   <nav class="navbar">
     <div class="navbar-container">
-      <div class="logo">
-        <a href="#"></a>
-      </div>
+      <a href="../public/Inicio.html" class="navbar-logo">
+        <img src="../assets/img/Blue-Cat_logo-removebg.png" alt="Blue-Cat">
+        <span>Blue-Cat</span>
+      </a>
       <div class="menu">
-        <ul>
-          <li><a href="../public/Inicio.html"><i class="fas fa-home"></i> Inicio</a></li>
-          <li><a href="punto_de_venta.html"><i class="fas fa-cash-register"></i> Punto de Ventas</a></li>
-        </ul>
+        <ul></ul>
       </div>
     </div>
   </nav>
 
-  <div class="container">
-    <h2>Gestion de Inventario</h2>
-    <button id="open-popup-btn" onclick="openPopup()">Anadir Producto</button>
-    <button onclick="openImportPopup()">Importar</button>
-    <button>Exportar</button>
+  <div class="page-container">
+    <div class="page-title"><i class="fas fa-box"></i> Inventario</div>
 
-    <div class="popup" id="import-popup">
-      <div class="popup-content">
-        <span class="close" onclick="closeImportPopup()">&times;</span>
-        <h4>Importar Productos</h4>
-        <p>Seleccione un archivo CSV:</p>
-        <input type="file" id="file-input" accept=".csv">
-        <button onclick="uploadFile()">Subir Archivo</button>
+    <div class="page-layout">
+      <div class="inv-sidebar">
+        <ul>
+          <li class="active" data-section="dashboard" onclick="switchSection('dashboard')"><i class="fas fa-tachometer-alt"></i> Dashboard</li>
+          <li data-section="productos" onclick="switchSection('productos')"><i class="fas fa-cube"></i> Productos</li>
+          <li data-section="categorias" onclick="switchSection('categorias')"><i class="fas fa-tags"></i> Categorías</li>
+          <li data-section="marcas" onclick="switchSection('marcas')"><i class="fas fa-tag"></i> Marcas</li>
+          <li data-section="bodegas" onclick="switchSection('bodegas')"><i class="fas fa-warehouse"></i> Bodegas</li>
+          <li data-section="stock" onclick="switchSection('stock')"><i class="fas fa-cubes"></i> Stock</li>
+          <li data-section="movimientos" onclick="switchSection('movimientos')"><i class="fas fa-exchange-alt"></i> Movimientos</li>
+          <li data-section="transferencias" onclick="switchSection('transferencias')"><i class="fas fa-truck-moving"></i> Transferencias</li>
+          <li data-section="ajustes" onclick="switchSection('ajustes')"><i class="fas fa-sliders-h"></i> Ajustes</li>
+          <li data-section="fisico" onclick="switchSection('fisico')"><i class="fas fa-clipboard-list"></i> Inventario Físico</li>
+          <li data-section="kardex" onclick="switchSection('kardex')"><i class="fas fa-book"></i> Kardex</li>
+          <li data-section="lotes" onclick="switchSection('lotes')"><i class="fas fa-layer-group"></i> Lotes</li>
+          <li data-section="series" onclick="switchSection('series')"><i class="fas fa-barcode"></i> Series</li>
+          <li data-section="alertas" onclick="switchSection('alertas')"><i class="fas fa-bell"></i> Alertas</li>
+          <li data-section="reportes" onclick="switchSection('reportes')"><i class="fas fa-chart-pie"></i> Reportes</li>
+          <li data-section="auditoria" onclick="switchSection('auditoria')"><i class="fas fa-history"></i> Auditoría</li>
+        </ul>
+      </div>
+
+      <div class="inv-content">
+        <!-- DASHBOARD -->
+        <div id="section-dashboard" class="section-title active">
+          <div id="stats-bar"></div>
+          <div class="chart-grid">
+            <div class="chart-box" id="chart-categorias"><h3><i class="fas fa-tags"></i> Productos por Categoría</h3><div id="chart-cat-bars"></div></div>
+            <div class="chart-box" id="chart-bodegas"><h3><i class="fas fa-warehouse"></i> Stock por Bodega</h3><div id="chart-stock-bars"></div></div>
+            <div class="chart-box" style="grid-column:1/-1;">
+              <h3><i class="fas fa-chart-line"></i> Entradas vs Salidas (últimos 14 días)</h3>
+              <div style="overflow-x:auto;" id="chart-ent-sal"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PRODUCTOS -->
+        <div id="section-productos" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-cube"></i> Productos</h2><div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-primary btn-sm" onclick="showProductForm()"><i class="fas fa-plus"></i> Nuevo</button><button class="btn btn-success btn-sm" onclick="showQuickStock()"><i class="fas fa-bolt"></i> Actualizar Stock</button><button class="btn btn-warning btn-sm" onclick="showQuickPrice()"><i class="fas fa-dollar-sign"></i> Actualizar Precio</button></div></div>
+          <div class="card-body">
+            <div class="toolbar">
+              <div class="search-wrapper"><i class="fas fa-search"></i><input type="text" id="search-productos" class="input" placeholder="Buscar producto..."></div>
+              <select id="filter-categoria" onchange="loadProductos()"><option value="">Todas las categorías</option></select>
+              <select id="filter-marca" onchange="loadProductos()"><option value="">Todas las marcas</option></select>
+              <select id="filter-estado" onchange="loadProductos()"><option value="">Todos</option><option value="activo">Activos</option><option value="inactivo">Inactivos</option><option value="sin_stock">Sin stock</option><option value="stock_bajo">Stock bajo</option></select>
+              <span id="product-count" style="font-size:13px;color:#94a3b8;"></span>
+            </div>
+            <div class="table-container">
+              <table><thead><tr><th>ID</th><th>Nombre</th><th>Código</th><th>SKU</th><th>Categoría</th><th>Marca</th><th>Stock</th><th>Costo</th><th>Precio</th><th>Estado</th><th></th></tr></thead><tbody id="tbody-productos"></tbody></table>
+            </div>
+          </div></div>
+        </div>
+
+        <!-- CATEGORÍAS -->
+        <div id="section-categorias" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-tags"></i> Categorías</h2><button class="btn btn-primary btn-sm" onclick="showCategoriaForm()"><i class="fas fa-plus"></i> Nueva</button></div>
+          <div class="card-body"><div class="table-container"><table><thead><tr><th>ID</th><th>Nombre</th><th>Descripción</th><th>Productos</th><th>Estado</th><th></th></tr></thead><tbody id="tbody-categorias"></tbody></table></div></div></div>
+        </div>
+
+        <!-- MARCAS -->
+        <div id="section-marcas" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-tag"></i> Marcas</h2><button class="btn btn-primary btn-sm" onclick="showMarcaForm()"><i class="fas fa-plus"></i> Nueva</button></div>
+          <div class="card-body"><div class="table-container"><table><thead><tr><th>ID</th><th>Nombre</th><th>Descripción</th><th>Productos</th><th>Estado</th><th></th></tr></thead><tbody id="tbody-marcas"></tbody></table></div></div></div>
+        </div>
+
+        <!-- BODEGAS -->
+        <div id="section-bodegas" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-warehouse"></i> Bodegas</h2><button class="btn btn-primary btn-sm" onclick="showBodegaForm()"><i class="fas fa-plus"></i> Nueva</button></div>
+          <div class="card-body"><div class="table-container"><table><thead><tr><th>Código</th><th>Nombre</th><th>Responsable</th><th>Dirección</th><th>Estado</th><th>Items</th><th></th></tr></thead><tbody id="tbody-bodegas"></tbody></table></div></div></div>
+        </div>
+
+        <!-- STOCK -->
+        <div id="section-stock" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-cubes"></i> Stock por Bodega</h2></div>
+          <div class="card-body">
+            <div class="toolbar">
+              <select id="filter-stock-bodega" onchange="loadStock()"><option value="">Todas las bodegas</option></select>
+              <div class="search-wrapper"><i class="fas fa-search"></i><input type="text" id="search-stock" placeholder="Buscar producto..."></div>
+            </div>
+            <div class="table-container"><table><thead><tr><th>Producto</th><th>Bodega</th><th>Disponible</th><th>Reservado</th><th>Comprometido</th><th>En Tránsito</th><th>Dañado</th><th>Bloqueado</th></tr></thead><tbody id="tbody-stock"></tbody></table></div>
+          </div></div>
+        </div>
+
+        <!-- MOVIMIENTOS -->
+        <div id="section-movimientos" class="section-title">
+          <div class="card">
+            <div class="card-header"><h2><i class="fas fa-exchange-alt"></i> Historial de Movimientos</h2></div>
+            <div class="card-body">
+              <div class="toolbar">
+                <select id="filter-mov-tipo" onchange="loadMovimientos()"><option value="">Todos los tipos</option><option value="INGRESO">Ingreso</option><option value="SALIDA">Salida</option><option value="AJUSTE">Ajuste</option><option value="CONSUMO">Consumo</option><option value="MERMA">Merma</option></select>
+              </div>
+              <div class="table-container"><table><thead><tr><th>N°</th><th>Fecha</th><th>Tipo</th><th>Producto</th><th>Cantidad</th><th>Bodega</th><th>Usuario</th></tr></thead><tbody id="tbody-movimientos"></tbody></table></div>
+            </div></div>
+          </div>
+        </div>
+
+        <!-- TRANSFERENCIAS -->
+        <div id="section-transferencias" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-truck-moving"></i> Transferencias</h2><button class="btn btn-primary btn-sm" onclick="showTransferenciaForm()"><i class="fas fa-plus"></i> Nueva</button></div>
+          <div class="card-body"><div class="table-container"><table><thead><tr><th>N°</th><th>Origen</th><th>Destino</th><th>Estado</th><th>Items</th><th>Fecha</th><th></th></tr></thead><tbody id="tbody-transferencias"></tbody></table></div></div></div>
+        </div>
+
+        <!-- AJUSTES -->
+        <div id="section-ajustes" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-sliders-h"></i> Ajustes de Inventario</h2><button class="btn btn-primary btn-sm" onclick="showAjusteForm()"><i class="fas fa-plus"></i> Nuevo</button></div>
+          <div class="card-body"><div class="table-container"><table><thead><tr><th>N°</th><th>Tipo</th><th>Producto</th><th>Anterior</th><th>Nuevo</th><th>Diferencia</th><th>Motivo</th><th>Fecha</th></tr></thead><tbody id="tbody-ajustes"></tbody></table></div></div></div>
+        </div>
+
+        <!-- INVENTARIO FÍSICO -->
+        <div id="section-fisico" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-clipboard-list"></i> Inventarios Físicos</h2><button class="btn btn-primary btn-sm" onclick="showFisicoForm()"><i class="fas fa-plus"></i> Nuevo</button></div>
+          <div class="card-body"><div class="table-container"><table><thead><tr><th>Código</th><th>Tipo</th><th>Bodega</th><th>Estado</th><th>Inicio</th><th>Fin</th><th></th></tr></thead><tbody id="tbody-fisicos"></tbody></table></div></div></div>
+        </div>
+
+        <!-- KARDEX -->
+        <div id="section-kardex" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-book"></i> Kardex</h2></div>
+          <div class="card-body">
+            <div class="toolbar">
+              <select id="filter-kardex-producto" onchange="loadKardex()"><option value="">Todos los productos</option></select>
+            </div>
+            <div class="table-container"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Bodega</th><th>Movimiento</th><th>Entrada</th><th>Salida</th><th>Saldo</th><th>Costo U.</th><th>Costo T.</th></tr></thead><tbody id="tbody-kardex"></tbody></table></div>
+          </div></div>
+        </div>
+
+        <!-- LOTES -->
+        <div id="section-lotes" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-layer-group"></i> Lotes</h2><button class="btn btn-primary btn-sm" onclick="showLoteForm()"><i class="fas fa-plus"></i> Nuevo</button></div>
+          <div class="card-body"><div class="table-container"><table><thead><tr><th>Lote</th><th>Producto</th><th>Proveedor</th><th>Vencimiento</th><th>Cantidad</th><th>Estado</th></tr></thead><tbody id="tbody-lotes"></tbody></table></div></div></div>
+        </div>
+
+        <!-- SERIES -->
+        <div id="section-series" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-barcode"></i> Series</h2><button class="btn btn-primary btn-sm" onclick="showSerieForm()"><i class="fas fa-plus"></i> Nueva</button></div>
+          <div class="card-body"><div class="table-container"><table><thead><tr><th>N° Serie</th><th>Producto</th><th>Lote</th><th>Estado</th><th>Cliente</th><th>Garantía</th></tr></thead><tbody id="tbody-series"></tbody></table></div></div></div>
+        </div>
+
+        <!-- ALERTAS -->
+        <div id="section-alertas" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-bell"></i> Alertas de Stock</h2></div>
+          <div class="card-body"><div class="table-container"><table><thead><tr><th>Tipo</th><th>Producto</th><th>Mensaje</th><th>Fecha</th><th></th></tr></thead><tbody id="tbody-alertas"></tbody></table></div></div></div>
+        </div>
+
+        <!-- REPORTES -->
+        <div id="section-reportes" class="section-title">
+          <div class="tab-bar">
+            <button class="tab-btn active" onclick="switchReporte('existencias',this)">Existencias</button>
+            <button class="tab-btn" onclick="switchReporte('stock_critico',this)">Stock Crítico</button>
+            <button class="tab-btn" onclick="switchReporte('rotacion',this)">Rotación</button>
+          </div>
+          <div class="card"><div class="card-header"><h2 id="reporte-title"><i class="fas fa-file-alt"></i> Reporte</h2></div>
+          <div class="card-body"><div class="table-container"><table id="reporte-table"><thead id="reporte-thead"></thead><tbody id="tbody-reporte"></tbody></table></div></div></div>
+        </div>
+
+        <!-- AUDITORÍA -->
+        <div id="section-auditoria" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-history"></i> Auditoría de Inventario</h2></div>
+          <div class="card-body"><div class="table-container"><table><thead><tr><th>Fecha</th><th>Usuario</th><th>Acción</th><th>Entidad</th><th>ID</th><th>Detalle</th></tr></thead><tbody id="tbody-auditoria"></tbody></table></div></div></div>
+        </div>
       </div>
     </div>
+  </div>
 
-    <div class="popup" id="create-product-popup">
-      <div class="popup-content">
-        <span class="close" onclick="closePopup()">&times;</span>
-        <h4>Anadir nuevo Producto</h4>
-        <form id="add-product-form" action="../assets/PHP/agregar_productos.php" method="post">
-          <label for="nombre_producto">Nombre:</label>
-          <input type="text" id="nombre_producto" name="nombre_producto" required>
-          <label for="codigo_de_barras">Codigo de Barras:</label>
-          <input type="text" id="codigo_de_barras" name="codigo_de_barras" required>
-          <label for="precio_venta">Precio:</label>
-          <input type="number" id="precio_venta" name="precio_venta" min="0" step="1" required>
-          <label for="cantidad">Cantidad:</label>
-          <input type="number" id="cantidad" name="cantidad" min="0" required>
-          <label for="categoria">Categoria:</label>
-          <input type="text" id="categoria" name="categoria">
-          <button type="submit">Agregar Producto</button>
-          <button type="button" onclick="closePopup()">Cancelar</button>
-        </form>
-      </div>
+  <!-- MODAL -->
+  <div class="popup" id="modal-overlay">
+    <div class="popup-content" style="max-width:680px;">
+      <span class="close-btn" onclick="closeModal()">&times;</span>
+      <div id="modal-body"></div>
     </div>
+  </div>
 
-    <div class="popup" id="stock-popup">
-      <div class="popup-content">
-        <span class="close" onclick="closeStockPopup()">&times;</span>
-        <h4>Actualizar Stock</h4>
-        <form id="stock-form">
-          <input type="hidden" id="stock-product-id" name="productId">
-          <p id="stock-product-name"></p>
-          <label for="stock-current">Stock actual:</label>
-          <input type="text" id="stock-current" disabled>
-          <label for="stock-new">Nuevo stock:</label>
-          <input type="number" id="stock-new" name="stock" min="0" step="1" required>
-          <button type="submit">Guardar Stock</button>
-          <button type="button" onclick="closeStockPopup()">Cancelar</button>
-        </form>
-      </div>
-    </div>
-
-    <div class="popup" id="price-popup">
-      <div class="popup-content">
-        <span class="close" onclick="closePricePopup()">&times;</span>
-        <h4>Actualizar Precio</h4>
-        <form id="price-form">
-          <input type="hidden" id="price-product-id" name="productId">
-          <p id="price-product-name"></p>
-          <label for="price-current">Precio actual:</label>
-          <input type="text" id="price-current" disabled>
-          <label for="price-new">Nuevo precio:</label>
-          <input type="number" id="price-new" name="precio" min="0" step="1" required>
-          <button type="submit">Guardar Precio</button>
-          <button type="button" onclick="closePricePopup()">Cancelar</button>
-        </form>
-      </div>
-    </div>
-
-    <div class="product-list">
-      <h3>Lista de Productos</h3>
-      <input type="text" id="search-input" placeholder="Buscar por nombre, codigo de barras, precio, cantidad o categoria">
-      <table id="product-table">
-        <thead>
-          <tr>
-            <th>ID producto</th>
-            <th>Nombre</th>
-            <th>Codigo de Barras</th>
-            <th>Precio</th>
-            <th>Cantidad</th>
-            <th>Categoria</th>
-            <th>Acciones</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
+  <!-- Cerrar sesión -->
+  <div id="cerrar-sesion-popup" class="popup">
+    <div class="popup-content">
+      <span class="close-btn" onclick="CloseSesionPopUp()">&times;</span>
+      <h2><i class="fas fa-sign-out-alt"></i> Cerrar Sesión</h2>
+      <p id="p-cerrar-sesion">¿Está seguro de que desea cerrar sesión?</p>
+      <button class="btn btn-danger" onclick="cerrarSesion()" style="width:100%;justify-content:center;">Cerrar Sesión</button>
     </div>
   </div>
 
   <script src="../assets/js/inventario.js"></script>
-  <script src="../assets/js/busquedas.js"></script>
+  <script src="../assets/js/login_pvt.js"></script>
+  <script src="../assets/js/navbar.js"></script>
 </body>
 </html>

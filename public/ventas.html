@@ -3,95 +3,352 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ventas</title>
+  <title>Blue-Cat · Ventas</title>
+  <link rel="icon" href="../assets/img/Blue-Cat_logo-removebg.png" type="image/png">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
-  <link rel="stylesheet" href="../assets/css/ventas.css">
+  <link rel="stylesheet" href="../assets/css/blue-cat.css?v=2">
+  <style>
+    .period-bar { display:flex; gap:6px; margin-bottom:18px; flex-wrap:wrap; }
+    .period-btn { padding:7px 14px; border-radius:20px; font-size:13px; cursor:pointer; border:1px solid #e2e8f0; background:#fff; color:#475569; transition:all .12s; font-family:inherit; }
+    .period-btn:hover { background:#f1f5f9; }
+    .period-btn.active { background:#4f46e5; color:#fff; border-color:#4f46e5; font-weight:600; }
+    .period-custom { display:none; gap:10px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
+    .period-custom.show { display:flex; }
+    .period-custom label { font-size:13px; color:#475569; font-weight:500; }
+    .period-custom input[type="date"] { padding:7px 10px; border:1px solid #e2e8f0; border-radius:6px; font-size:13px; outline:none; }
+    .period-custom input[type="date"]:focus { border-color:#4f46e5; }
+
+    .kpi-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:18px; }
+    .kpi-card { background:#fff; border-radius:10px; padding:14px 16px; display:flex; align-items:center; gap:12px; box-shadow:0 1px 3px rgba(0,0,0,.06); border:1px solid #e2e8f0; }
+    .kpi-icon { width:36px; height:36px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:15px; flex-shrink:0; }
+    .kpi-icon.blue { background:#eef2ff; color:#4f46e5; }
+    .kpi-icon.green { background:#ecfdf5; color:#059669; }
+    .kpi-icon.amber { background:#fffbeb; color:#d97706; }
+    .kpi-icon.red { background:#fef2f2; color:#dc2626; }
+    .kpi-icon.purple { background:#f5f3ff; color:#7c3aed; }
+    .kpi-icon.teal { background:#f0fdfa; color:#0d9488; }
+    .kpi-icon.rose { background:#fff1f2; color:#e11d48; }
+    .kpi-num { font-size:18px; font-weight:700; color:#1e293b; line-height:1.1; }
+    .kpi-label { font-size:11px; color:#64748b; margin-top:2px; }
+
+    .filter-bar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; align-items:center; }
+    .filter-bar select { padding:7px 10px; border:1px solid #e2e8f0; border-radius:6px; font-size:13px; outline:none; background:#fff; }
+    .filter-bar select:focus { border-color:#4f46e5; }
+
+    .toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
+    .toolbar .search-wrapper { position:relative; flex:1; min-width:200px; max-width:360px; }
+    .toolbar .search-wrapper i { position:absolute; left:12px; top:50%; transform:translateY(-50%); color:#94a3b8; font-size:14px; }
+    .toolbar .search-wrapper input { width:100%; padding:9px 12px 9px 36px; border:1px solid #e2e8f0; border-radius:8px; font-size:14px; outline:none; transition:border .15s; box-sizing:border-box; }
+    .toolbar .search-wrapper input:focus { border-color:#4f46e5; }
+
+    .table-container { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; font-size:14px; }
+    thead th { background:#f8fafc; padding:10px 14px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; color:#64748b; border-bottom:2px solid #e2e8f0; white-space:nowrap; text-align:left; }
+    tbody td { padding:10px 14px; vertical-align:middle; border-bottom:1px solid #f1f5f9; }
+    tbody tr:hover { background:#f8fafc; }
+    tbody tr:nth-child(even) { background:#fafbfc; }
+    tbody tr.main-row { cursor:pointer; }
+    tbody tr.main-row.anulada { background:#fef2f2; color:#94a3b8; }
+    tbody tr.main-row.anulada td { color:#94a3b8; }
+    tbody tr.main-row.anulada .strike { text-decoration:line-through; }
+    tbody tr.detail-row { display:none; background:#fafbfc; }
+    tbody tr.detail-row.show { display:table-row; }
+    tbody tr.detail-row td { padding:0 14px 14px; border-bottom:2px solid #e2e8f0; }
+    .detail-inner { display:flex; gap:24px; flex-wrap:wrap; }
+    .detail-box { flex:1; min-width:220px; }
+    .detail-box h4 { font-size:12px; font-weight:600; color:#64748b; text-transform:uppercase; margin-bottom:6px; letter-spacing:.5px; }
+    .detail-box table { font-size:12px; }
+    .detail-box table th { font-size:10px; padding:6px 10px; background:#f1f5f9; }
+    .detail-box table td { font-size:12px; padding:6px 10px; }
+
+    .badge-anulada { background:#fef2f2; color:#dc2626; font-weight:700; padding:2px 8px; border-radius:10px; font-size:11px; }
+    .badge-completada { background:#dcfce7; color:#059669; }
+    .badge-pendiente { background:#fef3c7; color:#d97706; }
+
+    .btn-xs { padding:4px 8px; font-size:11px; border-radius:4px; }
+    .btn-sm { padding:7px 14px; font-size:13px; border-radius:6px; }
+    .btn-icon { background:none; border:none; cursor:pointer; color:#64748b; padding:4px 6px; border-radius:4px; font-size:13px; transition:all .12s; }
+    .btn-icon:hover { background:#f1f5f9; color:#4f46e5; }
+    .btn-icon.danger:hover { background:#fef2f2; color:#dc2626; }
+
+    .pagination { display:flex; gap:4px; align-items:center; justify-content:center; margin-top:16px; flex-wrap:wrap; }
+    .pagination button { padding:7px 12px; border:1px solid #e2e8f0; background:#fff; border-radius:6px; font-size:13px; cursor:pointer; transition:all .12s; color:#475569; }
+    .pagination button:hover:not(:disabled) { background:#f1f5f9; }
+    .pagination button:disabled { opacity:.4; cursor:default; }
+    .pagination button.active { background:#4f46e5; color:#fff; border-color:#4f46e5; font-weight:600; }
+    .pagination span { font-size:12px; color:#94a3b8; margin:0 8px; }
+
+    .empty-state { text-align:center; padding:48px 20px; color:#94a3b8; }
+    .empty-state i { font-size:40px; color:#cbd5e1; display:block; margin-bottom:12px; }
+
+    .export-bar { display:flex; justify-content:flex-end; margin-bottom:12px; }
+
+    /* Edit modal specific */
+    .edit-items-table { width:100%; border-collapse:collapse; margin-bottom:12px; }
+    .edit-items-table th { font-size:11px; padding:6px; background:#f8fafc; }
+    .edit-items-table td { padding:4px; }
+    .edit-items-table input { width:60px; padding:4px; border:1px solid #e2e8f0; border-radius:4px; font-size:12px; text-align:center; }
+    .edit-section { margin-bottom:16px; }
+    .edit-section h4 { font-size:13px; font-weight:600; color:#475569; margin-bottom:8px; display:flex; align-items:center; gap:6px; }
+    .pago-row { display:flex; gap:8px; align-items:center; margin-bottom:6px; }
+    .pago-row select, .pago-row input { padding:6px 8px; border:1px solid #e2e8f0; border-radius:4px; font-size:12px; }
+    .pago-row input { width:90px; }
+
+    @media(max-width:768px) {
+      .kpi-grid { grid-template-columns:repeat(2, 1fr); }
+      .detail-inner { flex-direction:column; }
+    }
+
+    /* View Switcher */
+    .view-switcher { display:flex; gap:4px; margin-bottom:16px; background:#f1f5f9; padding:4px; border-radius:10px; width:fit-content; }
+    .view-btn { padding:8px 16px; border:none; background:transparent; border-radius:8px; font-size:13px; cursor:pointer; color:#64748b; transition:all .15s; display:flex; align-items:center; gap:6px; font-family:inherit; }
+    .view-btn:hover { background:#e2e8f0; }
+    .view-btn.active { background:#fff; color:#4f46e5; font-weight:600; box-shadow:0 1px 3px rgba(0,0,0,.08); }
+
+    /* Cards View */
+    .cards-view { display:none; }
+    .cards-view.active { display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:16px; }
+    .sale-card { background:#fff; border-radius:12px; padding:16px; border:1px solid #e2e8f0; transition:all .15s; cursor:pointer; }
+    .sale-card:hover { box-shadow:0 4px 12px rgba(0,0,0,.08); border-color:#4f46e5; }
+    .sale-card.anulada { opacity:.6; background:#fef2f2; }
+    .sale-card-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+    .sale-card-id { font-size:12px; color:#64748b; font-weight:600; }
+    .sale-card-status { font-size:11px; padding:3px 8px; border-radius:10px; font-weight:600; }
+    .sale-card-status.completada { background:#dcfce7; color:#059669; }
+    .sale-card-status.anulada { background:#fef2f2; color:#dc2626; }
+    .sale-card-client { font-size:14px; font-weight:600; color:#1e293b; margin-bottom:4px; }
+    .sale-card-date { font-size:12px; color:#94a3b8; margin-bottom:12px; }
+    .sale-card-items { font-size:12px; color:#64748b; margin-bottom:12px; padding:8px; background:#f8fafc; border-radius:6px; }
+    .sale-card-footer { display:flex; justify-content:space-between; align-items:center; padding-top:12px; border-top:1px solid #f1f5f9; }
+    .sale-card-total { font-size:18px; font-weight:700; color:#4f46e5; }
+    .sale-card-payments { display:flex; gap:4px; }
+    .sale-card-payments span { font-size:10px; padding:2px 6px; background:#f1f5f9; border-radius:4px; color:#64748b; }
+
+    /* Charts View */
+    .charts-view { display:none; }
+    .charts-view.active { display:block; }
+    .list-view { display:block; }
+    .list-view:not(.active) { display:none; }
+    .charts-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(400px, 1fr)); gap:20px; margin-bottom:20px; }
+    .chart-card { background:#fff; border-radius:12px; padding:20px; border:1px solid #e2e8f0; }
+    .chart-card h3 { font-size:14px; font-weight:600; color:#1e293b; margin-bottom:16px; display:flex; align-items:center; gap:8px; }
+    .chart-card h3 i { color:#4f46e5; }
+    .chart-container { position:relative; height:250px; }
+    .bar-chart { display:flex; align-items:flex-end; justify-content:space-around; height:200px; padding:0 10px; border-bottom:2px solid #e2e8f0; }
+    .bar-item { display:flex; flex-direction:column; align-items:center; gap:8px; flex:1; max-width:60px; }
+    .bar { width:100%; background:linear-gradient(180deg, #4f46e5, #818cf8); border-radius:4px 4px 0 0; min-height:4px; transition:all .3s; position:relative; }
+    .bar:hover { opacity:.8; }
+    .bar-label { font-size:10px; color:#64748b; text-align:center; }
+    .bar-value { font-size:10px; color:#1e293b; font-weight:600; }
+    .donut-chart { display:flex; align-items:center; justify-content:center; gap:30px; }
+    .donut-legend { display:flex; flex-direction:column; gap:8px; }
+    .legend-item { display:flex; align-items:center; gap:8px; font-size:12px; }
+    .legend-color { width:12px; height:12px; border-radius:3px; }
+    .stats-list { display:flex; flex-direction:column; gap:12px; }
+    .stat-item { display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:#f8fafc; border-radius:8px; }
+    .stat-item-label { font-size:13px; color:#64748b; }
+    .stat-item-value { font-size:14px; font-weight:700; color:#1e293b; }
+  </style>
 </head>
 <body>
   <nav class="navbar">
     <div class="navbar-container">
-      <div class="logo">
-        <a href="#">Blue Cat</a>
-      </div>
+      <a href="../public/Inicio.html" class="navbar-logo">
+        <img src="../assets/img/Blue-Cat_logo-removebg.png" alt="Blue-Cat">
+        <span>Blue-Cat</span>
+      </a>
       <div class="menu">
-        <ul>
-          <li><a href="Inicio.html"><i class="fas fa-home"></i> Inicio</a></li>
-          <li><a href="inventario.html"><i class="fas fa-box"></i> Inventario</a></li>
-          <li><a href="punto_de_venta.html"><i class="fas fa-cash-register"></i> Punto de Venta</a></li>
-          <li><a href="cuadre_de_ventas.html"><i class="fas fa-clipboard-check"></i> Cuadre</a></li>
-        </ul>
+        <ul></ul>
       </div>
     </div>
   </nav>
 
-  <main class="ventas-container">
-    <section class="ventas-header">
-      <div>
-        <h1>Ventas</h1>
-        <p id="alcance_ventas">--</p>
-      </div>
-      <div class="toolbar">
-        <select id="periodo_ventas" aria-label="Periodo de ventas">
-          <option value="siempre" selected>Todas</option>
-          <option value="hoy">Hoy</option>
-          <option value="semana">Ultimos 7 dias</option>
-          <option value="mes">Ultimo mes</option>
-        </select>
-        <input type="search" id="buscar_venta" placeholder="Buscar venta">
-        <button type="button" id="recargar_ventas"><i class="fas fa-sync-alt"></i> Recargar</button>
-      </div>
-    </section>
+  <div class="page-container">
+    <div class="page-title"><i class="fas fa-shopping-cart"></i> Ventas</div>
 
-    <section class="summary-grid" aria-label="Resumen de ventas">
-      <div class="summary-item">
-        <span>Total ventas</span>
-        <strong id="total_ventas">--</strong>
-      </div>
-      <div class="summary-item">
-        <span>Monto vendido</span>
-        <strong id="monto_vendido">--</strong>
-      </div>
-      <div class="summary-item">
-        <span>Efectivo</span>
-        <strong id="efectivo_total">--</strong>
-      </div>
-      <div class="summary-item">
-        <span>Tarjeta</span>
-        <strong id="tarjeta_total">--</strong>
-      </div>
-      <div class="summary-item">
-        <span>Transferencia</span>
-        <strong id="transferencia_total">--</strong>
-      </div>
-    </section>
+    <!-- Period presets -->
+    <div class="period-bar">
+      <button class="period-btn active" data-periodo="hoy" onclick="setPeriodo('hoy')">Hoy</button>
+      <button class="period-btn" data-periodo="ayer" onclick="setPeriodo('ayer')">Ayer</button>
+      <button class="period-btn" data-periodo="esta_semana" onclick="setPeriodo('esta_semana')">Esta Semana</button>
+      <button class="period-btn" data-periodo="este_mes" onclick="setPeriodo('este_mes')">Este Mes</button>
+      <button class="period-btn" data-periodo="este_ano" onclick="setPeriodo('este_año')">Este Año</button>
+      <button class="period-btn" data-periodo="personalizado" onclick="setPeriodo('personalizado')">Personalizado</button>
+    </div>
 
-    <section class="table-panel">
-      <div class="table-meta">
-        <span id="estado_carga">Cargando ventas...</span>
+    <!-- Custom date range -->
+    <div class="period-custom" id="custom-dates">
+      <label>Desde:</label>
+      <input type="date" id="fecha-desde" onchange="loadVentas()">
+      <label>Hasta:</label>
+      <input type="date" id="fecha-hasta" onchange="loadVentas()">
+    </div>
+
+    <!-- KPI Cards -->
+    <div class="kpi-grid" id="kpi-row">
+      <div class="kpi-card"><div class="kpi-icon blue"><i class="fas fa-receipt"></i></div><div><div class="kpi-num" id="kpi-total">0</div><div class="kpi-label"># Ventas</div></div></div>
+      <div class="kpi-card"><div class="kpi-icon green"><i class="fas fa-dollar-sign"></i></div><div><div class="kpi-num" id="kpi-monto">$0</div><div class="kpi-label">Monto Total</div></div></div>
+      <div class="kpi-card"><div class="kpi-icon purple"><i class="fas fa-chart-line"></i></div><div><div class="kpi-num" id="kpi-ticket">$0</div><div class="kpi-label">Ticket Promedio</div></div></div>
+      <div class="kpi-card"><div class="kpi-icon red"><i class="fas fa-ban"></i></div><div><div class="kpi-num" id="kpi-anuladas">0</div><div class="kpi-label">Anuladas</div></div></div>
+      <div class="kpi-card"><div class="kpi-icon teal"><i class="fas fa-money-bill-wave"></i></div><div><div class="kpi-num" id="kpi-efectivo">$0</div><div class="kpi-label">Efectivo</div></div></div>
+      <div class="kpi-card"><div class="kpi-icon blue"><i class="fas fa-credit-card"></i></div><div><div class="kpi-num" id="kpi-tarjeta">$0</div><div class="kpi-label">Tarjeta</div></div></div>
+      <div class="kpi-card"><div class="kpi-icon rose"><i class="fas fa-exchange-alt"></i></div><div><div class="kpi-num" id="kpi-transferencia">$0</div><div class="kpi-label">Transferencia</div></div></div>
+    </div>
+
+    <!-- Toolbar + Filters -->
+    <div class="toolbar">
+      <div class="search-wrapper">
+        <i class="fas fa-search"></i>
+        <input type="text" id="search-ventas" placeholder="Buscar por código, cliente o empleado..." oninput="doSearch()">
       </div>
-      <div class="table-wrap">
+    </div>
+    <div class="filter-bar">
+      <select id="filter-empleado" onchange="loadVentas()">
+        <option value="">Todos los empleados</option>
+      </select>
+      <select id="filter-metodo" onchange="loadVentas()">
+        <option value="">Todos los métodos</option>
+        <option value="EFECTIVO">Efectivo</option>
+        <option value="TARJETA">Tarjeta</option>
+        <option value="TRANSFERENCIA">Transferencia</option>
+        <option value="MIXTO">Mixto</option>
+      </select>
+      <select id="filter-estado" onchange="loadVentas()">
+        <option value="">Todos los estados</option>
+        <option value="COMPLETADA">Completada</option>
+        <option value="ANULADA">Anulada</option>
+        <option value="PENDIENTE">Pendiente</option>
+      </select>
+    </div>
+
+    <!-- Export -->
+    <div class="export-bar" id="export-bar">
+      <button class="btn btn-outline btn-sm" onclick="exportCSV()"><i class="fas fa-file-csv"></i> Exportar CSV</button>
+    </div>
+
+    <!-- View Switcher -->
+    <div class="view-switcher">
+      <button class="view-btn active" data-view="lista" onclick="switchView('lista')"><i class="fas fa-list"></i> Lista</button>
+      <button class="view-btn" data-view="graficos" onclick="switchView('graficos')"><i class="fas fa-chart-bar"></i> Gráficos</button>
+      <button class="view-btn" data-view="tarjetas" onclick="switchView('tarjetas')"><i class="fas fa-th-large"></i> Tarjetas</button>
+    </div>
+
+    <!-- List View (Default) -->
+    <div id="view-lista" class="list-view active">
+      <!-- Sales Table -->
+      <div class="table-container card">
         <table>
           <thead>
             <tr>
-              <th>Fecha</th>
-              <th>Folio</th>
+              <th>#</th>
+              <th>Fecha / Hora</th>
               <th>Empleado</th>
-              <th>Caja</th>
-              <th>Documento</th>
               <th>Cliente</th>
+              <th>Items</th>
               <th>Total</th>
-              <th>Pagado</th>
-              <th>Cambio</th>
-              <th>Metodos</th>
+              <th>Pagos</th>
+              <th>Estado</th>
+              <th>Acciones</th>
             </tr>
           </thead>
-          <tbody id="ventas_body"></tbody>
+          <tbody id="ventas-tbody"></tbody>
         </table>
+        <div class="empty-state" id="ventas-empty" style="display:none;">
+          <i class="fas fa-shopping-cart"></i>
+          <p>No se encontraron ventas</p>
+        </div>
       </div>
-      <div id="ventas_empty" class="empty-state">No hay ventas para mostrar.</div>
-    </section>
-  </main>
+
+      <!-- Pagination -->
+      <div class="pagination" id="pagination"></div>
+    </div>
+
+    <!-- Charts View -->
+    <div id="view-graficos" class="charts-view">
+      <div class="charts-grid">
+        <div class="chart-card">
+          <h3><i class="fas fa-chart-line"></i> Ventas por Día</h3>
+          <div class="chart-container">
+            <div class="bar-chart" id="chart-ventas-dia"></div>
+          </div>
+        </div>
+        <div class="chart-card">
+          <h3><i class="fas fa-chart-pie"></i> Métodos de Pago</h3>
+          <div class="chart-container">
+            <div class="donut-chart" id="chart-metodos-pago"></div>
+          </div>
+        </div>
+        <div class="chart-card">
+          <h3><i class="fas fa-trophy"></i> Top Productos</h3>
+          <div class="stats-list" id="chart-top-productos"></div>
+        </div>
+        <div class="chart-card">
+          <h3><i class="fas fa-users"></i> Ventas por Empleado</h3>
+          <div class="stats-list" id="chart-ventas-empleado"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cards View -->
+    <div id="view-tarjetas" class="cards-view"></div>
+  </div>
+
+  <!-- Edit Modal -->
+  <div class="popup" id="edit-modal">
+    <div class="popup-content" style="max-width:700px;">
+      <span class="close-btn" onclick="closeEditModal()">&times;</span>
+      <h2><i class="fas fa-edit"></i> Editar Venta <span id="edit-id-label"></span></h2>
+      <div id="edit-body" class="modal-body">
+        <div class="edit-section">
+          <h4><i class="fas fa-box"></i> Productos</h4>
+          <table class="edit-items-table">
+            <thead><tr><th>Producto</th><th>Cantidad</th><th>Precio Unitario</th><th>Total</th></tr></thead>
+            <tbody id="edit-items-tbody"></tbody>
+          </table>
+        </div>
+        <div class="edit-section">
+          <h4><i class="fas fa-credit-card"></i> Pagos</h4>
+          <div id="edit-pagos"></div>
+        </div>
+        <div class="edit-section">
+          <h4><i class="fas fa-comment"></i> Motivo de Edición</h4>
+          <textarea id="edit-motivo" rows="2" placeholder="Motivo de la modificación..."></textarea>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button class="btn btn-outline btn-sm" onclick="closeEditModal()">Cancelar</button>
+          <button class="btn btn-primary btn-sm" onclick="saveEdit()"><i class="fas fa-save"></i> Guardar Cambios</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete / Anular Modal -->
+  <div class="popup" id="delete-modal">
+    <div class="popup-content">
+      <span class="close-btn" onclick="closeDeleteModal()">&times;</span>
+      <h2><i class="fas fa-ban" style="color:#dc2626;"></i> Anular Venta</h2>
+      <p id="delete-msg" style="color:#475569;margin-bottom:14px;font-size:14px;">¿Está seguro de que desea anular esta venta?</p>
+      <label>Motivo de Anulación</label>
+      <textarea id="delete-motivo" rows="2" placeholder="Motivo de la anulación..." style="min-height:60px;"></textarea>
+      <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;">
+        <button class="btn btn-outline btn-sm" onclick="closeDeleteModal()">Cancelar</button>
+        <button class="btn btn-danger btn-sm" onclick="confirmDelete()" id="confirm-delete-btn"><i class="fas fa-trash"></i> Confirmar Anulación</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cerrar sesión -->
+  <div id="cerrar-sesion-popup" class="popup">
+    <div class="popup-content">
+      <span class="close-btn" onclick="CloseSesionPopUp()">&times;</span>
+      <h2><i class="fas fa-sign-out-alt"></i> Cerrar Sesión</h2>
+      <p>¿Está seguro de que desea cerrar sesión?</p>
+      <button class="btn btn-danger" onclick="cerrarSesion()" style="width:100%;justify-content:center;">Cerrar Sesión</button>
+    </div>
+  </div>
 
   <script src="../assets/js/ventas.js"></script>
+  <script src="../assets/js/login_pvt.js?v=2"></script>
+  <script src="../assets/js/navbar.js?v=2"></script>
 </body>
 </html>

@@ -25,9 +25,22 @@ function validateLogin() {
   xhr.open('POST', 'assets/PHP/login.php', true);
   xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
   xhr.onreadystatechange = function() {
-      if (xhr.readyState === 4 && xhr.status === 200) {
+      if (xhr.readyState === 4) {
+          var data = null;
+          try {
+              data = JSON.parse(xhr.responseText);
+          } catch (error) {
+              data = { ok: false, mensaje: xhr.responseText || 'Error de inicio de sesion' };
+          }
           // Manejar la respuesta del servidor
-          alert(xhr.responseText); // Muestra la respuesta del servidor en una alerta
+          alert(data.mensaje || xhr.responseText); // Muestra la respuesta del servidor en una alerta
+          if (xhr.status >= 200 && xhr.status < 300 && data.ok) {
+              if (data.id_user) sessionStorage.setItem('user_id', data.id_user);
+              if (data.nombre) sessionStorage.setItem('user_name', data.nombre);
+              if (data.nombre_completo) sessionStorage.setItem('nombre_completo', data.nombre_completo);
+              window.location.href = 'public/Inicio.html';//RUTA DE INICIO
+              return;
+          }
           // Si el inicio de sesión es exitoso, redirigir al usuario a otra página
           if (xhr.responseText.includes('Inicio de sesión exitoso')) {
               window.location.href = 'public/Inicio.html';//RUTA DE INICIO

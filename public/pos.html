@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Blue-Cat · POS</title>
+  <link rel="icon" href="../assets/img/Blue-Cat_logo-removebg.png" type="image/png">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+  <link rel="stylesheet" href="../assets/css/blue-cat.css">
+  <link rel="stylesheet" href="../assets/css/pos.css">
+</head>
+<body>
+  <nav class="navbar"><div class="navbar-container">
+    <a href="../public/Inicio.html" class="navbar-logo"><img src="../assets/img/Blue-Cat_logo-removebg.png" alt="Blue-Cat"><span>Blue-Cat</span></a>
+    <div class="menu"><ul></ul></div>
+  </div></nav>
+
+  <div class="pos-layout">
+    <!-- LEFT SIDEBAR -->
+    <div class="pos-sidebar">
+      <div class="section">
+        <div class="section-title"><i class="fas fa-cash-register"></i> Caja</div>
+        <div class="stat"><span class="label">Estado</span><span class="val" id="caja-status"><span class="badge badge-CERRADA">Cerrada</span></span></div>
+        <div class="stat"><span class="label">Monto</span><span class="val green" id="caja-monto">$0</span></div>
+        <div class="stat"><span class="label">Caja</span><span class="val" id="caja-codigo">—</span></div>
+        <div class="stat"><span class="label">Cajas activas</span><span class="val" id="db-cajas">0</span></div>
+        <button class="sidebar-btn" id="caja-action-btn" onclick="showAbrirCaja()"><i class="fas fa-plus"></i> Abrir Caja</button>
+        <button class="sidebar-btn" id="caja-mov-btn" style="display:none;" onclick="showMovimiento('INGRESO')"><i class="fas fa-arrow-down"></i> Ingreso Manual</button>
+        <button class="sidebar-btn" onclick="showMovimiento('EGRESO')"><i class="fas fa-arrow-up"></i> Egreso / Retiro</button>
+      </div>
+
+      <div class="section">
+        <div class="section-title"><i class="fas fa-chart-bar"></i> Hoy</div>
+        <div class="stat"><span class="label">Ventas</span><span class="val green" id="db-ventas-hoy">$0</span></div>
+        <div class="stat"><span class="label">Cantidad</span><span class="val" id="db-cant-hoy">0</span></div>
+        <div class="stat"><span class="label">Del mes</span><span class="val blue" id="db-ventas-mes">$0</span></div>
+        <div class="stat"><span class="label">Cant. mes</span><span class="val" id="db-cant-mes">0</span></div>
+        <div class="stat"><span class="label">Anuladas</span><span class="val amber" id="db-anuladas">0</span></div>
+        <div class="stat"><span class="label">Devoluciones</span><span class="val amber" id="db-devo">$0</span></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title"><i class="fas fa-box"></i> Stock</div>
+        <div class="stat"><span class="label">Bajo stock</span><span class="val amber" id="db-stock-bajo">0</span></div>
+        <div class="stat"><span class="label">Sin stock</span><span class="val" style="color:#dc2626;" id="db-sin-stock">0</span></div>
+        <div class="stat"><span class="label">Clientes</span><span class="val blue" id="db-clientes">0</span></div>
+        <div class="stat"><span class="label">Promociones</span><span class="val" id="db-promos">0</span></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title"><i class="fas fa-bolt"></i> Acciones</div>
+        <button class="sidebar-btn" onclick="showHistorial()"><i class="fas fa-history"></i> Historial (F4)</button>
+        <button class="sidebar-btn" onclick="showCotizacionesList()"><i class="fas fa-file-invoice"></i> Cotizaciones</button>
+        <button class="sidebar-btn" onclick="showPromoManager()"><i class="fas fa-tags"></i> Promociones</button>
+        <button class="sidebar-btn" onclick="clearCart()"><i class="fas fa-trash"></i> Limpiar Carrito</button>
+      </div>
+    </div>
+
+    <!-- CENTER - PRODUCTS -->
+    <div class="pos-center">
+      <div class="pos-toolbar">
+        <input type="text" id="search-input" placeholder="Buscar por nombre, código de barras o SKU... (/)">
+        <div class="cat-filters" id="cat-filters"></div>
+      </div>
+      <div class="pos-grid" id="product-grid">
+        <div class="loading"><i class="fas fa-spinner fa-spin"></i>Cargando productos...</div>
+      </div>
+    </div>
+
+    <!-- RIGHT - CART -->
+    <div class="pos-cart">
+      <div class="cart-header">
+        <h3><i class="fas fa-shopping-cart"></i> Carrito</h3>
+        <span class="count" id="cart-count">0</span>
+      </div>
+      <div class="cart-items" id="cart-items">
+        <div class="loading" style="padding:20px;"><i class="fas fa-shopping-cart"></i>Carrito vacío</div>
+      </div>
+      <div class="cart-totals">
+        <div class="row">
+          <span class="lbl">Subtotal (<span id="cart-items-count">0</span> ítems)</span>
+          <span id="cart-subtotal">$0</span>
+        </div>
+        <div class="row" id="promo-tag"></div>
+        <div class="row">
+          <span class="lbl">Descuento</span>
+          <span id="cart-dcto" style="color:#059669;">-$0</span>
+        </div>
+        <div class="row total">
+          <span>TOTAL</span>
+          <span id="cart-total">$0</span>
+        </div>
+        <div class="promo-input">
+          <input type="text" id="promo-input" placeholder="Código promocional" onkeydown="if(event.key==='Enter')applyPromo()">
+          <button onclick="applyPromo()"><i class="fas fa-tag"></i></button>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;font-size:12px;">
+          <span id="cart-client" style="color:#64748b;cursor:pointer;" onclick="showClientSelector()"><i class="fas fa-user"></i> Consumidor Final</span>
+          <span style="color:#94a3b8;">F2=Cobrar</span>
+        </div>
+      </div>
+      <div class="cart-actions">
+        <button class="pay-btn primary" onclick="showPayment()"><i class="fas fa-check-circle"></i> Cobrar <span id="cart-total-val" style="display:none;">0</span></button>
+        <button class="pay-btn secondary" onclick="showCotizacion()"><i class="fas fa-file-invoice"></i> Cotizar</button>
+        <button class="pay-btn secondary" onclick="showClientSelector()"><i class="fas fa-user"></i> Cliente</button>
+        <button class="pay-btn danger" onclick="clearCart()"><i class="fas fa-trash"></i> Vaciar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cerrar sesión -->
+  <div id="cerrar-sesion-popup" class="popup"><div class="popup-content">
+    <span class="close-btn" onclick="CloseSesionPopUp()">&times;</span>
+    <h2><i class="fas fa-sign-out-alt"></i> Cerrar Sesión</h2>
+    <p>¿Está seguro de que desea cerrar sesión?</p>
+    <button class="btn btn-danger" onclick="cerrarSesion()" style="width:100%;justify-content:center;">Cerrar Sesión</button>
+  </div></div>
+
+  <script src="../assets/js/pos.js?v=7"></script>
+  <script src="../assets/js/login_pvt.js"></script>
+  <script src="../assets/js/navbar.js"></script>
+</body>
+</html>

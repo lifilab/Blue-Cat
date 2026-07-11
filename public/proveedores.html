@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Blue-Cat · Proveedores</title>
+  <link rel="icon" href="../assets/img/Blue-Cat_logo-removebg.png" type="image/png">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+  <link rel="stylesheet" href="../assets/css/blue-cat.css">
+  <style>
+    :root { --primary: #4f46e5; --bg: #f1f5f9; }
+    * { margin:0;padding:0;box-sizing:border-box; }
+    body { font-family:'Segoe UI',system-ui,sans-serif; background:var(--bg); color:#1e293b; }
+
+    /* KPI */
+    .kpi-grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:18px; }
+    .kpi-card { background:#fff;border-radius:14px;padding:16px 18px;border:1px solid #e2e8f0; }
+    .kpi-card .lbl { font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.4px; }
+    .kpi-card .val { font-size:22px;font-weight:700;color:#1e293b;margin-top:4px; }
+    .kpi-card .val.money { color:var(--primary); }
+    .kpi-card.danger .val { color:#dc2626; }
+    .kpi-card.success .val { color:#059669; }
+
+    /* Toolbar */
+    .bar { display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px; }
+    .bar input,.bar select { padding:8px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;outline:none;font-family:inherit;background:#fff; }
+    .bar input:focus,.bar select:focus { border-color:var(--primary); }
+    .bar .sp { flex:1; }
+
+    /* Table */
+    .tw { overflow-x:auto; }
+    table.w100 { width:100%;border-collapse:collapse;font-size:13px; }
+    table.w100 th { background:#f8fafc;padding:10px 12px;text-align:left;font-weight:600;color:#475569;border-bottom:2px solid #e2e8f0;white-space:nowrap; }
+    table.w100 td { padding:10px 12px;border-bottom:1px solid #f1f5f9;color:#1e293b; }
+    table.w100 tr:hover td { background:#f8fafc; }
+    .badge-ACTIVO { background:#ecfdf5;color:#059669; }
+    .badge-INACTIVO { background:#f1f5f9;color:#64748b; }
+    .badge-SUSPENDIDO,.badge-BLOQUEADO { background:#fef2f2;color:#dc2626; }
+    .badge-PENDIENTE { background:#fffbeb;color:#d97706; }
+    .bi { width:32px;height:32px;border:none;border-radius:8px;cursor:pointer;font-size:13px;transition:all .15s;background:transparent;color:#94a3b8; }
+    .bi:hover { background:#f1f5f9;color:#1e293b; }
+    .bi.green:hover { background:#ecfdf5;color:#059669; }
+    .bi.red:hover { background:#fef2f2;color:#dc2626; }
+
+    /* Modals */
+    .mo { display:none;position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.6);backdrop-filter:blur(4px);align-items:center;justify-content:center; }
+    .mo.show { display:flex; }
+    .mc { background:#fff;border-radius:20px;padding:28px 32px;width:540px;max-width:94%;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.18); }
+    .mc.wide { width:700px; }
+    .mcb { display:flex;gap:8px;margin-top:18px; }
+    .mcb button { flex:1;padding:12px;font-size:14px;font-weight:600;border:none;border-radius:12px;cursor:pointer;font-family:inherit;transition:all .18s;display:flex;align-items:center;justify-content:center;gap:6px; }
+    .btn-p { background:linear-gradient(135deg,var(--primary),#4338ca);color:#fff; }
+    .btn-p:hover { transform:translateY(-2px); }
+    .btn-g { background:#f1f5f9;color:#475569;border:1px solid #e2e8f0; }
+    .btn-g:hover { background:#e2e8f0; }
+    .btn-d { background:linear-gradient(135deg,#dc2626,#b91c1c);color:#fff; }
+    .btn-d:hover { transform:translateY(-2px); }
+    .fld { margin-bottom:10px; }
+    .fld label { font-size:12px;font-weight:600;color:#475569;display:block;margin-bottom:4px; }
+    .fld input,.fld select,.fld textarea { width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;outline:none;font-family:inherit;background:#fff;transition:border-color .15s; }
+    .fld input:focus,.fld select:focus,.fld textarea:focus { border-color:var(--primary); }
+
+    /* Profile tabs */
+    .tabs { display:flex;gap:4px;margin-bottom:16px;border-bottom:2px solid #e2e8f0;padding-bottom:0; }
+    .tab { padding:10px 18px;font-size:13px;font-weight:500;color:#64748b;cursor:pointer;border-radius:10px 10px 0 0;transition:all .15s;border:1px solid transparent;margin-bottom:-2px; }
+    .tab:hover { background:#f8fafc; }
+    .tab.active { color:var(--primary);font-weight:600;background:#fff;border-color:#e2e8f0 #e2e8f0 #fff; }
+    .tab-pane { display:none; }
+    .tab-pane.active { display:block; }
+
+    .tag { display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:500;background:#eef2ff;color:var(--primary);margin:1px; }
+    .gr2 { display:grid;grid-template-columns:1fr 1fr;gap:10px; }
+    @media(max-width:768px){ .gr2 { grid-template-columns:1fr; } .kpi-grid { grid-template-columns:repeat(2,1fr); } }
+  </style>
+</head>
+<body>
+  <nav class="navbar"><div class="navbar-container">
+    <a href="../public/Inicio.html" class="navbar-logo"><img src="../assets/img/Blue-Cat_logo-removebg.png" alt="Blue-Cat"><span>Blue-Cat</span></a>
+    <div class="menu"><ul></ul></div>
+  </div></nav>
+
+  <div class="page-container">
+    <div class="page-title"><i class="fas fa-truck"></i> Proveedores</div>
+
+    <!-- KPIs -->
+    <div class="kpi-grid" id="kpis">
+      <div class="kpi-card"><div class="lbl">Total</div><div class="val" id="kp-total">0</div></div>
+      <div class="kpi-card success"><div class="lbl">Activos</div><div class="val" id="kp-activos">0</div></div>
+      <div class="kpi-card danger"><div class="lbl">Bloqueados</div><div class="val" id="kp-bloqueados">0</div></div>
+      <div class="kpi-card warn"><div class="lbl">Pendientes</div><div class="val" id="kp-pendientes">0</div></div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="bar">
+      <input type="text" id="sq" placeholder="Buscar por RUT, razón social, correo..." style="width:280px;" onkeyup="ds()">
+      <select id="sf" onchange="loadProv()"><option value="">Todos</option><option value="ACTIVO">Activos</option><option value="INACTIVO">Inactivos</option><option value="SUSPENDIDO">Suspendidos</option><option value="BLOQUEADO">Bloqueados</option><option value="PENDIENTE">Pendientes</option></select>
+      <div class="sp"></div>
+      <button class="btn btn-primary btn-sm" onclick="showCreate()"><i class="fas fa-plus"></i> Nuevo Proveedor</button>
+    </div>
+
+    <!-- Table -->
+    <div class="card"><div class="card-header"><h2><i class="fas fa-truck"></i> Proveedores</h2></div>
+    <div class="card-body">
+      <div class="tw">
+        <table class="w100"><thead><tr>
+          <th>Código</th><th>RUT</th><th>Razón Social</th><th>Ciudad</th><th>Teléfono</th><th>Correo</th><th>Estado</th><th>Acciones</th>
+        </tr></thead><tbody id="ptb"></tbody></table>
+        <div id="pe" style="display:none;text-align:center;padding:40px;color:#94a3b8;">
+          <i class="fas fa-truck" style="font-size:32px;display:block;margin-bottom:8px;"></i>No hay proveedores
+        </div>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- Create/Edit modal -->
+  <div class="mo" id="cm"><div class="mc wide"><div id="cbody"></div></div></div>
+
+  <!-- Profile modal -->
+  <div class="mo" id="pm"><div class="mc wide" style="width:780px;"><div id="pbody"></div></div></div>
+
+  <!-- Cerrar sesión -->
+  <div id="cerrar-sesion-popup" class="popup"><div class="popup-content">
+    <span class="close-btn" onclick="CloseSesionPopUp()">&times;</span>
+    <h2><i class="fas fa-sign-out-alt"></i> Cerrar Sesión</h2>
+    <p>¿Está seguro de que desea cerrar sesión?</p>
+    <button class="btn btn-danger" onclick="cerrarSesion()" style="width:100%;justify-content:center;">Cerrar Sesión</button>
+  </div></div>
+
+  <script src="../assets/js/proveedores.js"></script>
+  <script src="../assets/js/login_pvt.js"></script>
+  <script src="../assets/js/navbar.js"></script>
+</body>
+</html>

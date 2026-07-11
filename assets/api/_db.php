@@ -192,6 +192,67 @@ function reponerStock(mysqli $conn, int $id_producto, int $id_bodega, int $canti
     return $affected;
 }
 
+function actualizarStock(mysqli $conn, int $id_producto, int $id_bodega, string $campo, float $delta): int {
+    $allowed = ['disponible', 'reservado', 'comprometido', 'en_transito', 'danado', 'bloqueado', 'devuelto', 'produccion'];
+    if (!in_array($campo, $allowed, true)) {
+        throw new InvalidArgumentException('Campo de stock invalido.');
+    }
+    if ($id_producto <= 0 || $id_bodega <= 0) {
+        throw new InvalidArgumentException('Producto o bodega invalida.');
+    }
+
+    $sql = "SELECT id_stock, {$campo}
+            FROM stock
+            WHERE id_producto = ?
+              AND id_bodega   = ?
+            LIMIT 1
+            FOR UPDATE";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param('ii', $id_producto, $id_bodega);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result->fetch_assoc();
+    $stmt->close();
+
+    if ($row) {
+        $nuevo = (float) $row[$campo] + $delta;
+        if ($nuevo < 0) {
+            throw new RuntimeException('Stock insuficiente.');
+        }
+        $id_stock = (int) $row['id_stock'];
+        $sql = "UPDATE stock SET {$campo} = ? WHERE id_stock = ?";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param('di', $nuevo, $id_stock);
+        $stmt->execute();
+        $affected = $stmt->affected_rows;
+        $stmt->close();
+    } else {
+        if ($delta < 0) {
+            throw new RuntimeException('Stock insuficiente.');
+        }
+        $sql = "INSERT INTO stock (id_producto, id_bodega, {$campo}) VALUES (?, ?, ?)";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param('iid', $id_producto, $id_bodega, $delta);
+        $stmt->execute();
+        $affected = $stmt->affected_rows;
+        $stmt->close();
+    }
+
+    $stmt = $conn->prepare("SELECT COALESCE(SUM(disponible), 0) AS total FROM stock WHERE id_producto = ?");
+    $stmt->bind_param('i', $id_producto);
+    $stmt->execute();
+    $totalRow = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    $total = (float) ($totalRow['total'] ?? 0);
+    $stmt = $conn->prepare("UPDATE producto SET cantidad = ? WHERE id_producto = ?");
+    $stmt->bind_param('di', $total, $id_producto);
+    $stmt->execute();
+    $stmt->close();
+
+    return $affected;
+}
+
 function actualizarKardex(
     mysqli $conn,
     int    $uid,

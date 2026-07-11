@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Blue-Cat · CRM</title>
+  <link rel="icon" href="../assets/img/Blue-Cat_logo-removebg.png" type="image/png">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+  <link rel="stylesheet" href="../assets/css/blue-cat.css">
+  <style>
+    .page-layout { display:flex; gap:20px; }
+    .crm-sidebar { width:200px; flex-shrink:0; background:#fff; border-radius:12px; border:1px solid #e2e8f0; overflow:hidden; }
+    .crm-sidebar ul { list-style:none; padding:8px; margin:0; }
+    .crm-sidebar li { display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:8px; cursor:pointer; font-size:14px; color:#475569; transition:all .12s; margin-bottom:2px; }
+    .crm-sidebar li:hover { background:#f1f5f9; }
+    .crm-sidebar li.active { background:#eef2ff; color:#4f46e5; font-weight:600; }
+    .crm-sidebar li i { width:18px; text-align:center; font-size:14px; }
+    .crm-content { flex:1; min-width:0; }
+
+    #stats-bar { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:18px; }
+    .stat { background:#fff; border-radius:10px; padding:14px 16px; display:flex; align-items:center; gap:12px; box-shadow:0 1px 3px rgba(0,0,0,.06); border:1px solid #e2e8f0; }
+    .stat-icon { width:36px; height:36px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:15px; flex-shrink:0; }
+    .stat-icon.blue { background:#eef2ff; color:#4f46e5; }
+    .stat-icon.green { background:#ecfdf5; color:#059669; }
+    .stat-icon.amber { background:#fffbeb; color:#d97706; }
+    .stat-icon.red { background:#fef2f2; color:#dc2626; }
+    .stat-icon.purple { background:#f5f3ff; color:#7c3aed; }
+    .stat-num { font-size:18px; font-weight:700; color:#1e293b; line-height:1.1; }
+    .stat-label { font-size:11px; color:#64748b; margin-top:2px; }
+
+    .toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
+    .toolbar .search-wrapper { position:relative; flex:1; min-width:180px; max-width:300px; }
+    .toolbar .search-wrapper i { position:absolute; left:12px; top:50%; transform:translateY(-50%); color:#94a3b8; font-size:14px; }
+    .toolbar .search-wrapper input { width:100%; padding:9px 12px 9px 36px; border:1px solid #e2e8f0; border-radius:8px; font-size:14px; outline:none; transition:border .15s; box-sizing:border-box; }
+    .toolbar .search-wrapper input:focus { border-color:#4f46e5; }
+
+    .table-container { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; font-size:14px; }
+    thead th { background:#f8fafc; padding:10px 14px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; color:#64748b; border-bottom:2px solid #e2e8f0; white-space:nowrap; text-align:left; }
+    tbody td { padding:10px 14px; vertical-align:middle; border-bottom:1px solid #f1f5f9; }
+    tbody tr:hover { background:#f8fafc; }
+    tbody tr:nth-child(even) { background:#fafbfc; }
+
+    .badge-success { background:#dcfce7; color:#059669; }
+    .badge-warning { background:#fef3c7; color:#d97706; }
+    .badge-danger { background:#fef2f2; color:#dc2626; }
+    .badge-info { background:#e0f2fe; color:#0284c7; }
+    .badge-gray { background:#f1f5f9; color:#64748b; }
+    .badge-purple { background:#f5f3ff; color:#7c3aed; }
+
+    .empty-state { text-align:center; padding:48px 20px; color:#94a3b8; }
+    .empty-state i { font-size:40px; color:#cbd5e1; display:block; margin-bottom:12px; }
+
+    .section-title { display:none; }
+    .section-title.active { display:block; }
+    .section-title h2 { font-size:18px; font-weight:700; color:#1e293b; margin:0 0 4px; }
+    .section-title p { font-size:13px; color:#64748b; margin:0 0 16px; }
+
+    .filter-bar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+    .filter-bar select, .filter-bar input { padding:7px 10px; border:1px solid #e2e8f0; border-radius:6px; font-size:13px; }
+
+    .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+
+    .btn-sm { padding:7px 14px; font-size:13px; border-radius:6px; }
+    .btn-xs { padding:4px 8px; font-size:11px; border-radius:4px; }
+
+    .modal-body { max-height:70vh; overflow-y:auto; }
+    .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .form-grid .full { grid-column:1/-1; }
+    .form-grid label { font-size:12px; font-weight:600; color:#475569; display:block; margin-bottom:3px; }
+    .form-grid input, .form-grid select, .form-grid textarea { width:100%; padding:8px 10px; border:1px solid #e2e8f0; border-radius:6px; font-size:13px; box-sizing:border-box; }
+
+    .tab-bar { display:flex; gap:4px; margin-bottom:16px; flex-wrap:wrap; }
+    .tab-btn { padding:7px 14px; border-radius:6px; font-size:13px; cursor:pointer; border:1px solid transparent; background:#f1f5f9; color:#475569; transition:all .12s; }
+    .tab-btn.active { background:#eef2ff; color:#4f46e5; border-color:#c7d2fe; font-weight:600; }
+    .tab-btn:hover:not(.active) { background:#e2e8f0; }
+
+    .profile-tabs { display:flex; gap:0; border-bottom:2px solid #e2e8f0; margin-bottom:16px; }
+    .profile-tab { padding:8px 16px; cursor:pointer; font-size:13px; color:#64748b; border-bottom:2px solid transparent; margin-bottom:-2px; transition:all .12s; }
+    .profile-tab:hover { color:#4f46e5; }
+    .profile-tab.active { color:#4f46e5; border-bottom-color:#4f46e5; font-weight:600; }
+    .profile-pane { display:none; }
+    .profile-pane.active { display:block; }
+
+    @media(max-width:900px) { .page-layout { flex-direction:column; } .crm-sidebar { width:100%; } .grid-2 { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="navbar-container">
+      <a href="../public/Inicio.html" class="navbar-logo">
+        <img src="../assets/img/Blue-Cat_logo-removebg.png" alt="Blue-Cat">
+        <span>Blue-Cat</span>
+      </a>
+      <div class="menu">
+        <ul></ul>
+      </div>
+    </div>
+  </nav>
+
+  <div class="page-container">
+    <div class="page-title"><i class="fas fa-users"></i> Clientes CRM</div>
+
+    <div class="page-layout">
+      <div class="crm-sidebar">
+        <ul>
+          <li class="active" data-section="dashboard" onclick="switchCrm('dashboard')"><i class="fas fa-tachometer-alt"></i> Dashboard</li>
+          <li data-section="clientes" onclick="switchCrm('clientes')"><i class="fas fa-user-tie"></i> Clientes</li>
+          <li data-section="actividades" onclick="switchCrm('actividades')"><i class="fas fa-tasks"></i> Actividades</li>
+          <li data-section="creditos" onclick="switchCrm('creditos')"><i class="fas fa-credit-card"></i> Créditos</li>
+          <li data-section="reportes" onclick="switchCrm('reportes')"><i class="fas fa-chart-pie"></i> Reportes</li>
+          <li data-section="auditoria" onclick="switchCrm('auditoria')"><i class="fas fa-history"></i> Auditoría</li>
+        </ul>
+      </div>
+
+      <div class="crm-content">
+        <!-- DASHBOARD -->
+        <div id="crm-dashboard" class="section-title active">
+          <div id="stats-bar"></div>
+          <div class="grid-2">
+            <div class="card"><div class="card-header"><h2><i class="fas fa-clock"></i> Últimos Clientes</h2></div><div class="card-body"><div class="table-container"><table><thead><tr><th>Cliente</th><th>Razón Social</th><th>Ciudad</th><th>Fecha</th></tr></thead><tbody id="t-ultimos-clientes"></tbody></table></div></div></div>
+            <div class="card"><div class="card-header"><h2><i class="fas fa-star"></i> Top Clientes</h2></div><div class="card-body"><div class="table-container"><table><thead><tr><th>Cliente</th><th>Total Compras</th><th>Visitas</th></tr></thead><tbody id="t-top-clientes"></tbody></table></div></div></div>
+          </div>
+        </div>
+
+        <!-- CLIENTES -->
+        <div id="crm-clientes" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-user-tie"></i> Clientes</h2><button class="btn btn-primary btn-sm" onclick="showClienteForm()"><i class="fas fa-plus"></i> Nuevo</button></div>
+          <div class="card-body">
+            <div class="toolbar">
+              <div class="search-wrapper"><i class="fas fa-search"></i><input type="text" id="search-clientes" class="input" placeholder="Buscar cliente..." oninput="loadClientes()"></div>
+              <select id="filter-estado" onchange="loadClientes()"><option value="">Todos</option><option value="activo">Activos</option><option value="inactivo">Inactivos</option><option value="bloqueado">Bloqueados</option></select>
+              <select id="filter-tipo" onchange="loadClientes()"><option value="">Todos los tipos</option></select>
+              <select id="filter-ciudad" onchange="loadClientes()"><option value="">Todas las ciudades</option></select>
+              <span id="client-count" style="font-size:13px;color:#94a3b8;"></span>
+            </div>
+            <div class="table-container">
+              <table><thead><tr><th>Código</th><th>Nombre</th><th>Razón Social</th><th>RUT</th><th>Ciudad</th><th>Total Compras</th><th>Estado</th><th></th></tr></thead><tbody id="tbody-clientes"></tbody></table>
+            </div>
+          </div></div>
+        </div>
+
+        <!-- ACTIVIDADES -->
+        <div id="crm-actividades" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-tasks"></i> Actividades</h2><button class="btn btn-primary btn-sm" onclick="showActividadForm()"><i class="fas fa-plus"></i> Nueva</button></div>
+          <div class="card-body">
+            <div class="toolbar">
+              <select id="filter-act-estado" onchange="loadActividades()"><option value="">Todos los estados</option><option value="pendiente">Pendiente</option><option value="completada">Completada</option><option value="cancelada">Cancelada</option></select>
+            </div>
+            <div class="table-container">
+              <table><thead><tr><th>Tipo</th><th>Asunto</th><th>Cliente</th><th>Fecha Planificada</th><th>Estado</th><th></th></tr></thead><tbody id="tbody-actividades"></tbody></table>
+            </div>
+          </div></div>
+        </div>
+
+        <!-- CRÉDITOS -->
+        <div id="crm-creditos" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-credit-card"></i> Créditos de Clientes</h2></div>
+          <div class="card-body">
+            <div class="table-container">
+              <table><thead><tr><th>Cliente</th><th>Límite</th><th>Utilizado</th><th>Disponible</th><th>Estado</th><th></th></tr></thead><tbody id="tbody-creditos"></tbody></table>
+            </div>
+          </div></div>
+        </div>
+
+        <!-- REPORTES -->
+        <div id="crm-reportes" class="section-title">
+          <div class="tab-bar">
+            <button class="tab-btn active" onclick="switchReporte('abc',this)">ABC</button>
+            <button class="tab-btn" onclick="switchReporte('morosidad',this)">Morosidad</button>
+          </div>
+          <div class="card"><div class="card-header"><h2 id="reporte-title"><i class="fas fa-file-alt"></i> Reporte</h2></div>
+          <div class="card-body"><div class="table-container"><table id="reporte-table"><thead id="reporte-thead"></thead><tbody id="tbody-reporte"></tbody></table></div></div></div>
+        </div>
+
+        <!-- AUDITORÍA -->
+        <div id="crm-auditoria" class="section-title">
+          <div class="card"><div class="card-header"><h2><i class="fas fa-history"></i> Auditoría CRM</h2></div>
+          <div class="card-body">
+            <div class="toolbar"><select id="filter-nivel" onchange="loadAuditoria()"><option value="">Todos los niveles</option><option value="INFO">INFO</option><option value="WARNING">WARNING</option><option value="ERROR">ERROR</option></select></div>
+            <div class="table-container"><table><thead><tr><th>Fecha</th><th>Usuario</th><th>Acción</th><th>Entidad</th><th>ID</th><th>Detalle</th><th>Nivel</th></tr></thead><tbody id="tbody-auditoria-crm"></tbody></table></div>
+          </div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL -->
+  <div class="popup" id="crm-modal">
+    <div class="popup-content" style="max-width:700px;">
+      <span class="close-btn" onclick="closeCrmModal()">&times;</span>
+      <div id="crm-modal-body"></div>
+    </div>
+  </div>
+
+  <!-- Perfil 360 modal (larger) -->
+  <div class="popup" id="crm-perfil-modal">
+    <div class="popup-content" style="max-width:800px;">
+      <span class="close-btn" onclick="closeCrmPerfil()">&times;</span>
+      <div id="crm-perfil-body"></div>
+    </div>
+  </div>
+
+  <!-- Cerrar sesión -->
+  <div id="cerrar-sesion-popup" class="popup">
+    <div class="popup-content">
+      <span class="close-btn" onclick="CloseSesionPopUp()">&times;</span>
+      <h2><i class="fas fa-sign-out-alt"></i> Cerrar Sesión</h2>
+      <p id="p-cerrar-sesion">¿Está seguro de que desea cerrar sesión?</p>
+      <button class="btn btn-danger" onclick="cerrarSesion()" style="width:100%;justify-content:center;">Cerrar Sesión</button>
+    </div>
+  </div>
+
+  <script src="../assets/js/crm.js"></script>
+  <script src="../assets/js/login_pvt.js"></script>
+  <script src="../assets/js/navbar.js"></script>
+</body>
+</html>
