@@ -10,6 +10,8 @@ permissions:
 jobs:
   package:
     runs-on: windows-latest
+    env:
+      WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
     steps:
       - uses: actions/checkout@v4
       - name: Validate
@@ -32,7 +34,7 @@ jobs:
           format: spdx-json
           output-file: dist/Blue-Cat-${{ github.ref_name }}.spdx.json
       - name: Sign artifact when certificate is configured
-        if: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 != '' }}
+        if: env.WINDOWS_SIGNING_CERT_BASE64 != ''
         shell: pwsh
         env:
           SIGN_CERT: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
