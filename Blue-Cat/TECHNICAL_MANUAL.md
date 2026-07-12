@@ -352,12 +352,12 @@ Blue-Cat/
 
 ### Autenticación
 
-**POST /assets/api/compat/login.php**
+**POST /assets/api/auth.php?accion=login**
 - Descripción: Iniciar sesión
 - Parámetros: username, password, csrf_token
 - Respuesta: JSON con mensaje de éxito/error
 
-**POST /assets/api/compat/cerrar_sesion.php**
+**POST /assets/api/auth.php?accion=logout**
 - Descripción: Cerrar sesión
 - Respuesta: JSON con mensaje de éxito
 

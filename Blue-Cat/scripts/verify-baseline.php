@@ -32,13 +32,7 @@ foreach ([$root.'/VERSION',$root.'/BETA_SCOPE.md',$root.'/GOVERNANCE.md',$root.'
 $version = trim((string) file_get_contents($root . '/VERSION'));
 if (!preg_match('/^0\.\d+\.\d+(?:-beta\.\d+)?$/', $version)) $errors[] = 'VERSION inválida: ' . $version;
 
-$legacyAllowlist = array_values(array_filter(array_map('trim', file($root . '/docs/legacy-api-allowlist.txt'))));
-sort($legacyAllowlist);
-$legacyActual = array_map('basename', glob($root . '/assets/api/compat/*.php') ?: []);
-sort($legacyActual);
-if ($legacyActual !== $legacyAllowlist) {
-    $errors[] = "Cambió la superficie legacy sin migración explícita.\nEsperado: ".implode(', ',$legacyAllowlist)."\nActual: ".implode(', ',$legacyActual);
-}
+if (is_dir($root . '/assets/api/compat')) $errors[] = 'La API de compatibilidad debe permanecer eliminada.';
 
 if ($errors) {
     fwrite(STDERR, "Baseline falló:\n\n" . implode("\n\n", $errors) . "\n");

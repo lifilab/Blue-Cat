@@ -1,8 +1,0 @@
-_db.php
-cerrar_sesion.php
-create_account.php
-formulario_apertura.php
-listar_ventas.php
-login.php
-obtener_validar_sesion.php
-subir_archivo.php

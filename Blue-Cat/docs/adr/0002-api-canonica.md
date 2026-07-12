@@ -1,19 +1,26 @@
 # ADR-0002: API canónica
 
-- Estado: Aceptado
+- Estado: Aceptado y completado
 - Fecha: 2026-07-12
 - Responsable: Pablo-Millones
 
 ## Contexto
 
-Existen endpoints modernos en `assets/api/` y scripts históricos en `assets/PHP/`. Algunos flujos todavía referencian la generación histórica, lo que duplica autenticación, acceso a datos y reglas de negocio.
+El proyecto mantuvo dos generaciones de backend: `assets/api/` y `assets/PHP/`. Varios flujos duplicaban autenticación, caja, ventas, importación y acceso a datos.
 
 ## Decisión
 
-`assets/api/` es la única ubicación permitida para nuevos endpoints. Los puentes indispensables se concentran temporalmente en `assets/api/compat/`: no reciben funcionalidades y sus consumidores deben migrarse por flujo antes de eliminar cada archivo. La carpeta `assets/PHP/` queda eliminada. CI impide agregar nuevos scripts o nuevas referencias legacy.
+`assets/api/` es la única raíz de backend. Los consumidores históricos se migraron a:
+
+- `auth.php` para login, registro, estado y logout;
+- `pos.php` para apertura/cierre y ventas;
+- `ventas.php` para consultas de pedidos;
+- `importar_productos.php` para importación autorizada.
+
+Las carpetas `assets/PHP/` y `assets/api/compat/` quedan prohibidas. CI falla si reaparece compatibilidad.
 
 ## Consecuencias
 
-- La eliminación completa será incremental y verificable, sin romper login o caja.
-- Toda corrección de seguridad compartida se implementa en `assets/api/_db.php`.
-- La Beta no puede salir mientras existan consumidores runtime de `assets/api/compat/`.
+- Existe una sola conexión, sesión y verificación de permisos compartida.
+- Nuevas funciones se incorporan al controlador de su dominio.
+- Los contratos antiguos no justifican duplicar reglas de negocio.

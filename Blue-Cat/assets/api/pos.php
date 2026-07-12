@@ -80,11 +80,11 @@ if ($method === 'GET') {
     $action = $data->action ?? $data->accion ?? '';
 
     switch ($action) {
-        case 'caja_abrir':          POST_caja_abrir($data);       break;
-        case 'caja_cerrar':         POST_caja_cerrar($data);      break;
+        case 'caja_abrir':          if (!verificarPermiso('pos','abrir_caja')) json(['error'=>true,'message'=>'Permiso denegado'],403); POST_caja_abrir($data); break;
+        case 'caja_cerrar':         if (!verificarPermiso('pos','cerrar_caja')) json(['error'=>true,'message'=>'Permiso denegado'],403); POST_caja_cerrar($data); break;
         case 'caja_movimiento':     POST_caja_movimiento($data);  break;
-        case 'venta_crear':         POST_venta_crear($data);      break;
-        case 'venta_anular':        POST_venta_anular($data);     break;
+        case 'venta_crear':         if (!verificarPermiso('pos','realizar_venta')) json(['error'=>true,'message'=>'Permiso denegado'],403); POST_venta_crear($data); break;
+        case 'venta_anular':        if (!verificarPermiso('pos','cancelar_venta')) json(['error'=>true,'message'=>'Permiso denegado'],403); POST_venta_anular($data); break;
         case 'cliente_crear':       POST_cliente_crear($data);    break;
         case 'promocion_crear':     POST_promocion_crear($data);  break;
         case 'promocion_validar':   POST_promocion_validar($data);break;
@@ -828,6 +828,9 @@ function POST_caja_abrir($data) {
         $stmt->execute();
         $stmt->close();
 
+        $stmt = $conn->prepare('UPDATE usuario SET validar_sesion=2 WHERE id_user=?');
+        $stmt->bind_param('i',$uid); $stmt->execute(); $stmt->close();
+
         insertAuditoria($conn, $uid, 'caja_abrir', "Caja {$idCaja} abierta con monto {$montoApertura}", $idCaja, 'pos_caja');
 
         $conn->commit();
@@ -902,6 +905,9 @@ function POST_caja_cerrar($data) {
         $stmt->bind_param('i', $idSesion);
         $stmt->execute();
         $stmt->close();
+
+        $stmt = $conn->prepare('UPDATE usuario SET validar_sesion=1 WHERE id_user=?');
+        $stmt->bind_param('i',$uid); $stmt->execute(); $stmt->close();
 
         insertAuditoria($conn, $uid, 'caja_cerrar', "Caja {$idCaja} cerrada. Esperado: {$esperado}, Real: {$montoReal}, Dif: {$diferencia}", $idCaja, 'pos_caja');
 
