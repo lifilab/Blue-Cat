@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Blue-Cat · Facturas</title>
+  <link rel="icon" href="../assets/img/Blue-Cat_logo-removebg.png" type="image/png">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+  <link rel="stylesheet" href="../assets/css/blue-cat.css">
+  <style>
+    .kpi-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:12px; margin-bottom:20px; }
+    .kpi-card { background:#fff; border-radius:14px; padding:16px 18px; border:1px solid #e2e8f0; }
+    .kpi-card .kpi-label { font-size:11px; font-weight:600; color:#64748b; text-transform:uppercase; letter-spacing:.4px; }
+    .kpi-card .kpi-value { font-size:22px; font-weight:700; color:#1e293b; margin-top:4px; }
+    .kpi-card .kpi-value.money { color:#4f46e5; }
+    .kpi-card .kpi-sub { font-size:12px; color:#94a3b8; margin-top:2px; }
+    .kpi-card.danger .kpi-value { color:#dc2626; }
+    .kpi-card.success .kpi-value { color:#059669; }
+    .kpi-card.warn .kpi-value { color:#d97706; }
+    .toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+    .toolbar .spacer { flex:1; }
+    .toolbar input, .toolbar select { padding:8px 12px; border:1.5px solid #e2e8f0; border-radius:8px; font-size:13px; outline:none; font-family:inherit; background:#fff; }
+    .toolbar input:focus, .toolbar select:focus { border-color:#4f46e5; }
+    .table-wrap { overflow-x:auto; }
+    .table-wrap table { width:100%; border-collapse:collapse; font-size:13px; }
+    .table-wrap th { background:#f8fafc; padding:10px 12px; text-align:left; font-weight:600; color:#475569; border-bottom:2px solid #e2e8f0; white-space:nowrap; }
+    .table-wrap td { padding:10px 12px; border-bottom:1px solid #f1f5f9; color:#1e293b; }
+    .table-wrap tr:hover td { background:#f8fafc; }
+    .badge-emitida { background:#eef2ff; color:#4f46e5; }
+    .badge-pagada { background:#ecfdf5; color:#059669; }
+    .badge-parcial { background:#fffbeb; color:#d97706; }
+    .badge-anulada { background:#fef2f2; color:#dc2626; }
+    .badge-vencida { background:#fef2f2; color:#dc2626; }
+    .badge-borrador { background:#f1f5f9; color:#64748b; }
+    .btn-icon { width:32px;height:32px;border:none;border-radius:8px;cursor:pointer;font-size:13px;transition:all .15s ease;background:transparent;color:#94a3b8; }
+    .btn-icon:hover { background:#f1f5f9; color:#1e293b; }
+    .btn-icon.danger:hover { background:#fef2f2; color:#dc2626; }
+    .btn-icon.success:hover { background:#ecfdf5; color:#059669; }
+    .pagination { display:flex;align-items:center;gap:6px;justify-content:center;margin-top:16px;font-size:13px; }
+    .pagination button { padding:6px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;cursor:pointer;font-weight:500;transition:all .15s ease; }
+    .pagination button:hover { background:#f1f5f9;border-color:#cbd5e1; }
+    .pagination button.active { background:#4f46e5;color:#fff;border-color:#4f46e5; }
+    .pagination button:disabled { opacity:.4;cursor:default; }
+    .detail-grid { display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:14px; }
+    .detail-section { }
+    .detail-section h4 { font-size:13px;font-weight:600;color:#1e293b;margin-bottom:8px;display:flex;align-items:center;gap:6px; }
+    .detail-section h4 i { color:#4f46e5; }
+    .detail-row { display:flex;padding:4px 0;font-size:12px; }
+    .detail-row .dl { color:#64748b;min-width:120px; }
+    .detail-row .dv { color:#1e293b;font-weight:500; }
+    .historial-item { padding:6px 0;border-bottom:1px solid #f1f5f9;font-size:12px;display:flex;gap:8px; }
+    .historial-item .hi-date { color:#94a3b8;min-width:120px; }
+    .historial-item .hi-action { color:#4f46e5;font-weight:600;min-width:100px; }
+    .historial-item .hi-user { color:#64748b;min-width:80px; }
+    .historial-item .hi-detail { color:#1e293b; }
+    .modal-overlay { display:none;position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.6);backdrop-filter:blur(4px);align-items:center;justify-content:center; }
+    .modal-overlay.show { display:flex; }
+    .modal-content { background:#fff;border-radius:20px;padding:28px 32px;width:520px;max-width:94%;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.18); }
+    @media(max-width:768px){ .kpi-grid { grid-template-columns:repeat(2,1fr); } .detail-grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <nav class="navbar"><div class="navbar-container">
+    <a href="../public/Inicio.html" class="navbar-logo"><img src="../assets/img/Blue-Cat_logo-removebg.png" alt="Blue-Cat"><span>Blue-Cat</span></a>
+    <div class="menu"><ul></ul></div>
+  </div></nav>
+
+  <div class="page-container">
+    <div class="page-title"><i class="fas fa-file-invoice"></i> Facturación</div>
+
+    <!-- KPIs -->
+    <div class="kpi-grid" id="kpi-grid">
+      <div class="kpi-card"><div class="kpi-label">Hoy</div><div class="kpi-value money" id="kpi-hoy-monto">$0</div><div class="kpi-sub" id="kpi-hoy-cant">0 facturas</div></div>
+      <div class="kpi-card"><div class="kpi-label">Este Mes</div><div class="kpi-value money" id="kpi-mes-monto">$0</div><div class="kpi-sub" id="kpi-mes-cant">0 facturas</div></div>
+      <div class="kpi-card warn"><div class="kpi-label">Pendientes</div><div class="kpi-value" id="kpi-pendientes-monto">$0</div><div class="kpi-sub" id="kpi-pendientes-cant">0 facturas</div></div>
+      <div class="kpi-card danger"><div class="kpi-label">Vencidas</div><div class="kpi-value" id="kpi-vencidas-monto">$0</div><div class="kpi-sub" id="kpi-vencidas-cant">0 facturas</div></div>
+      <div class="kpi-card success"><div class="kpi-label">Pagadas</div><div class="kpi-value" id="kpi-pagadas-monto">$0</div><div class="kpi-sub" id="kpi-pagadas-cant">0 facturas</div></div>
+      <div class="kpi-card"><div class="kpi-label">Clientes</div><div class="kpi-value" id="kpi-clientes">0</div><div class="kpi-sub">registrados</div></div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <input type="text" id="search-q" placeholder="Buscar por folio, cliente, RUT..." style="width:260px;" onkeyup="debounceSearch()">
+      <select id="filter-estado" onchange="loadFacturas()"><option value="">Todos los estados</option><option value="BORRADOR">Borrador</option><option value="EMITIDA">Emitida</option><option value="ACEPTADA">Aceptada</option><option value="PAGADA">Pagada</option><option value="PARCIAL">Parcial</option><option value="VENCIDA">Vencida</option><option value="ANULADA">Anulada</option></select>
+      <input type="date" id="filter-desde" onchange="loadFacturas()" style="width:140px;">
+      <input type="date" id="filter-hasta" onchange="loadFacturas()" style="width:140px;">
+      <button class="btn btn-outline btn-sm" onclick="exportCSV()"><i class="fas fa-file-csv"></i> CSV</button>
+      <div class="spacer"></div>
+      <button class="btn btn-primary btn-sm" onclick="showCreateModal()"><i class="fas fa-plus"></i> Nueva Factura</button>
+    </div>
+
+    <!-- Table -->
+    <div class="card">
+      <div class="card-header"><h2><i class="fas fa-list"></i> Facturas</h2></div>
+      <div class="card-body">
+        <div class="table-wrap">
+          <table><thead><tr>
+            <th>#</th><th>Folio</th><th>Cliente</th><th>RUT</th><th>Total</th><th>Pagado</th><th>Saldo</th><th>Estado</th><th>Fecha</th><th>Acciones</th>
+          </tr></thead><tbody id="facturas-tbody"></tbody></table>
+          <div id="empty-msg" style="display:none;text-align:center;padding:40px;color:#94a3b8;"><i class="fas fa-file-invoice" style="font-size:32px;display:block;margin-bottom:8px;"></i>No hay facturas</div>
+        </div>
+        <div class="pagination" id="pagination"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detail modal -->
+  <div class="modal-overlay" id="detail-modal"><div class="modal-content" id="detail-content"></div></div>
+
+  <!-- Create modal -->
+  <div class="modal-overlay" id="create-modal"><div class="modal-content" id="create-content"></div></div>
+
+  <!-- Pay modal -->
+  <div class="modal-overlay" id="pay-modal"><div class="modal-content" id="pay-content"></div></div>
+
+  <!-- Cerrar sesión -->
+  <div id="cerrar-sesion-popup" class="popup"><div class="popup-content">
+    <span class="close-btn" onclick="CloseSesionPopUp()">&times;</span>
+    <h2><i class="fas fa-sign-out-alt"></i> Cerrar Sesión</h2>
+    <p>¿Está seguro de que desea cerrar sesión?</p>
+    <button class="btn btn-danger" onclick="cerrarSesion()" style="width:100%;justify-content:center;">Cerrar Sesión</button>
+  </div></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="../assets/js/facturas.js"></script>
+  <script src="../assets/js/login_pvt.js"></script>
+  <script src="../assets/js/navbar.js"></script>
+</body>
+</html>

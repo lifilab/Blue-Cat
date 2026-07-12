@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Blue-Cat · Cuadre de Ventas</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+  <link rel="stylesheet" href="../assets/css/blue-cat.css">
+  <style>
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .summary-card {
+      background: #fff;
+      border-radius: 14px;
+      padding: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.08);
+      border: 1px solid #e2e8f0;
+    }
+    .summary-card .label {
+      font-size: 12px;
+      font-weight: 500;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+    }
+    .summary-card .value {
+      font-size: 22px;
+      font-weight: 700;
+      color: #1e293b;
+      margin-top: 6px;
+    }
+    .summary-card .value.money { color: #4f46e5; }
+    .summary-card .value.green { color: #059669; }
+    .summary-card .value.red { color: #dc2626; }
+    .detail-table { margin-top: 8px; }
+    .detail-table table td:first-child {
+      font-weight: 500;
+      color: #475569;
+      width: 220px;
+    }
+    .detail-table table td:last-child {
+      font-weight: 600;
+    }
+    .diferencia-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .diferencia-row input {
+      width: 120px;
+      padding: 8px 12px;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      outline: none;
+    }
+    .diferencia-row input:focus {
+      border-color: #4f46e5;
+      box-shadow: 0 0 0 3px rgba(79,70,229,.12);
+    }
+    .sales-section { margin-top: 28px; }
+    .sales-section .card-header h2 { font-size: 16px; }
+    .sales-table-wrap { overflow-x: auto; }
+    .sales-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .sales-table th {
+      background: #f8fafc;
+      padding: 10px 12px;
+      text-align: left;
+      font-weight: 600;
+      color: #475569;
+      border-bottom: 2px solid #e2e8f0;
+      white-space: nowrap;
+    }
+    .sales-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #f1f5f9;
+      color: #1e293b;
+      vertical-align: top;
+    }
+    .sales-table tr:hover td { background: #f8fafc; }
+    .sales-table .items-cell { max-width: 280px; }
+    .sales-table .items-cell small { display: block; color: #64748b; font-size: 11px; line-height: 1.4; }
+    .sales-table .pagos-cell small { display: block; color: #64748b; font-size: 11px; line-height: 1.4; }
+    .sales-table .actions-cell { white-space: nowrap; }
+    .btn-sm {
+      padding: 6px 12px;
+      font-size: 12px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: all .15s ease;
+      font-family: inherit;
+    }
+    .btn-sm-edit { background: #eef2ff; color: #4f46e5; }
+    .btn-sm-edit:hover { background: #e0e7ff; }
+    .btn-sm-delete { background: #fef2f2; color: #dc2626; }
+    .btn-sm-delete:hover { background: #fee2e2; }
+    .btn-sm:disabled { opacity: .4; cursor: not-allowed; }
+    .no-sales { text-align: center; padding: 32px; color: #94a3b8; font-size: 14px; }
+    .no-sales i { font-size: 32px; display: block; margin-bottom: 8px; }
+    .edit-input {
+      width: 100px;
+      padding: 6px 8px;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      text-align: center;
+      outline: none;
+      font-family: inherit;
+      transition: border-color .15s ease;
+    }
+    .edit-input:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,.1); }
+    .edit-row { background: #fffbeb !important; }
+
+    .edit-item-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      background: #f8fafc;
+      border-radius: 12px;
+      margin-bottom: 6px;
+      border: 1.5px solid #e2e8f0;
+      transition: all .2s ease;
+    }
+    .edit-item-row:hover { border-color: #c7d2fe; background: #f1f5f9; }
+    .edit-item-name {
+      flex: 1;
+      font-size: 13px;
+      font-weight: 500;
+      color: #1e293b;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      padding: 0 4px;
+    }
+    .edit-item-qty { width: 64px; text-align: center !important; }
+    .edit-item-price { width: 110px; text-align: center !important; }
+    .edit-item-qty-label, .edit-item-price-label {
+      font-size: 10px;
+      font-weight: 500;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: .3px;
+      display: block;
+      margin-bottom: 2px;
+    }
+    .edit-item-qty-wrap, .edit-item-price-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .edit-item-remove {
+      width: 32px;
+      height: 32px;
+      border: none;
+      border-radius: 8px;
+      background: #f1f5f9;
+      color: #94a3b8;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      transition: all .15s ease;
+      flex-shrink: 0;
+    }
+    .edit-item-remove:hover { background: #fef2f2; color: #dc2626; }
+    .edit-item-removed {
+      opacity: .55;
+      background: #fef2f2 !important;
+      border-color: #fecaca !important;
+    }
+    .edit-item-removed .edit-item-name { text-decoration: line-through; color: #dc2626; }
+    .edit-item-removed .edit-item-remove { background: #fee2e2; color: #dc2626; }
+    .edit-total-row {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 10px 0;
+      font-size: 14px;
+      font-weight: 600;
+      color: #1e293b;
+      border-top: 1px solid #e2e8f0;
+      margin-top: 6px;
+    }
+    .edit-total-row .total-value { color: #4f46e5; font-size: 18px; }
+
+    /* Toast (reuse from POS) */
+    .pos-toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      padding: 12px 20px;
+      background: #ecfdf5;
+      color: #065f46;
+      border: 1px solid #a7f3d0;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 500;
+      z-index: 9999;
+      box-shadow: 0 8px 24px rgba(0,0,0,.12);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transform: translateY(20px);
+      opacity: 0;
+      transition: all .3s ease;
+      pointer-events: none;
+    }
+    .pos-toast.show { transform: translateY(0); opacity: 1; }
+    .pos-toast i { color: #059669; font-size: 16px; }
+
+    .btn-cerrar-caja {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      width: 100%;
+      padding: 16px 24px;
+      background: linear-gradient(135deg, #dc2626, #b91c1c);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all .2s;
+      font-family: inherit;
+      margin-top: 24px;
+      box-shadow: 0 4px 12px rgba(220,38,38,.25);
+    }
+    .btn-cerrar-caja:hover { background: linear-gradient(135deg, #b91c1c, #991b1b); transform: translateY(-1px); box-shadow: 0 6px 16px rgba(220,38,38,.35); }
+    .btn-cerrar-caja:active { transform: translateY(0); }
+    .btn-cerrar-caja:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+    .btn-cerrar-caja i { font-size: 18px; }
+
+    .cerrar-section {
+      margin-top: 32px;
+      padding-top: 24px;
+      border-top: 2px solid #e2e8f0;
+    }
+    .cerrar-section h3 {
+      font-size: 16px;
+      font-weight: 700;
+      color: #1e293b;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .cerrar-section h3 i { color: #dc2626; }
+    .monto-real-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .monto-real-row label {
+      font-size: 14px;
+      font-weight: 600;
+      color: #475569;
+      min-width: 160px;
+    }
+    .monto-real-row input {
+      width: 160px;
+      padding: 10px 14px;
+      border: 2px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 700;
+      outline: none;
+      font-family: inherit;
+    }
+    .monto-real-row input:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,.12); }
+    .obs-row { margin-bottom: 16px; }
+    .obs-row label { display: block; font-size: 13px; font-weight: 600; color: #475569; margin-bottom: 6px; }
+    .obs-row textarea {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 13px;
+      outline: none;
+      font-family: inherit;
+      resize: vertical;
+      min-height: 50px;
+      box-sizing: border-box;
+    }
+    .obs-row textarea:focus { border-color: #4f46e5; }
+
+    @media print {
+      .navbar { display: none; }
+      .page-container { padding: 0; }
+      .summary-card { break-inside: avoid; }
+      .sales-section { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="navbar-container">
+      <a href="../public/Inicio.html" class="navbar-logo">
+        <img src="../assets/img/Blue-Cat_logo-removebg.png" alt="Blue-Cat">
+        <span>Blue-Cat</span>
+      </a>
+      <div class="menu">
+        <ul>
+          <li><a href="../public/Inicio.html"><i class="fas fa-home"></i> Inicio</a></li>
+          <li><a href="inventario.html"><i class="fas fa-box"></i> Inventario</a></li>
+          <li><a href="punto_de_venta.html"><i class="fas fa-cash-register"></i> POS</a></li>
+          <li><a href="#" onclick="openCerrarSesionPopup()"><i class="fas fa-sign-out-alt"></i> Salir</a></li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <div class="page-container">
+    <div class="page-title"><i class="fas fa-chart-line"></i> Cuadre de Ventas</div>
+
+    <div class="summary-grid" id="summary-cards">
+      <div class="summary-card">
+        <div class="label">Monto Apertura</div>
+        <div class="value money" id="monto_apertura">--</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">Efectivo</div>
+        <div class="value money" id="efectivo">--</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">Tarjeta</div>
+        <div class="value money" id="tarjeta">--</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">Transferencia</div>
+        <div class="value money" id="transferencia">--</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">Ventas de la sesión</div>
+        <div class="value money" id="monto_ventas">--</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">N° de ventas</div>
+        <div class="value" id="cantidad_ventas">--</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">Monto Total</div>
+        <div class="value green" id="monto_total">--</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">Diferencia</div>
+        <div class="value red" id="diferencia">--</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h2><i class="fas fa-info-circle"></i> Detalles de la Sesión</h2>
+      </div>
+      <div class="card-body">
+        <div class="detail-table">
+          <table>
+            <tr><td>Empleado</td><td id="empleado">--</td></tr>
+            <tr><td>Nota</td><td id="nota">--</td></tr>
+            <tr><td>Fecha de apertura</td><td id="fecha_apertura">--</td></tr>
+            <tr><td>Fecha de cierre</td><td id="fecha_cierre">--</td></tr>
+            <tr>
+              <td>Diferencia manual</td>
+              <td>
+                <div class="diferencia-row">
+                  <input type="number" id="inputDiferencia" placeholder="Monto real">
+                  <span id="diferencia-calculada" style="font-weight:700;color:#4f46e5;">$0</span>
+                </div>
+              </td>
+            </tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card sales-section" id="sales-section">
+    <div class="card-header">
+      <h2><i class="fas fa-receipt"></i> Detalle de Ventas de la Sesión</h2>
+      <button class="btn btn-outline" onclick="refreshSales()" style="padding:6px 14px;font-size:13px;"><i class="fas fa-sync-alt"></i> Refrescar</button>
+    </div>
+    <div class="card-body">
+      <div class="sales-table-wrap">
+        <table class="sales-table" id="sales-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Productos</th>
+              <th>Total</th>
+              <th>Pagos</th>
+              <th>Fecha</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="sales-tbody"></tbody>
+        </table>
+        <div class="no-sales" id="no-sales-msg" style="display:none;">
+          <i class="fas fa-receipt"></i> No hay ventas en esta sesión
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cerrar Caja Section -->
+  <div class="card cerrar-section" id="cerrar-section">
+    <h3><i class="fas fa-cash-register"></i> Cerrar Caja</h3>
+    <div class="monto-real-row">
+      <label>Monto Real en Caja *</label>
+      <input type="number" id="monto-real-cierre" min="0" placeholder="0">
+      <span id="diferencia-cierre" style="font-size:14px;font-weight:700;color:#64748b;"></span>
+    </div>
+    <div class="obs-row">
+      <label>Observaciones</label>
+      <textarea id="obs-cierre" rows="2" placeholder="Observaciones de cierre..."></textarea>
+    </div>
+    <button class="btn-cerrar-caja" id="btn-cerrar-caja" onclick="cerrarCajaFinal()">
+      <i class="fas fa-lock"></i> Cerrar Caja y Finalizar Sesión
+    </button>
+  </div>
+
+  <!-- Edit modal -->
+  <div id="edit-venta-modal" class="pos-modal">
+    <div class="pos-modal-box" style="width:560px;max-width:94%;padding:28px 32px;">
+      <div class="pos-modal-icon input-icon"><i class="fas fa-exchange-alt"></i></div>
+      <p style="font-weight:700;color:#1e293b;font-size:17px;margin-bottom:2px;">Editar Venta #<span id="edit-venta-id"></span></p>
+      <p style="font-size:13px;color:#64748b;margin-bottom:14px;">Modifica productos, cantidades, precios o métodos de pago</p>
+      <div id="edit-modal-body" style="text-align:left;max-height:55vh;overflow-y:auto;scrollbar-width:thin;">
+        <div style="margin-bottom:14px;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+            <span style="font-size:13px;font-weight:600;color:#1e293b;display:flex;align-items:center;gap:6px;"><i class="fas fa-box" style="color:#4f46e5;"></i> Productos</span>
+            <span style="font-size:11px;color:#94a3b8;">(marca <span style="color:#dc2626;">🗑️</span> para devolver)</span>
+          </div>
+          <div id="edit-items-list"></div>
+        </div>
+        <div style="padding-top:12px;border-top:2px solid #e2e8f0;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+            <span style="font-size:13px;font-weight:600;color:#1e293b;display:flex;align-items:center;gap:6px;"><i class="fas fa-coins" style="color:#4f46e5;"></i> Métodos de Pago</span>
+          </div>
+          <div id="edit-pagos-list"></div>
+        </div>
+      </div>
+      <div class="modal-actions" style="margin-top:18px;">
+        <button class="modal-btn modal-btn-ghost" onclick="document.getElementById('edit-venta-modal').style.display='none'">Cancelar</button>
+        <button class="modal-btn modal-btn-primary" id="edit-save-btn"><i class="fas fa-save"></i> Guardar Cambios</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete confirm modal -->
+  <div id="delete-venta-modal" class="pos-modal">
+    <div class="pos-modal-box" style="width:380px;">
+      <div class="pos-modal-icon warn"><i class="fas fa-trash-alt"></i></div>
+      <p style="font-weight:600;color:#1e293b;font-size:16px;">Eliminar Venta #<span id="delete-venta-id"></span></p>
+      <p style="font-size:14px;color:#64748b;margin-top:4px;">¿Estás seguro? Se restaurará el stock de los productos.</p>
+      <div class="modal-actions">
+        <button class="modal-btn modal-btn-ghost" onclick="document.getElementById('delete-venta-modal').style.display='none'">Cancelar</button>
+        <button class="modal-btn modal-btn-danger" id="delete-confirm-btn">Eliminar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="cerrar-sesion-popup" class="popup">
+    <div class="popup-content">
+      <span class="close-btn" onclick="CloseSesionPopUp()">&times;</span>
+      <h2><i class="fas fa-sign-out-alt"></i> Cerrar Sesión</h2>
+      <p id="p-cerrar-sesion">¿Está seguro de que desea cerrar sesión?</p>
+      <button class="btn btn-danger" onclick="cerrarSesion()" style="width:100%;justify-content:center;">Cerrar Sesión</button>
+    </div>
+  </div>
+
+  <script src="../assets/js/cuadre_de_ventas.js?v=4"></script>
+  <script src="../assets/js/navbar.js"></script>
+</body>
+</html>

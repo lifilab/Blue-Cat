@@ -1,0 +1,89 @@
+# Blue-Cat ERP - .gitignore
+
+# Variables de entorno
+.env
+.env.local
+.env.production
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Backups
+backups/
+*.sql.gz
+*.tar.gz
+*.zip
+
+# Archivos temporales
+*.tmp
+*.temp
+*~
+*.swp
+*.swo
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Composer
+vendor/
+composer.lock
+
+# Node (si se usa)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Build
+dist/
+build/
+*.min.js
+*.min.css
+
+# Cache
+cache/
+*.cache
+
+# Uploads (archivos de usuario)
+assets/uploads/*
+!assets/uploads/.gitkeep
+
+# Archivos de instalación (NO subir a producción)
+install_*.php
+fix_*.php
+check_*.php
+validar_*.php
+actualizar_*.php
+crear_*.php
+auditoria_*.php
+
+# Archivos de prueba
+test_*.php
+*_test.php
+
+# Documentación de desarrollo
+AUDITORIA_*.md
+INFORME_*.md
+
+# Archivos sensibles
+*.pem
+*.key
+*.crt
+*.cert
+
+# Config PHP
+config.php
+
+# Archivos de backup de BD
+*.bak
+*.backup
+*.old

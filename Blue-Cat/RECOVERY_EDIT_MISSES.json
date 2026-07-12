@@ -1,0 +1,324 @@
+[
+  {
+    "rel": "assets\\js\\inventario.js",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f21128e470015BUcwZQPf8fODQ",
+    "time_created": 1782966292040,
+    "old_preview": "function openPopup() {\n    document.getElementById(\"create-product-popup\").style.display = \"block\";\n  }\n  \n  function closePopup() {\n    document.getElementById"
+  },
+  {
+    "rel": "public\\inventario.html",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f21658583001JdQ03lhvV0ZCE5",
+    "time_created": 1782971729283,
+    "old_preview": "           <li><a href=\"cuadre_de_ventas.html\"><i class=\"fas fa-chart-line\"></i> Cuadre</a></li>\n           <li><a href=\"#\" onclick=\"openCerrarSesionPopup()\"><i"
+  },
+  {
+    "rel": "public\\cuadre_de_ventas.html",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f216593750013tfhSwHTV54ofV",
+    "time_created": 1782971732853,
+    "old_preview": "           <li><a href=\"punto_de_venta.html\"><i class=\"fas fa-cash-register\"></i> POS</a></li>\n           <li><a href=\"#\" onclick=\"openCerrarSesionPopup()\"><i c"
+  },
+  {
+    "rel": "public\\punto_de_venta.html",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f2165afec0010plr79Dt6Y9pjD",
+    "time_created": 1782971740140,
+    "old_preview": "           <li><a href=\"cuadre_de_ventas.html\"><i class=\"fas fa-chart-line\"></i> Cuadre de Ventas</a></li>\n           <li><a href=\"#\" onclick=\"openCerrarSesionP"
+  },
+  {
+    "rel": "public\\inventario.html",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f21753634001n3YOveArjwuXMa",
+    "time_created": 1782972757557,
+    "old_preview": "           <li><a href=\"punto_de_venta.html\"><i class=\"fas fa-cash-register\"></i> POS</a></li>"
+  },
+  {
+    "rel": "public\\cuadre_de_ventas.html",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f217548ba0010jYfA4xzz5vJ9D",
+    "time_created": 1782972762298,
+    "old_preview": "           <li><a href=\"punto_de_venta.html\"><i class=\"fas fa-cash-register\"></i> POS</a></li>"
+  },
+  {
+    "rel": "public\\punto_de_venta.html",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f2175827d0016Lc1OVuaF48pE6",
+    "time_created": 1782972777085,
+    "old_preview": "           <li><a href=\"inventario.html\"><i class=\"fas fa-box\"></i> Inventario</a></li>"
+  },
+  {
+    "rel": "assets\\PHP\\cuadre_de_ventas.php",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f2a05a227001C7tDAhDS7tHU5M",
+    "time_created": 1783116440104,
+    "old_preview": "// Consulta para obtener los datos de ventas desde la última sesión del usuario\n$sql_ventas = $conn->prepare(\"SELECT SUM(precio_total) AS monto_total FROM detal"
+  },
+  {
+    "rel": "assets\\PHP\\cuadre_de_ventas.php",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f2a05b71d001h3dsvwcH40Pn7f",
+    "time_created": 1783116445469,
+    "old_preview": "$sql_metodos_pago = $conn->prepare(\"\nSELECT \n    SUM(CASE WHEN m.nombre_metodo_pago = 'Efectivo' THEN m.monto - COALESCE(p.diferencia, 0) ELSE 0 END) AS efectiv"
+  },
+  {
+    "rel": "assets\\PHP\\cuadre_de_ventas.php",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f2a05d0c4001U69x8hRPsd2eUe",
+    "time_created": 1783116452036,
+    "old_preview": "$sql_cigarros = $conn->prepare(\"\nSELECT \n    dp.id_detalle_pedido, \n    dp.id_pedido, \n    dp.id_producto, \n    dp.precio_total, \n    p.categoria, \n    -- Selec"
+  },
+  {
+    "rel": "assets\\PHP\\cuadre_de_ventas.php",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f2a06794c00172GbuXJ8f6iuCJ",
+    "time_created": 1783116495180,
+    "old_preview": "// Consulta para obtener los datos de ventas desde la última sesión del usuario\n$sql_ventas = $conn->prepare(\"SELECT SUM(dp.precio_total) AS monto_total FROM de"
+  },
+  {
+    "rel": "assets\\api\\inventario.php",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f2abf772c001qMSXo8Ipy0IT4x",
+    "time_created": 1783128618797,
+    "old_preview": "    $id = (int)$conn->insert_id;\n    $stmt->close();\n    invLog($conn, $uid, 'CREAR', 'marca', $id, ['nombre'=>$nombre]);\n    json(['success'=>true, 'id'=>$id],"
+  },
+  {
+    "rel": "assets\\api\\inventario.php",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f2ac032070011NV5XcbHn2R4vp",
+    "time_created": 1783128666631,
+    "old_preview": "    $id = (int)$conn->insert_id;\n    $stmt->close();\n    invLog($conn, $uid, 'CREAR', 'marca', $id, ['nombre'=>$nombre]);\n    json(['success'=>true, 'id'=>$id],"
+  },
+  {
+    "rel": "assets\\api\\inventario.php",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f2ac06de4001NkGXdY3eo0ObvL",
+    "time_created": 1783128681956,
+    "old_preview": "    invLog($conn, $uid, 'CREAR', 'marca', $id, ['nombre'=>$nombre]);\n    json(['success'=>true, 'id'=>$id], 201);\n\n// ─── ALERTAS ───"
+  },
+  {
+    "rel": "public\\cuadre_de_ventas.html",
+    "session_id": "ses_0d50c4537ffel3bJICh3OGqds6",
+    "part_id": "prt_f2af51e7e001kbf5nkb6TCCkgl",
+    "time_created": 1783132135038,
+    "old_preview": "      <div class=\"menu\">\n        <ul>\n          <li><a href=\"../public/Inicio.html\"><i class=\"fas fa-home\"></i> Inicio</a></li>\n          <li><a href=\"inventari"
+  },
+  {
+    "rel": "public\\punto_de_venta.html",
+    "session_id": "ses_0d50c4537ffel3bJICh3OGqds6",
+    "part_id": "prt_f2af52ee7001CybKlsKkdxOLg2",
+    "time_created": 1783132139240,
+    "old_preview": "      <div class=\"menu\">\n        <ul>\n          <li><a href=\"../public/Inicio.html\"><i class=\"fas fa-home\"></i> Inicio</a></li>\n           <li><a href=\"pos.html"
+  },
+  {
+    "rel": "public\\cuadre_de_ventas.html",
+    "session_id": "ses_0d4b291b3ffe2LzOLeTrx3jP1t",
+    "part_id": "prt_f2b4e8fca00187Av97dQpLyagc",
+    "time_created": 1783137996747,
+    "old_preview": "        <ul>\n          <li><a href=\"Inicio.html\"><i class=\"fas fa-home\"></i> Inicio</a></li>\n          <li><a href=\"pos.html\"><i class=\"fas fa-cash-register\"></"
+  },
+  {
+    "rel": "public\\punto_de_venta.html",
+    "session_id": "ses_0d4b291b3ffe2LzOLeTrx3jP1t",
+    "part_id": "prt_f2b4e9bba0011nnWWgSbpvxWOF",
+    "time_created": 1783137999802,
+    "old_preview": "        <ul>\n          <li><a href=\"Inicio.html\"><i class=\"fas fa-home\"></i> Inicio</a></li>\n          <li><a href=\"pos.html\"><i class=\"fas fa-cash-register\"></"
+  },
+  {
+    "rel": "assets\\PHP\\login.php",
+    "session_id": "ses_0d4a56865ffespiLbnQEWdE92z",
+    "part_id": "prt_f2b5bb8b3001tfNzpu5ZXJ2kB3",
+    "time_created": 1783138859187,
+    "old_preview": "<?php\nsession_start(); // Iniciar o reanudar la sesión\n\n// Función para establecer la conexión con la base de datos"
+  },
+  {
+    "rel": "assets\\PHP\\login.php",
+    "session_id": "ses_0d4a56865ffespiLbnQEWdE92z",
+    "part_id": "prt_f2b5bc75e001sgQXd8jGd1JvCd",
+    "time_created": 1783138862942,
+    "old_preview": "            if (password_verify($password, $row['password'])) {\n                // Inicio de sesión exitoso\n                // Almacenar el id_user en la sesión"
+  },
+  {
+    "rel": "assets\\PHP\\cerrar_sesion.php",
+    "session_id": "ses_0d4a56865ffespiLbnQEWdE92z",
+    "part_id": "prt_f2b5be98b001rpy3wW2DBdgU7j",
+    "time_created": 1783138871691,
+    "old_preview": "<?php\nsession_start(); // Iniciar o reanudar la sesión\n\n$servername = \"localhost\";\n$username = \"root\";\n$password = \"\";\n$database = \"erp\";\n\n// Establecer conexió"
+  },
+  {
+    "rel": "assets\\PHP\\login.php",
+    "session_id": "ses_0d4a56865ffespiLbnQEWdE92z",
+    "part_id": "prt_f2b5c48820011Ts6AfIo9oTx63",
+    "time_created": 1783138896002,
+    "old_preview": "                logAccess($id_user, 'LOGIN', 'OK', ['msg'=>'Inicio de sesión exitoso']);\n                updateLastAccess($id_user);"
+  },
+  {
+    "rel": "assets\\PHP\\cerrar_sesion.php",
+    "session_id": "ses_0d4a56865ffespiLbnQEWdE92z",
+    "part_id": "prt_f2b5c5b36001gHfY5FhtSI30WZ",
+    "time_created": 1783138900790,
+    "old_preview": "        logAccess($id_user, 'LOGOUT', 'OK');\n\n        // Actualizar el campo validar_sesion en la tabla usuario a 1"
+  },
+  {
+    "rel": "assets\\api\\empleados.php",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f2bb1487f0019aQoXG4hLweO7C",
+    "time_created": 1783144466559,
+    "old_preview": "    if (empty($sets))\n        json(['error' => 'Sin cambios'], 400);\n    $params[] = $id;\n    $types .= 'i';\n    $params[] = $uid;\n    $types .= 'i';\n\n    $sql "
+  },
+  {
+    "rel": "assets\\PHP\\login.php",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f2bd2f4ff001xYY0WwTMshXV41",
+    "time_created": 1783146673407,
+    "old_preview": "        // Preparar y ejecutar la consulta SQL para verificar el inicio de sesión\n        $sql = \"SELECT * FROM usuario WHERE nombre = ?\";\n        $stmt = $conn"
+  },
+  {
+    "rel": "index.html",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f2bd3130c0012Lr8R9NeZJN92U",
+    "time_created": 1783146681101,
+    "old_preview": "        <label for=\"username\">Usuario</label>\n          <div class=\"input-icon\">\n            <i class=\"fas fa-user\"></i>\n            <input type=\"text\" id=\"user"
+  },
+  {
+    "rel": "assets\\PHP\\cerrar_sesion.php",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f2be2ccba0017v6Xh7mt7W9eSU",
+    "time_created": 1783147711674,
+    "old_preview": "        // Si la actualización fue exitosa, enviar un mensaje de confirmación\n        echo \"Sesión cerrada correctamente.\";"
+  },
+  {
+    "rel": "assets\\PHP\\login.php",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f2be32618001Nk8i8jeXHZ9uGy",
+    "time_created": 1783147734552,
+    "old_preview": "    if (isset($_POST['username']) && isset($_POST['password'])) {\n        // Recibe los datos del formulario\n        $username = $_POST['username'];\n        $pa"
+  },
+  {
+    "rel": "assets\\PHP\\cerrar_sesion.php",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f2be6899d001dCoLfGCSNXzAIh",
+    "time_created": 1783147956637,
+    "old_preview": "        // Limpiar completamente la sesión\n        session_unset();\n        session_destroy();\n        echo \"Sesión cerrada correctamente.\";"
+  },
+  {
+    "rel": "public\\Inicio.html",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f2bf2b7f600156Nhwv9DDVKVbM",
+    "time_created": 1783148754934,
+    "old_preview": "  <script src=\"../assets/js/navbar.js?v=2\"></script>"
+  },
+  {
+    "rel": "public\\Inicio.html",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f2bf2e4d3001LyG1tn4TI8LJWA",
+    "time_created": 1783148766419,
+    "old_preview": "  <script>\n    // Filtrar cards del dashboard según permisos del usuario\n    document.addEventListener('DOMContentLoaded', function() {\n      fetch('../assets/a"
+  },
+  {
+    "rel": "public\\cuadre_de_ventas.html",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f2bf72528001VMIvM9ir9OWZbA",
+    "time_created": 1783149045032,
+    "old_preview": "  <script src=\"../assets/js/cuadre_de_ventas.js\"></script>\n  <script src=\"../assets/js/navbar.js?v=2\"></script>"
+  },
+  {
+    "rel": "assets\\PHP\\login.php",
+    "session_id": "ses_0d3fbbadfffe07W1UDanJRcIl5",
+    "part_id": "prt_f2c0488ce0019N4PhEXal0slgN",
+    "time_created": 1783149922510,
+    "old_preview": "                echo \"Error: Contraseña incorrecta.\";\n                logAccess(0, 'LOGIN_FAILED', 'ERROR', ['msg'=>'Credenciales inválidas']);\n                "
+  },
+  {
+    "rel": "public\\cuadre_de_ventas.html",
+    "session_id": "ses_0d3fb90d1ffep0cQYznaucTHry",
+    "part_id": "prt_f2c050ef5001D6W0azeNWbUnrT",
+    "time_created": 1783149956853,
+    "old_preview": "  <script src=\"../assets/js/cuadre_de_ventas.js\"></script>\n  <script src=\"../assets/js/navbar.js?v=2\"></script>"
+  },
+  {
+    "rel": "assets\\PHP\\login.php",
+    "session_id": "ses_0cfea5975ffexyIF3yanEq5jQ1",
+    "part_id": "prt_f3016145a001BiRNBm3DeBvMrk",
+    "time_created": 1783218181210,
+    "old_preview": "// Verifica si se han enviado datos a través del método POST\nif ($_SERVER[\"REQUEST_METHOD\"] == \"POST\") {\n    // Establecer conexión con la base de datos\n    $co"
+  },
+  {
+    "rel": "assets\\PHP\\cerrar_sesion.php",
+    "session_id": "ses_0cfea5975ffexyIF3yanEq5jQ1",
+    "part_id": "prt_f3016492d001tEp7l2o74Wu8t9",
+    "time_created": 1783218194733,
+    "old_preview": "        // Destruir completamente la sesión\n        $_SESSION = array();\n        if (ini_get(\"session.use_cookies\")) {\n            $params = session_get_cookie_"
+  },
+  {
+    "rel": "assets\\PHP\\create_account.php",
+    "session_id": "ses_0cfea5975ffexyIF3yanEq5jQ1",
+    "part_id": "prt_f301659120015PtYckKDq8lZCZ",
+    "time_created": 1783218198802,
+    "old_preview": "header(\"Location: index.html\");"
+  },
+  {
+    "rel": "assets\\api\\pos.php",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f356d3ebe001KJqFccmJIssjYG",
+    "time_created": 1783307779774,
+    "old_preview": "    addAud($conn, $uid, 'VENTA_CREAR', \"Venta #$id_pedido: $$total\", $id_pedido, 'pedido');\n    $conn->commit();\n    json(['success' => true, 'id_pedido' => $id"
+  },
+  {
+    "rel": "assets\\api\\pos.php",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f35b8f05f001MHXmqyzp7T8kFM",
+    "time_created": 1783312740448,
+    "old_preview": "/* ── VENTA CREAR ── */\nfunction ventaCrear($conn, $uid, $input) {\n    error_log('ventaCrear called with input: ' . json_encode($input));\n    $items = $input['i"
+  },
+  {
+    "rel": "assets\\api\\_db.php",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f35ba6965001OHwecLLOXjaA60",
+    "time_created": 1783312836965,
+    "old_preview": "function sincronizarProductoCantidad($conn, $id_producto) {\n    $id_producto = (int)$id_producto;\n    if (!$id_producto) return;\n\n    $stmt = $conn->prepare(\"SE"
+  },
+  {
+    "rel": "assets\\api\\_db.php",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f35bb6439001adJqJPLogecou2",
+    "time_created": 1783312901177,
+    "old_preview": "function actualizarStock($conn, $id_producto, $id_bodega, $campo, $delta) {\n    $allowed = ['disponible','reservado','comprometido','en_transito','danado','bloq"
+  },
+  {
+    "rel": "assets\\js\\pos.js",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f35bd02a2001aMJQ2o6OaYXac3",
+    "time_created": 1783313007266,
+    "old_preview": "function handleBarcode() {\n  var q = $('search-input').value.trim();\n  if (!q) return;\n  var savedCat = currentCat;\n  currentCat = '';\n  for (var i = 0; i < pro"
+  },
+  {
+    "rel": "assets\\api\\_db.php",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f38caa2f9001xtJ3HHT5d8TPGq",
+    "time_created": 1783364231929,
+    "old_preview": "    $stmt2 = $conn->prepare(\"INSERT INTO kardex (id_producto,id_bodega,tipo_movimiento,id_documento,documento_tipo,entrada,salida,saldo,costo_unitario,costo_tot"
+  },
+  {
+    "rel": "public\\inventario.html",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f38edf0bd001AWZzfPpmohABsX",
+    "time_created": 1783366545597,
+    "old_preview": "  <script src=\"../assets/js/inventario.js\"></script>\n  <script src=\"../assets/js/login_pvt.js?v=2\"></script>\n  <script src=\"../assets/js/navbar.js?v=2\"></script"
+  },
+  {
+    "rel": "assets\\api\\_db.php",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f3a88b68f001UJYNkSDQyaca8U",
+    "time_created": 1783393465999,
+    "old_preview": "<?php\nob_start();\nini_set('display_errors', '0');\nerror_reporting(E_ALL);\ndate_default_timezone_set('America/Santiago');\n\n$DB_HOST = 'localhost';\n$DB_USER = 'ro"
+  },
+  {
+    "rel": "README.md",
+    "session_id": "ses_0df22023cffeke7tR1raT41ic0",
+    "part_id": "prt_f3a9044c80013QSoOJ10jDnmAg",
+    "time_created": 1783393961160,
+    "old_preview": "# Blue-Cat\n\nBlue-Cat es un proyecto de sistema ERP (Enterprise Resource Planning) que se centra en la implementación de un punto de ventas (POS) y la gestión de"
+  }
+]
