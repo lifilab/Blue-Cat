@@ -3,7 +3,7 @@ function openPopup() {
     console.log("Abriendo el pop-up...");
 
     // Realizar una solicitud AJAX para obtener el valor de validar_sesion del servidor
-    fetch("../assets/PHP/obtener_validar_sesion.php")
+    fetch("../assets/api/compat/obtener_validar_sesion.php")
         .then(response => {
             if (!response.ok) {
                 throw new Error("La solicitud no fue exitosa: " + response.status);
@@ -74,7 +74,7 @@ function apertura() {
 
     // Enviar los datos a través de AJAX a formulario_apertura.php
     var xhr = new XMLHttpRequest();
-    xhr.open('POST', '../assets/PHP/formulario_apertura.php', true);
+    xhr.open('POST', '../assets/api/compat/formulario_apertura.php', true);
     xhr.onreadystatechange = function () {
         if (xhr.readyState === 4) {
             if (xhr.status === 200) {
@@ -144,7 +144,7 @@ function cerrarSesion() {
             }
         }
     };
-    xhr.open('POST', '../assets/PHP/cerrar_sesion.php', true);
+    xhr.open('POST', '../assets/api/compat/cerrar_sesion.php', true);
     xhr.send(formData);
     return false;
 }

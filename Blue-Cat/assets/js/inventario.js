@@ -977,7 +977,7 @@ function importProductosFile(input) {
   var fd = new FormData();
   fd.append('file', input.files[0]);
   var xhr = new XMLHttpRequest();
-  xhr.open('POST', '../assets/PHP/subir_archivo.php', true);
+  xhr.open('POST', '../assets/api/compat/subir_archivo.php', true);
   xhr.onload = function() {
     input.value = '';
     try {

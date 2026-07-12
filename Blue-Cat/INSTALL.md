@@ -122,16 +122,14 @@ php -r "echo bin2hex(random_bytes(32)) . PHP_EOL;"
 ### Paso 6: Importar Estructura de Base de Datos
 
 ```bash
-# Importar schemas SQL
-cd /var/www/bluecat/assets/sql
-mysql -u bluecat_user -p bluecat_erp < core.sql
-mysql -u bluecat_user -p bluecat_erp < pos.sql
-mysql -u bluecat_user -p bluecat_erp < inventario.sql
-mysql -u bluecat_user -p bluecat_erp < crm.sql
-mysql -u bluecat_user -p bluecat_erp < empleados.sql
-mysql -u bluecat_user -p bluecat_erp < facturacion.sql
-mysql -u bluecat_user -p bluecat_erp < proveedores.sql
+cd /var/www/bluecat
+php scripts/migrate.php
+
+# Solo para una instalación de demostración:
+php scripts/migrate.php --with-demo
 ```
+
+Las migraciones canónicas están en database/migrations/; los datos ficticios están separados en database/demo/.
 
 ### Paso 7: Crear Usuario Administrador
 
@@ -360,7 +358,7 @@ Crear archivo `C:\inetpub\bluecat\.env` con la configuración (igual que en Linu
 
 ### Paso 5: Importar Base de Datos
 
-Usar MySQL Workbench o línea de comandos para importar los scripts SQL.
+Desde PowerShell, dentro del directorio de Blue-Cat, ejecutar php scripts/migrate.php.
 
 ### Paso 6: Crear Usuario Administrador
 
@@ -449,9 +447,8 @@ RUN chmod -R 777 /var/www/html/assets/uploads
 # Construir y levantar
 docker-compose up -d
 
-# Importar base de datos
-docker-compose exec mysql mysql -ubluecat_user -pTuPasswordSeguro123! bluecat_erp < assets/sql/core.sql
-# Repetir para cada archivo SQL
+# Aplicar migraciones versionadas
+docker-compose exec app php scripts/migrate.php
 
 # Crear administrador
 docker-compose exec app php install_admin.php

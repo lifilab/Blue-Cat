@@ -1,0 +1,39 @@
+name: baseline
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Runtime versions
+        run: |
+          php --version
+          node --version
+      - name: Repository baseline
+        run: php Blue-Cat/scripts/verify-baseline.php
+      - name: Secret patterns
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -I -n -E '(AKIA[0-9A-Z]{16}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})' -- ':!*.example' ':!*.md'; then
+            echo 'Se detectó un posible secreto en archivos versionados.'
+            exit 1
+          fi
+      - name: No dependency artifacts committed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -E '(^|/)(vendor|node_modules)/'; then
+            echo 'No se deben versionar dependencias instaladas.'
+            exit 1
+          fi

@@ -226,7 +226,7 @@ function loadPedidosSelect() {
   var sel = document.getElementById('create-pedido');
   if (!sel) return;
   var xhr = new XMLHttpRequest();
-  xhr.open('GET', '../assets/PHP/listar_ventas.php', true);
+  xhr.open('GET', '../assets/api/compat/listar_ventas.php', true);
   xhr.onload = function() {
     if (xhr.status !== 200) return;
     var ps = JSON.parse(xhr.responseText);
@@ -248,7 +248,7 @@ function createFactura() {
 
   // Get pedido details from the option text - better to fetch from API
   var xhr = new XMLHttpRequest();
-  xhr.open('GET', '../assets/PHP/listar_ventas.php', true);
+  xhr.open('GET', '../assets/api/compat/listar_ventas.php', true);
   xhr.onload = function() {
     if (xhr.status !== 200) { showToast('Error al obtener pedido', 'error'); return; }
     var pedidos = JSON.parse(xhr.responseText);

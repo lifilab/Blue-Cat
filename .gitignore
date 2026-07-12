@@ -1,0 +1,11 @@
+/.env
+/base de datos.csv
+/base de datos.xlsx
+/data/
+/backups/
+/*.sql
+/*.sql.gz
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
