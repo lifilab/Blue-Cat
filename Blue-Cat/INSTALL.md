@@ -108,7 +108,7 @@ APP_DEBUG=false
 APP_URL=https://erp.tudominio.com
 APP_TIMEZONE=America/Santiago
 
-APP_KEY=GeneraUnaClaveSeguraDe32Caracteres
+APP_KEY=<GENERAR_DURANTE_LA_INSTALACION>
 SESSION_LIFETIME=120
 BCRYPT_ROUNDS=12
 ```
