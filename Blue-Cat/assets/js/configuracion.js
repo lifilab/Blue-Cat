@@ -600,7 +600,28 @@ function cerrarSesionRemota(id) {
 }
 
 // ═══ CONFIGURACIÓN DE BOLETAS ═══
+function logoBoletaValido(src) {
+  return typeof src === 'string' && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(src);
+}
+
+function mostrarLogoBoleta(src) {
+  var preview = document.getElementById('b-logo-preview');
+  var valido = logoBoletaValido(src);
+  preview.dataset.logo = valido ? src : '';
+  preview.innerHTML = valido
+    ? '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;"><img src="' + src + '" alt="Logo de la boleta" style="max-width:150px;max-height:110px;object-fit:contain;border-radius:8px;border:1px solid #e2e8f0;background:#fff;padding:6px;"><button type="button" class="btn btn-outline btn-sm" onclick="quitarLogoBoleta()"><i class="fas fa-trash"></i> Quitar logo</button></div>'
+    : '<small style="color:#64748b;">Sin logo. Formatos permitidos: PNG, JPG o WebP, máximo 2 MB.</small>';
+  actualizarPreviewBoleta();
+}
+
+function quitarLogoBoleta() {
+  var input = document.getElementById('b-logo-file');
+  if (input) input.value = '';
+  mostrarLogoBoleta('');
+}
+
 function cargarConfigBoleta() {
+  inicializarPreviewBoleta();
   apiCfg('config_boleta', {}, function(d) {
     document.getElementById('b-nombre-empresa').value = d.nombre_empresa || '';
     document.getElementById('b-rut-empresa').value = d.rut_empresa || '';
@@ -609,58 +630,123 @@ function cargarConfigBoleta() {
     document.getElementById('b-email').value = d.email || '';
     document.getElementById('b-mensaje-pie').value = d.mensaje_pie || '';
     document.getElementById('b-mensaje-agradecimiento').value = d.mensaje_agradecimiento || '';
-    document.getElementById('b-iva').value = d.iva_porcentaje || 19;
+    document.getElementById('b-iva').value = d.iva_porcentaje !== undefined ? d.iva_porcentaje : 19;
     document.getElementById('b-mostrar-rut-cliente').checked = d.mostrar_rut_cliente == 1;
     document.getElementById('b-mostrar-iva').checked = d.mostrar_desglose_iva == 1;
     document.getElementById('b-mostrar-descuento').checked = d.mostrar_descuento == 1;
-    
-    if (d.logo) {
-      document.getElementById('b-logo-preview').innerHTML = '<img src="' + d.logo + '" style="max-width:150px;max-height:150px;border-radius:8px;border:1px solid #e2e8f0;">';
-    }
+    document.getElementById('b-logo-file').value = '';
+    mostrarLogoBoleta(d.logo || '');
   });
 }
 
 function cargarLogo(event) {
   var file = event.target.files[0];
   if (!file) return;
-  
+  var tipos = ['image/png', 'image/jpeg', 'image/webp'];
+  if (tipos.indexOf(file.type) === -1) {
+    event.target.value = '';
+    toast('Use un logo PNG, JPG o WebP', 'error');
+    return;
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    event.target.value = '';
+    toast('El logo no puede superar 2 MB', 'error');
+    return;
+  }
+
   var reader = new FileReader();
   reader.onload = function(e) {
-    document.getElementById('b-logo-preview').innerHTML = '<img src="' + e.target.result + '" style="max-width:150px;max-height:150px;border-radius:8px;border:1px solid #e2e8f0;">';
-    document.getElementById('b-logo-preview').dataset.logo = e.target.result;
+    var img = new Image();
+    img.onload = function() {
+      if (img.naturalWidth > 2000 || img.naturalHeight > 2000) {
+        event.target.value = '';
+        toast('El logo no puede superar 2000x2000 px', 'error');
+        return;
+      }
+      mostrarLogoBoleta(e.target.result);
+    };
+    img.onerror = function() {
+      event.target.value = '';
+      toast('No se pudo leer la imagen', 'error');
+    };
+    img.src = e.target.result;
   };
   reader.readAsDataURL(file);
 }
 
+function actualizarPreviewBoleta() {
+  var ticket = document.getElementById('b-ticket-preview');
+  if (!ticket) return;
+  var logo = document.getElementById('b-logo-preview').dataset.logo || '';
+  var nombre = document.getElementById('b-nombre-empresa').value || 'Mi Empresa';
+  var rut = document.getElementById('b-rut-empresa').value;
+  var direccion = document.getElementById('b-direccion').value;
+  var telefono = document.getElementById('b-telefono').value;
+  var email = document.getElementById('b-email').value;
+  var iva = parseFloat(document.getElementById('b-iva').value);
+  if (isNaN(iva)) iva = 19;
+  var agradecimiento = document.getElementById('b-mensaje-agradecimiento').value || '¡Gracias por su compra!';
+  var pie = document.getElementById('b-mensaje-pie').value;
+  var html = logoBoletaValido(logo) ? '<img src="' + logo + '" alt="Logo" style="display:block;max-width:120px;max-height:75px;object-fit:contain;margin:0 auto 8px;">' : '';
+  html += '<div style="font-weight:800;font-size:17px;text-align:center;">' + esc(nombre) + '</div>';
+  if (rut) html += '<div>RUT: ' + esc(rut) + '</div>';
+  if (direccion) html += '<div>' + esc(direccion) + '</div>';
+  if (telefono) html += '<div>Tel: ' + esc(telefono) + '</div>';
+  if (email) html += '<div>' + esc(email) + '</div>';
+  html += '<div style="border-top:1px dashed #334155;margin:8px 0;"></div>';
+  if (document.getElementById('b-mostrar-rut-cliente').checked) html += '<div style="text-align:left;">Cliente: Consumidor final<br>RUT: 11.111.111-1</div><div style="border-top:1px dashed #334155;margin:8px 0;"></div>';
+  html += '<div style="display:flex;justify-content:space-between;"><span>Producto de prueba x1</span><span>$10.000</span></div>';
+  html += '<div style="border-top:1px dashed #334155;margin:8px 0;"></div>';
+  if (document.getElementById('b-mostrar-iva').checked) {
+    var ivaMonto = Math.round(10000 * iva / (100 + iva));
+    html += '<div style="display:flex;justify-content:space-between;"><span>Neto</span><span>$' + fmt(10000 - ivaMonto) + '</span></div>';
+    html += '<div style="display:flex;justify-content:space-between;"><span>IVA ' + esc(String(iva)) + '%</span><span>$' + fmt(ivaMonto) + '</span></div>';
+  }
+  html += '<div style="display:flex;justify-content:space-between;font-size:15px;font-weight:800;"><span>TOTAL</span><span>$10.000</span></div>';
+  if (document.getElementById('b-mostrar-descuento').checked) html += '<div style="display:flex;justify-content:space-between;color:#059669;"><span>Descuento</span><span>-$0</span></div>';
+  html += '<div style="border-top:1px dashed #334155;margin:8px 0;"></div><div>' + esc(agradecimiento) + '</div>';
+  if (pie) html += '<div style="font-size:10px;color:#64748b;margin-top:6px;font-style:italic;">' + esc(pie) + '</div>';
+  ticket.innerHTML = html;
+}
+
 function guardarConfigBoleta(event) {
   event.preventDefault();
-  
-  var logo = '';
   var preview = document.getElementById('b-logo-preview');
-  if (preview.dataset.logo) {
-    logo = preview.dataset.logo;
-  } else if (preview.querySelector('img')) {
-    logo = preview.querySelector('img').src;
-  }
-  
+  var logo = preview.dataset.logo || '';
   var data = {
-    nombre_empresa: document.getElementById('b-nombre-empresa').value,
-    rut_empresa: document.getElementById('b-rut-empresa').value,
-    direccion: document.getElementById('b-direccion').value,
-    telefono: document.getElementById('b-telefono').value,
-    email: document.getElementById('b-email').value,
+    nombre_empresa: document.getElementById('b-nombre-empresa').value.trim(),
+    rut_empresa: document.getElementById('b-rut-empresa').value.trim(),
+    direccion: document.getElementById('b-direccion').value.trim(),
+    telefono: document.getElementById('b-telefono').value.trim(),
+    email: document.getElementById('b-email').value.trim(),
     logo: logo,
-    mensaje_pie: document.getElementById('b-mensaje-pie').value,
-    mensaje_agradecimiento: document.getElementById('b-mensaje-agradecimiento').value,
-    iva_porcentaje: parseFloat(document.getElementById('b-iva').value) || 19,
+    mensaje_pie: document.getElementById('b-mensaje-pie').value.trim(),
+    mensaje_agradecimiento: document.getElementById('b-mensaje-agradecimiento').value.trim(),
+    iva_porcentaje: parseFloat(document.getElementById('b-iva').value),
     mostrar_rut_cliente: document.getElementById('b-mostrar-rut-cliente').checked ? 1 : 0,
     mostrar_desglose_iva: document.getElementById('b-mostrar-iva').checked ? 1 : 0,
     mostrar_descuento: document.getElementById('b-mostrar-descuento').checked ? 1 : 0
   };
-  
-  apiCfg('config_boleta_guardar', data, function(r) {
-    toast('Configuración de boleta guardada');
+  if (!data.nombre_empresa) {
+    toast('Ingrese el nombre de la empresa', 'error');
+    return;
+  }
+  if (isNaN(data.iva_porcentaje) || data.iva_porcentaje < 0 || data.iva_porcentaje > 100) {
+    toast('El IVA debe estar entre 0 y 100', 'error');
+    return;
+  }
+  apiCfg('config_boleta_guardar', data, function() {
+    toast('Plantilla de boleta guardada');
+    cargarConfigBoleta();
   });
+}
+
+function inicializarPreviewBoleta() {
+  var form = document.getElementById('form-boleta');
+  if (!form || form.dataset.previewReady) return;
+  form.dataset.previewReady = '1';
+  form.addEventListener('input', actualizarPreviewBoleta);
+  form.addEventListener('change', actualizarPreviewBoleta);
 }
 
 // Init

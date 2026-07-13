@@ -12,9 +12,23 @@ function assertApi(bool $condition,string $message): void {
 function invokeApi(string $root,string $env,string $endpoint,int $user,string $method,array $query=[],?array $body=null): array {
     $parts = [PHP_BINARY,$root.'/scripts/invoke-api-test.php','--env='.$env,'--endpoint='.$endpoint,'--user='.$user,'--method='.$method];
     if ($query) $parts[]='--query='.base64_encode(json_encode($query));
-    if ($body !== null) $parts[]='--body='.base64_encode(json_encode($body));
+    $bodyFile = null;
+    if ($body !== null) {
+        $bodyJson = json_encode($body);
+        if (strlen($bodyJson) > 8000) {
+            $bodyFile = tempnam(sys_get_temp_dir(),'bluecat-api-body-');
+            if ($bodyFile === false || file_put_contents($bodyFile,$bodyJson) === false) throw new RuntimeException('No se pudo crear body temporal');
+            $parts[]='--body-file='.$bodyFile;
+        } else {
+            $parts[]='--body='.base64_encode($bodyJson);
+        }
+    }
     $command = implode(' ',array_map('escapeshellarg',$parts));
-    exec($command,$lines,$code);
+    try {
+        exec($command,$lines,$code);
+    } finally {
+        if ($bodyFile && is_file($bodyFile)) unlink($bodyFile);
+    }
     $raw = implode("\n",$lines);
     $decoded = json_decode($raw,true);
     if (!is_array($decoded)) throw new RuntimeException("Respuesta API invalida ({$endpoint}, codigo {$code}): {$raw}");
@@ -44,7 +58,8 @@ try {
     provisionTenantRoles($db,$accountA);provisionTenantRoles($db,$accountB);
     $adminA=(int)$db->query("SELECT id_rol FROM rol WHERE id_cuenta={$accountA} AND nombre='Administrador'")->fetch_row()[0];
     $vendorA=(int)$db->query("SELECT id_rol FROM rol WHERE id_cuenta={$accountA} AND nombre='Vendedor'")->fetch_row()[0];
-    $db->query("INSERT INTO usuario_rol(id_user,id_rol) VALUES ({$userA},{$adminA}),({$employeeA},{$vendorA})");
+    $cashierB=(int)$db->query("SELECT id_rol FROM rol WHERE id_cuenta={$accountB} AND nombre='Cajero'")->fetch_row()[0];
+    $db->query("INSERT INTO usuario_rol(id_user,id_rol) VALUES ({$userA},{$adminA}),({$employeeA},{$vendorA}),({$userB},{$cashierB})");
 
     $stmt=$db->prepare('INSERT INTO producto(id_user,id_cuenta,nombre_producto,precio_venta) VALUES (?,?,?,1000)');
     $name='Producto API A';$stmt->bind_param('iis',$userA,$accountA,$name);$stmt->execute();$productA=(int)$db->insert_id;
@@ -97,6 +112,50 @@ try {
     $deniedProviders=invokeApi($root,$envPath,'proveedores.php',$employeeA,'GET');
     assertApi(isset($deniedProviders['error']),'sin proveedores.ver el empleado no puede consultar proveedores');
 
+    $logoBytes=file_get_contents($root.'/assets/img/Blue-Cat_logo-removebg.png');
+    if ($logoBytes === false) throw new RuntimeException('Logo real de prueba no encontrado');
+    $pngLogo='data:image/png;base64,'.base64_encode($logoBytes);
+    $savedTemplate=invokeApi($root,$envPath,'core.php',$userA,'POST',[],[
+        'accion'=>'config_boleta_guardar','nombre_empresa'=>'Blue Cat Test','rut_empresa'=>'76.000.000-1',
+        'direccion'=>'Local de prueba','telefono'=>'+56 9 1111 1111','email'=>'boleta@test.local',
+        'logo'=>$pngLogo,'mensaje_pie'=>'Documento de prueba','mensaje_agradecimiento'=>'Gracias',
+        'mostrar_rut_cliente'=>1,'mostrar_desglose_iva'=>1,'mostrar_descuento'=>1,'iva_porcentaje'=>19
+    ]);
+    assertApi(!empty($savedTemplate['success'])&&!empty($savedTemplate['logo_guardado']),'la plantilla guarda un logo PNG real');
+    $adminTemplate=invokeApi($root,$envPath,'core.php',$userA,'POST',[],['accion'=>'config_boleta']);
+    assertApi(($adminTemplate['logo']??'')===$pngLogo,'configuracion recupera el mismo logo guardado');
+    $employeeTemplate=invokeApi($root,$envPath,'pos.php',$employeeA,'GET',['accion'=>'config_boleta']);
+    assertApi(($employeeTemplate['config']['logo']??'')===$pngLogo,'el POS del empleado comparte el logo de la cuenta');
+    $secondLogoBytes=file_get_contents($root.'/assets/img/Blue-Cat logo.png');
+    if ($secondLogoBytes === false) throw new RuntimeException('Segundo logo real de prueba no encontrado');
+    $secondLogo='data:image/png;base64,'.base64_encode($secondLogoBytes);
+    $replacedTemplate=invokeApi($root,$envPath,'core.php',$userA,'POST',[],[
+        'accion'=>'config_boleta_guardar','nombre_empresa'=>'Blue Cat Test','logo'=>$secondLogo,
+        'mensaje_agradecimiento'=>'Gracias','mostrar_desglose_iva'=>1,'mostrar_descuento'=>1,'iva_porcentaje'=>19
+    ]);
+    $replacedInPos=invokeApi($root,$envPath,'pos.php',$employeeA,'GET',['accion'=>'config_boleta']);
+    assertApi(!empty($replacedTemplate['success'])&&($replacedInPos['config']['logo']??'')===$secondLogo,'reemplazar el logo actualiza el POS del empleado');
+    $foreignTemplate=invokeApi($root,$envPath,'pos.php',$userB,'GET',['accion'=>'config_boleta']);
+    assertApi(empty($foreignTemplate['config']),'el logo no se filtra a otra cuenta');
+    $svgRejected=invokeApi($root,$envPath,'core.php',$userA,'POST',[],[
+        'accion'=>'config_boleta_guardar','nombre_empresa'=>'Blue Cat Test',
+        'logo'=>'data:image/svg+xml;base64,'.base64_encode('<svg xmlns="http://www.w3.org/2000/svg"/>')
+    ]);
+    assertApi(isset($svgRejected['error']),'la API rechaza logos SVG');
+    $fakeImageRejected=invokeApi($root,$envPath,'core.php',$userA,'POST',[],[
+        'accion'=>'config_boleta_guardar','nombre_empresa'=>'Blue Cat Test',
+        'logo'=>'data:image/png;base64,'.base64_encode('contenido falso')
+    ]);
+    assertApi(isset($fakeImageRejected['error']),'la API rechaza contenido que no es una imagen');
+    $afterRejectedLogo=invokeApi($root,$envPath,'pos.php',$employeeA,'GET',['accion'=>'config_boleta']);
+    assertApi(($afterRejectedLogo['config']['logo']??'')===$secondLogo,'un logo rechazado no sobrescribe el logo vigente');
+    $removedTemplate=invokeApi($root,$envPath,'core.php',$userA,'POST',[],[
+        'accion'=>'config_boleta_guardar','nombre_empresa'=>'Blue Cat Test','logo'=>'',
+        'mensaje_agradecimiento'=>'Gracias','mostrar_desglose_iva'=>1,'mostrar_descuento'=>1,'iva_porcentaje'=>19
+    ]);
+    $removedInPos=invokeApi($root,$envPath,'pos.php',$employeeA,'GET',['accion'=>'config_boleta']);
+    assertApi(!empty($removedTemplate['success'])&&empty($removedInPos['config']['logo']),'quitar el logo tambien se refleja en el POS');
+
     $own=invokeApi($root,$envPath,'clientes.php',$userA,'GET',['id'=>$clientA]);
     assertApi((int)($own['id_cliente']??0)===$clientA,'el endpoint permite leer un cliente propio');
     $foreign=invokeApi($root,$envPath,'clientes.php',$userA,'GET',['id'=>$clientB]);
@@ -129,7 +188,10 @@ try {
     foreach ($warehouseIds as $id) {$db->query("DELETE FROM stock WHERE id_bodega=".(int)$id);$db->query("DELETE FROM bodega WHERE id_bodega=".(int)$id);}
     foreach ($productIds as $id) $db->query("DELETE FROM producto WHERE id_producto=".(int)$id);
     foreach ($clientIds as $id) $db->query("DELETE FROM cliente WHERE id_cliente=".(int)$id);
-    foreach ($accountIds as $id) $db->query("UPDATE cuenta SET id_usuario_propietario=NULL WHERE id_cuenta=".(int)$id);
+    foreach ($accountIds as $id) {
+        $db->query("DELETE FROM config_boleta WHERE id_cuenta=".(int)$id);
+        $db->query("UPDATE cuenta SET id_usuario_propietario=NULL WHERE id_cuenta=".(int)$id);
+    }
     foreach ($userIds as $id) {
         foreach (['pos_auditoria','inventario_auditoria','cliente_auditoria','core_auditoria','empleado_auditoria','proveedor_historial'] as $table) {
             try { $db->query("DELETE FROM {$table} WHERE id_user=".(int)$id); } catch (mysqli_sql_exception) {}

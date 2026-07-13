@@ -705,7 +705,8 @@ function showReceipt(data, items, pagos) {
   var direccionEmpresa = (configBoleta && configBoleta.direccion) ? configBoleta.direccion : '';
   var telefonoEmpresa = (configBoleta && configBoleta.telefono) ? configBoleta.telefono : '';
   var emailEmpresa = (configBoleta && configBoleta.email) ? configBoleta.email : '';
-  var logoEmpresa = (configBoleta && configBoleta.logo) ? configBoleta.logo : '';
+  var logoEmpresaRaw = (configBoleta && configBoleta.logo) ? configBoleta.logo : '';
+  var logoEmpresa = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(logoEmpresaRaw) ? logoEmpresaRaw : '';
   var mensajeAgradecimiento = (configBoleta && configBoleta.mensaje_agradecimiento) ? configBoleta.mensaje_agradecimiento : '¡Gracias por su compra!';
   var mensajePie = (configBoleta && configBoleta.mensaje_pie) ? configBoleta.mensaje_pie : '';
   var mostrarDesgloseIVA = (configBoleta && configBoleta.mostrar_desglose_iva !== undefined) ? configBoleta.mostrar_desglose_iva : 1;
@@ -787,14 +788,37 @@ function showReceipt(data, items, pagos) {
 
 function printReceipt() {
   try {
-    var w = window.open('', '_blank', 'width=300,height=600');
+    var w = window.open('', '_blank', 'width=340,height=650');
     if (!w) { toast('Permita ventanas emergentes para imprimir', 'err'); return; }
-    w.document.write('<html><head><style>body{font-family:Consolas,monospace;font-size:12px;padding:10px;}.rec-line{display:flex;justify-content:space-between;}.rec-divider{border-top:1px dashed #000;margin:6px 0;}</style></head><body>');
+    w.document.write('<!doctype html><html><head><meta charset="UTF-8"><title>Boleta</title><style>@page{size:80mm auto;margin:4mm}body{width:72mm;margin:0 auto;font-family:Consolas,monospace;font-size:12px;color:#000}.rec-header{text-align:center;font-size:18px;font-weight:800}.rec-line{display:flex;justify-content:space-between;gap:8px}.rec-divider{border-top:1px dashed #000;margin:6px 0}.mcb{display:none}img{max-width:120px;max-height:80px;object-fit:contain}</style></head><body>');
     w.document.write(window._lastReceiptHTML || '');
     w.document.write('</body></html>');
     w.document.close();
-    w.print();
-    closeModal();
+
+    var printed = false;
+    function imprimirCuandoEsteLista() {
+      if (printed) return;
+      printed = true;
+      w.focus();
+      w.print();
+      closeModal();
+    }
+    var imagenes = Array.prototype.slice.call(w.document.images || []);
+    var pendientes = imagenes.filter(function(img) { return !img.complete; }).length;
+    if (!pendientes) {
+      setTimeout(imprimirCuandoEsteLista, 50);
+      return;
+    }
+    imagenes.forEach(function(img) {
+      if (img.complete) return;
+      var terminar = function() {
+        pendientes--;
+        if (pendientes <= 0) setTimeout(imprimirCuandoEsteLista, 50);
+      };
+      img.onload = terminar;
+      img.onerror = terminar;
+    });
+    setTimeout(imprimirCuandoEsteLista, 1800);
   } catch(e) {
     toast('Error al imprimir', 'err');
   }

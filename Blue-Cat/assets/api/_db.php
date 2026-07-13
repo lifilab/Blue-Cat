@@ -96,7 +96,17 @@ function makeJsonInputObject(array $data): ArrayObject {
 function getJsonInput(): ?ArrayObject {
     $raw = file_get_contents('php://input');
     $testJson = getenv('BLUECAT_TEST_JSON');
-    if (getenv('APP_ENV') === 'test' && $testJson !== false) $raw = $testJson;
+    $testJsonFile = getenv('BLUECAT_TEST_JSON_FILE');
+    if (getenv('APP_ENV') === 'test' && $testJson !== false) {
+        $raw = $testJson;
+    } elseif (getenv('APP_ENV') === 'test' && $testJsonFile !== false) {
+        $realTestFile = realpath($testJsonFile);
+        $realTemp = realpath(sys_get_temp_dir());
+        $tempPrefix = $realTemp ? rtrim($realTemp, '\\/').DIRECTORY_SEPARATOR : '';
+        if ($realTestFile && $tempPrefix !== '' && str_starts_with($realTestFile, $tempPrefix) && filesize($realTestFile) <= 4 * 1024 * 1024) {
+            $raw = file_get_contents($realTestFile);
+        }
+    }
     if ($raw === false || trim($raw) === '') {
         return null;
     }

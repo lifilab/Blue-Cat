@@ -544,8 +544,8 @@ case 'sesion_cerrar':
 
 // ═══ CONFIGURACIÓN DE BOLETAS ═══
 case 'config_boleta':
-    $stmt = $conn->prepare("SELECT * FROM config_boleta WHERE id_user=? AND activo=1 LIMIT 1");
-    $stmt->bind_param("i", $uid);
+    $stmt = $conn->prepare("SELECT * FROM config_boleta WHERE id_cuenta=? AND activo=1 ORDER BY id_config DESC LIMIT 1");
+    $stmt->bind_param("i", $accountId);
     $stmt->execute();
     $r = $stmt->get_result();
     if ($r->num_rows) {
@@ -570,42 +570,63 @@ case 'config_boleta':
     break;
 
 case 'config_boleta_guardar':
-    $nombre_empresa = $input['nombre_empresa'] ?? '';
+    $nombre_empresa = trim((string)($input['nombre_empresa'] ?? ''));
     if (!$nombre_empresa) json(['error' => 'Nombre de empresa requerido'], 400);
+    if (strlen($nombre_empresa) > 150) json(['error' => 'Nombre de empresa demasiado largo'], 400);
     
     $rut_empresa = $input['rut_empresa'] ?? '';
     $direccion = $input['direccion'] ?? '';
     $telefono = $input['telefono'] ?? '';
     $email = $input['email'] ?? '';
-    $logo = $input['logo'] ?? '';
+    $logo = trim((string)($input['logo'] ?? ''));
+    if ($logo !== '') {
+        if (!preg_match('#^data:image/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$#', $logo, $logoMatch)) {
+            json(['error' => 'Logo invalido. Use PNG, JPG o WebP'], 400);
+        }
+        $logoBin = base64_decode($logoMatch[2], true);
+        if ($logoBin === false || strlen($logoBin) > 2 * 1024 * 1024) {
+            json(['error' => 'El logo no puede superar 2 MB'], 400);
+        }
+        $logoInfo = @getimagesizefromstring($logoBin);
+        if (!$logoInfo || $logoInfo[0] > 2000 || $logoInfo[1] > 2000) {
+            json(['error' => 'Logo invalido o dimensiones mayores a 2000x2000 px'], 400);
+        }
+        $mimeMap = [IMAGETYPE_PNG => 'png', IMAGETYPE_JPEG => 'jpeg', IMAGETYPE_WEBP => 'webp'];
+        if (!isset($mimeMap[$logoInfo[2]]) || $mimeMap[$logoInfo[2]] !== strtolower($logoMatch[1])) {
+            json(['error' => 'El contenido del logo no coincide con su formato'], 400);
+        }
+    }
     $mensaje_pie = $input['mensaje_pie'] ?? '';
     $mensaje_agradecimiento = $input['mensaje_agradecimiento'] ?? '¡Gracias por su compra!';
     $mostrar_rut_cliente = (int)($input['mostrar_rut_cliente'] ?? 0);
     $mostrar_desglose_iva = (int)($input['mostrar_desglose_iva'] ?? 1);
     $mostrar_descuento = (int)($input['mostrar_descuento'] ?? 1);
     $iva_porcentaje = (float)($input['iva_porcentaje'] ?? 19.00);
+    if ($iva_porcentaje < 0 || $iva_porcentaje > 100) json(['error' => 'IVA fuera de rango'], 400);
     
     // Verificar si ya existe configuración
-    $stmt = $conn->prepare("SELECT id_config FROM config_boleta WHERE id_user=? AND activo=1");
-    $stmt->bind_param("i", $uid);
+    $stmt = $conn->prepare("SELECT id_config FROM config_boleta WHERE id_cuenta=? AND activo=1");
+    $stmt->bind_param("i", $accountId);
     $stmt->execute();
     $r = $stmt->get_result();
+    $stmt->close();
     
     if ($r->num_rows) {
         // Actualizar
         $id_config = $r->fetch_assoc()['id_config'];
-        $stmt = $conn->prepare("UPDATE config_boleta SET nombre_empresa=?, rut_empresa=?, direccion=?, telefono=?, email=?, logo=?, mensaje_pie=?, mensaje_agradecimiento=?, mostrar_rut_cliente=?, mostrar_desglose_iva=?, mostrar_descuento=?, iva_porcentaje=? WHERE id_config=?");
-        $stmt->bind_param("ssssssssiiidi", $nombre_empresa, $rut_empresa, $direccion, $telefono, $email, $logo, $mensaje_pie, $mensaje_agradecimiento, $mostrar_rut_cliente, $mostrar_desglose_iva, $mostrar_descuento, $iva_porcentaje, $id_config);
+        $stmt = $conn->prepare("UPDATE config_boleta SET id_user=?, nombre_empresa=?, rut_empresa=?, direccion=?, telefono=?, email=?, logo=?, mensaje_pie=?, mensaje_agradecimiento=?, mostrar_rut_cliente=?, mostrar_desglose_iva=?, mostrar_descuento=?, iva_porcentaje=? WHERE id_config=? AND id_cuenta=?");
+        $stmt->bind_param("issssssssiiidii", $uid, $nombre_empresa, $rut_empresa, $direccion, $telefono, $email, $logo, $mensaje_pie, $mensaje_agradecimiento, $mostrar_rut_cliente, $mostrar_desglose_iva, $mostrar_descuento, $iva_porcentaje, $id_config, $accountId);
     } else {
         // Insertar
-        $stmt = $conn->prepare("INSERT INTO config_boleta (id_user, nombre_empresa, rut_empresa, direccion, telefono, email, logo, mensaje_pie, mensaje_agradecimiento, mostrar_rut_cliente, mostrar_desglose_iva, mostrar_descuento, iva_porcentaje) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)");
-        $stmt->bind_param("issssssssiiid", $uid, $nombre_empresa, $rut_empresa, $direccion, $telefono, $email, $logo, $mensaje_pie, $mensaje_agradecimiento, $mostrar_rut_cliente, $mostrar_desglose_iva, $mostrar_descuento, $iva_porcentaje);
+        $stmt = $conn->prepare("INSERT INTO config_boleta (id_cuenta, id_user, nombre_empresa, rut_empresa, direccion, telefono, email, logo, mensaje_pie, mensaje_agradecimiento, mostrar_rut_cliente, mostrar_desglose_iva, mostrar_descuento, iva_porcentaje) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+        $stmt->bind_param("iissssssssiiid", $accountId, $uid, $nombre_empresa, $rut_empresa, $direccion, $telefono, $email, $logo, $mensaje_pie, $mensaje_agradecimiento, $mostrar_rut_cliente, $mostrar_desglose_iva, $mostrar_descuento, $iva_porcentaje);
     }
     
     $stmt->execute();
     $stmt->close();
-    coreLog($conn, $uid, 'GUARDAR', 'config_boleta', null, ['nombre_empresa' => $nombre_empresa]);
-    json(['success' => true]);
+    $savedConfigId = $id_config ?? (int)$conn->insert_id;
+    coreLog($conn, $uid, 'GUARDAR', 'config_boleta', $savedConfigId, ['nombre_empresa' => $nombre_empresa, 'logo' => $logo !== '']);
+    json(['success' => true, 'logo_guardado' => $logo !== '']);
     break;
 
 default:

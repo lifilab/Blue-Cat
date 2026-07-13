@@ -23,5 +23,10 @@ $_SERVER['REQUEST_METHOD'] = strtoupper(cliOption('--method') ?? 'GET');
 $query = cliOption('--query');
 $_GET = $query ? (json_decode(base64_decode($query),true) ?: []) : [];
 $body = cliOption('--body');
-if ($body !== null) putenv('BLUECAT_TEST_JSON='.base64_decode($body));
+$bodyFile = cliOption('--body-file');
+if ($body !== null) {
+    putenv('BLUECAT_TEST_JSON='.base64_decode($body));
+} elseif ($bodyFile !== null) {
+    putenv('BLUECAT_TEST_JSON_FILE='.$bodyFile);
+}
 require $root.'/assets/api/'.$endpoint;

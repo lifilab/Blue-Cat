@@ -52,6 +52,9 @@ function insertAuditoria($conn, $uid, $accion, $detalle, $idRef = null, $tablaRe
 if ($method === 'GET') {
     // Accept both names while older POS clients still send `accion`.
     $action = $_GET['action'] ?? $_GET['accion'] ?? '';
+    if ($action !== 'permisos_usuario' && !verificarPermiso('pos','ver')) {
+        json(['error'=>true,'message'=>'Permiso denegado: pos.ver'],403);
+    }
 
     switch ($action) {
         case 'dashboard':           GET_dashboard();          break;
@@ -721,9 +724,9 @@ function GET_reporte_productos_top() {
 function GET_config_boleta() {
     global $conn, $uid, $tenant;
 
-    $sql = "SELECT * FROM config_boleta WHERE id_user = ? AND activo = 1 ORDER BY id_config DESC LIMIT 1";
+    $sql = "SELECT * FROM config_boleta WHERE id_cuenta = ? AND activo = 1 ORDER BY id_config DESC LIMIT 1";
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param('i', $uid);
+    $stmt->bind_param('i', $tenant->accountId);
     $stmt->execute();
     $result = $stmt->get_result();
     $config = $result->fetch_assoc();
