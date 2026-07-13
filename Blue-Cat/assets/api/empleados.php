@@ -8,6 +8,47 @@ function requierePermiso($modulo, $accion) {
     }
 }
 
+function requireEmpleadoActionScope(mysqli $conn, int $uid, string $accion, ArrayObject $input): void {
+    $accountId = tenantContext($uid)->accountId;
+    $employeeId = (int)($input['id_empleado'] ?? 0);
+    if ($employeeId > 0) {
+        $stmt = $conn->prepare('SELECT 1 FROM empleado WHERE id_empleado=? AND id_cuenta=? LIMIT 1');
+        $stmt->bind_param('ii', $employeeId, $accountId);
+        $stmt->execute(); $ok = (bool)$stmt->get_result()->fetch_row(); $stmt->close();
+        if (!$ok) json(['error'=>'Recurso no encontrado'],404);
+    }
+
+    $children = [
+        'contrato_eliminar' => ['empleado_contrato','id_contrato','id_contrato'],
+        'documento_eliminar' => ['empleado_documento','id_documento','id_documento'],
+        'asistencia_editar' => ['empleado_asistencia','id_asistencia','id_asistencia'],
+        'asistencia_eliminar' => ['empleado_asistencia','id_asistencia','id_asistencia'],
+        'turno_editar' => ['empleado_turno','id_turno','id_turno'],
+        'vacacion_aprobar' => ['empleado_vacacion','id_vacacion','id_vacacion'],
+        'vacacion_eliminar' => ['empleado_vacacion','id_vacacion','id_vacacion'],
+        'permiso_aprobar' => ['empleado_permiso','id_permiso','id_permiso'],
+        'permiso_eliminar' => ['empleado_permiso','id_permiso','id_permiso'],
+        'licencia_eliminar' => ['empleado_licencia','id_licencia','id_licencia'],
+        'hora_extra_aprobar' => ['empleado_hora_extra','id_hora_extra','id_hora_extra'],
+        'hora_extra_eliminar' => ['empleado_hora_extra','id_hora_extra','id_hora_extra'],
+        'remuneracion_eliminar' => ['empleado_remuneracion','id_remuneracion','id_remuneracion'],
+        'beneficio_eliminar' => ['empleado_beneficio','id_beneficio','id_beneficio'],
+        'capacitacion_editar' => ['empleado_capacitacion','id_capacitacion','id_capacitacion'],
+        'capacitacion_eliminar' => ['empleado_capacitacion','id_capacitacion','id_capacitacion'],
+        'evaluacion_eliminar' => ['empleado_evaluacion','id_evaluacion','id_evaluacion'],
+        'activo_devolver' => ['empleado_activo','id_activo','id_activo'],
+        'activo_eliminar' => ['empleado_activo','id_activo','id_activo'],
+    ];
+    if (!isset($children[$accion])) return;
+    [$table,$idColumn,$inputKey] = $children[$accion];
+    $childId = (int)($input[$inputKey] ?? 0);
+    if ($childId <= 0) return;
+    $stmt = $conn->prepare("SELECT 1 FROM `{$table}` child JOIN empleado e ON e.id_empleado=child.id_empleado WHERE child.`{$idColumn}`=? AND e.id_cuenta=? LIMIT 1");
+    $stmt->bind_param('ii', $childId, $accountId);
+    $stmt->execute(); $ok = (bool)$stmt->get_result()->fetch_row(); $stmt->close();
+    if (!$ok) json(['error'=>'Recurso no encontrado'],404);
+}
+
 $conn = getDB();
 
 // Debug: catch fatal errors
@@ -38,6 +79,7 @@ switch ($method) {
     case 'POST':
         $input = getJsonInput();
         $accion = $input['accion'] ?? 'crear';
+        requireEmpleadoActionScope($conn, $uid, $accion, $input);
         if ($accion === 'crear') { requierePermiso('empleados','crear'); crearEmpleado($conn, $uid, $input); }
         elseif ($accion === 'editar') { requierePermiso('empleados','editar'); editarEmpleado($conn, $uid, $input); }
         elseif ($accion === 'cambiar_estado') { requierePermiso('empleados','editar'); cambiarEstado($conn, $uid, $input); }
@@ -96,6 +138,7 @@ function addAuditoria($conn, $id_empleado, $id_user, $accion, $detalle = null) {
 
 /* ── LIST ── */
 function listEmpleados($conn, $uid) {
+    $context = requireTenantContext($uid);
     $q = $_GET['q'] ?? '';
     $estado = $_GET['estado'] ?? '';
     $departamento = $_GET['departamento'] ?? '';
@@ -104,10 +147,9 @@ function listEmpleados($conn, $uid) {
     $limit = min(100, max(10, (int)($_GET['limit'] ?? 50)));
     $offset = ($page-1)*$limit;
 
-    $cuentaIds = getUsuariosCuentaIds($conn, $uid);
-    $where = " WHERE e.id_user IN (" . implode(",", array_fill(0, count($cuentaIds), "?")) . ")";
-    $params = $cuentaIds;
-    $types = str_repeat("i", count($cuentaIds));
+    $where = " WHERE e.id_cuenta = ?";
+    $params = [$context->accountId];
+    $types = "i";
 
     if ($q) {
         $where .= " AND (e.nombres LIKE ? OR e.apellidos LIKE ? OR e.rut LIKE ? OR e.codigo LIKE ? OR e.correo_corporativo LIKE ? OR e.telefono LIKE ? OR e.cargo LIKE ? OR e.departamento LIKE ?)";
@@ -148,17 +190,16 @@ function listEmpleados($conn, $uid) {
 
 /* ── GET PROFILE ── */
 function getEmpleado($conn, $uid, $id) {
-    $stmt = $conn->prepare("SELECT * FROM empleado WHERE id_empleado = ?");
-    $stmt->bind_param("i", $id);
+    $context = requireTenantContext($uid);
+    $stmt = $conn->prepare("SELECT * FROM empleado WHERE id_empleado = ? AND id_cuenta = ?");
+    $stmt->bind_param("ii", $id, $context->accountId);
     $stmt->execute();
     $e = $stmt->get_result()->fetch_assoc();
     $stmt->close();
-    $cuentaIds = getUsuariosCuentaIds($conn, $uid);
-    if (!$e || !in_array((int)$e['id_user'], $cuentaIds, true))
-        json(['error' => 'Empleado no encontrado'], 404);
+    if (!$e) json(['error' => 'Empleado no encontrado'], 404);
 
-    $stmt = $conn->prepare("SELECT id_user, nombre, correo, activo FROM usuario WHERE id_empleado = ? LIMIT 1");
-    $stmt->bind_param("i", $id);
+    $stmt = $conn->prepare("SELECT id_user, nombre, correo, activo FROM usuario WHERE id_empleado = ? AND id_cuenta = ? LIMIT 1");
+    $stmt->bind_param("ii", $id, $context->accountId);
     $stmt->execute();
     $credencial = $stmt->get_result()->fetch_assoc();
     $stmt->close();
@@ -211,6 +252,7 @@ function getEmpleado($conn, $uid, $id) {
 
 /* ── CREATE ── */
 function crearEmpleado($conn, $uid, $input) {
+    $context = requireTenantContext($uid);
     $nombres = $input['nombres'] ?? '';
     $apellidos = $input['apellidos'] ?? '';
     if (empty($nombres) || empty($apellidos))
@@ -223,10 +265,11 @@ function crearEmpleado($conn, $uid, $input) {
 
     // Determine linked user ID (use provided id_user or default to owner)
     $link_user_id = isset($input['id_user']) && $input['id_user'] ? (int)$input['id_user'] : $uid;
+    requireTenantUser($conn, $context, $link_user_id);
 
     // Auto-code
-    $stmt = $conn->prepare("SELECT COALESCE(MAX(id_empleado), 0) + 1 as n FROM empleado WHERE id_user = ?");
-    $stmt->bind_param("i", $uid);
+    $stmt = $conn->prepare("SELECT COALESCE(MAX(id_empleado), 0) + 1 as n FROM empleado WHERE id_cuenta = ?");
+    $stmt->bind_param("i", $context->accountId);
     $stmt->execute();
     $r = $stmt->get_result();
     $codigo = 'EMP-' . str_pad((int) $r->fetch_assoc()['n'], 4, '0', STR_PAD_LEFT);
@@ -235,10 +278,10 @@ function crearEmpleado($conn, $uid, $input) {
     // String fields
     $fields = ['rut', 'nombres', 'apellidos', 'fecha_nacimiento', 'sexo', 'estado_civil', 'nacionalidad', 'fotografia', 'correo_personal', 'correo_corporativo', 'telefono', 'celular', 'direccion', 'comuna', 'ciudad', 'region', 'pais', 'contacto_emergencia_nombre', 'contacto_emergencia_telefono', 'cargo', 'departamento', 'sucursal', 'centro_costo', 'jefe_directo', 'fecha_ingreso', 'fecha_termino', 'tipo_contrato', 'modalidad', 'horario', 'afp', 'salud', 'caja_compensacion', 'mutual', 'banco', 'tipo_cuenta', 'numero_cuenta', 'forma_pago', 'tramo_impuesto', 'retenciones', 'observaciones', 'estado'];
     $intFields = ['sueldo_base', 'asignaciones', 'bonos', 'comisiones'];
-    $vals = [$codigo, $link_user_id];
-    $phs = ['?', '?'];
-    $sql_fields = 'codigo, id_user';
-    $types = 'si';
+    $vals = [$codigo, $link_user_id, $context->accountId];
+    $phs = ['?', '?', '?'];
+    $sql_fields = 'codigo, id_user, id_cuenta';
+    $types = 'sii';
 
     foreach ($fields as $f) {
         if (isset($input[$f]) && $input[$f] !== '') {
@@ -268,8 +311,8 @@ function crearEmpleado($conn, $uid, $input) {
     if (isset($input['id_user']) && $input['id_user']) {
         $link_uid = (int) $input['id_user'];
         $nombre_completo = $nombres . ' ' . $apellidos;
-        $stmt2 = $conn->prepare("UPDATE usuario SET nombre_completo = ?, id_empleado = ? WHERE id_user = ?");
-        $stmt2->bind_param("sii", $nombre_completo, $id, $link_uid);
+        $stmt2 = $conn->prepare("UPDATE usuario SET nombre_completo = ?, id_empleado = ? WHERE id_user = ? AND id_cuenta = ?");
+        $stmt2->bind_param("siii", $nombre_completo, $id, $link_uid, $context->accountId);
         $stmt2->execute();
         $stmt2->close();
     }
@@ -280,6 +323,7 @@ function crearEmpleado($conn, $uid, $input) {
 
 /* ── EDIT ── */
 function editarEmpleado($conn, $uid, $input) {
+    $context = requireTenantContext($uid);
     $id = (int) ($input['id_empleado'] ?? 0);
     if (!$id)
         json(['error' => 'ID requerido'], 400);
@@ -308,10 +352,10 @@ function editarEmpleado($conn, $uid, $input) {
         json(['error' => 'Sin cambios'], 400);
     $params[] = $id;
     $types .= 'i';
-    $params[] = $uid;
+    $params[] = $context->accountId;
     $types .= 'i';
 
-    $sql = "UPDATE empleado SET " . implode(', ', $sets) . " WHERE id_empleado = ? AND id_user = ?";
+    $sql = "UPDATE empleado SET " . implode(', ', $sets) . " WHERE id_empleado = ? AND id_cuenta = ?";
     $stmt = $conn->prepare($sql);
     $stmt->bind_param($types, ...$params);
     $stmt->execute();
@@ -322,17 +366,20 @@ function editarEmpleado($conn, $uid, $input) {
 
 /* ── CAMBIAR ESTADO ── */
 function cambiarEstado($conn, $uid, $input) {
+    $context = requireTenantContext($uid);
     $id = (int) ($input['id_empleado'] ?? 0);
     $estado = $input['estado'] ?? '';
     if (!$id || !$estado)
         json(['error' => 'Datos inválidos'], 400);
-    $stmt = $conn->prepare("SELECT estado FROM empleado WHERE id_empleado = ?");
-    $stmt->bind_param("i", $id);
+    $stmt = $conn->prepare("SELECT estado FROM empleado WHERE id_empleado = ? AND id_cuenta = ?");
+    $stmt->bind_param("ii", $id, $context->accountId);
     $stmt->execute();
-    $old = $stmt->get_result()->fetch_assoc()['estado'];
+    $oldRow = $stmt->get_result()->fetch_assoc();
+    if (!$oldRow) { $stmt->close(); json(['error'=>'Empleado no encontrado'],404); }
+    $old = $oldRow['estado'];
     $stmt->close();
-    $stmt = $conn->prepare("UPDATE empleado SET estado = ? WHERE id_empleado = ?");
-    $stmt->bind_param("si", $estado, $id);
+    $stmt = $conn->prepare("UPDATE empleado SET estado = ? WHERE id_empleado = ? AND id_cuenta = ?");
+    $stmt->bind_param("sii", $estado, $id, $context->accountId);
     $stmt->execute();
     $stmt->close();
     addAuditoria($conn, $id, $uid, 'ESTADO', "$old -> $estado");
@@ -343,11 +390,12 @@ function cambiarEstado($conn, $uid, $input) {
    CONTRATOS
    ═══════════════════════════════════════════ */
 function crearContrato($conn, $uid, $input) {
+    $context = requireTenantContext($uid);
     $id_emp = (int) ($input['id_empleado'] ?? 0);
     if (!$id_emp)
         json(['error' => 'ID requerido'], 400);
-    $stmt = $conn->prepare("SELECT id_empleado FROM empleado WHERE id_empleado = ? AND id_user = ?");
-    $stmt->bind_param("ii", $id_emp, $uid);
+    $stmt = $conn->prepare("SELECT id_empleado FROM empleado WHERE id_empleado = ? AND id_cuenta = ?");
+    $stmt->bind_param("ii", $id_emp, $context->accountId);
     $stmt->execute();
     $r = $stmt->get_result();
     if (!$r->num_rows) { $stmt->close(); json(['error'=>'No autorizado'], 403); }
@@ -390,13 +438,14 @@ function eliminarContrato($conn, $uid, $input) {
    DOCUMENTOS
    ═══════════════════════════════════════════ */
 function crearDocumento($conn, $uid, $input) {
+    $context = requireTenantContext($uid);
     $id_emp = (int) ($input['id_empleado'] ?? 0);
     $tipo = $input['tipo'] ?? '';
     $nombre = $input['nombre'] ?? '';
     if (!$id_emp || empty($nombre))
         json(['error' => 'Datos inválidos'], 400);
-    $stmt = $conn->prepare("SELECT id_empleado FROM empleado WHERE id_empleado = ? AND id_user = ?");
-    $stmt->bind_param("ii", $id_emp, $uid);
+    $stmt = $conn->prepare("SELECT id_empleado FROM empleado WHERE id_empleado = ? AND id_cuenta = ?");
+    $stmt->bind_param("ii", $id_emp, $context->accountId);
     $stmt->execute();
     $r = $stmt->get_result();
     if (!$r->num_rows) { $stmt->close(); json(['error'=>'No autorizado'], 403); }
@@ -1034,12 +1083,13 @@ function eliminarActivo($conn, $uid, $input) {
    HISTORIAL
    ═══════════════════════════════════════════ */
 function crearHistorial($conn, $uid, $input) {
+    $context = requireTenantContext($uid);
     $id_emp = (int) ($input['id_empleado'] ?? 0);
     $tipo = $input['tipo'] ?? '';
     if (!$id_emp || empty($tipo))
         json(['error' => 'Datos inválidos'], 400);
-    $stmt = $conn->prepare("SELECT id_empleado FROM empleado WHERE id_empleado = ? AND id_user = ?");
-    $stmt->bind_param("ii", $id_emp, $uid);
+    $stmt = $conn->prepare("SELECT id_empleado FROM empleado WHERE id_empleado = ? AND id_cuenta = ?");
+    $stmt->bind_param("ii", $id_emp, $context->accountId);
     $stmt->execute();
     $r = $stmt->get_result();
     if (!$r->num_rows) { $stmt->close(); json(['error'=>'No autorizado'], 403); }
@@ -1060,6 +1110,7 @@ function crearHistorial($conn, $uid, $input) {
    CREAR CREDENCIALES
    ═══════════════════════════════════════════ */
 function crearCredenciales($conn, $uid, $input) {
+    $context = requireTenantContext($uid);
     $id_emp = (int)($input['id_empleado'] ?? 0);
     $correo = $input['correo'] ?? '';
     $password = $input['password'] ?? '';
@@ -1067,14 +1118,14 @@ function crearCredenciales($conn, $uid, $input) {
 
     if (!$id_emp || !$correo || !$password) json(['error'=>'Empleado, correo y contraseña requeridos'], 400);
 
-    $stmt = $conn->prepare("SELECT e.id_empleado, e.nombres, e.apellidos FROM empleado e WHERE e.id_empleado = ? AND e.id_user = ?");
-    $stmt->bind_param("ii", $id_emp, $uid);
+    $stmt = $conn->prepare("SELECT e.id_empleado, e.nombres, e.apellidos FROM empleado e WHERE e.id_empleado = ? AND e.id_cuenta = ?");
+    $stmt->bind_param("ii", $id_emp, $context->accountId);
     $stmt->execute();
     $emp = $stmt->get_result()->fetch_assoc();
     $stmt->close();
     if (!$emp) json(['error'=>'Empleado no encontrado'], 404);
-    $stmt = $conn->prepare("SELECT id_user FROM usuario WHERE id_empleado = ? LIMIT 1");
-    $stmt->bind_param("i", $id_emp);
+    $stmt = $conn->prepare("SELECT id_user FROM usuario WHERE id_empleado = ? AND id_cuenta = ? LIMIT 1");
+    $stmt->bind_param("ii", $id_emp, $context->accountId);
     $stmt->execute();
     $existing = $stmt->get_result()->fetch_assoc();
     $stmt->close();
@@ -1098,10 +1149,8 @@ function crearCredenciales($conn, $uid, $input) {
         while (true) { $checkUser->bind_param("s", $username); $checkUser->execute(); if (!$checkUser->get_result()->num_rows) break; $username = $baseUsername . $suffix++; }
         $checkUser->close();
 
-        $stmt = $conn->prepare("SELECT COALESCE(id_cuenta,id_user) AS id_cuenta,id_sucursal FROM usuario WHERE id_user=?");
-        $stmt->bind_param("i", $uid); $stmt->execute(); $owner=$stmt->get_result()->fetch_assoc(); $stmt->close();
-        $idCuenta=(int)($owner['id_cuenta']??$uid); $idSucursal=$owner['id_sucursal']!==null?(int)$owner['id_sucursal']:null;
-        $stmt = $conn->prepare("UPDATE usuario SET id_cuenta=COALESCE(id_cuenta,id_user) WHERE id_user=?"); $stmt->bind_param("i",$uid); $stmt->execute(); $stmt->close();
+        $idCuenta = $context->accountId;
+        $idSucursal = $context->branchId;
         $stmt = $conn->prepare("INSERT INTO usuario (nombre, correo, password, nombre_completo, activo, validar_sesion, id_empleado, id_cuenta, id_sucursal) VALUES (?,?,?,?,1,1,?,?,?)");
         $stmt->bind_param("ssssiii", $username, $correo, $hash, $nombre_completo, $id_emp, $idCuenta, $idSucursal);
         $stmt->execute();
@@ -1109,6 +1158,7 @@ function crearCredenciales($conn, $uid, $input) {
         $stmt->close();
 
         if ($id_rol) {
+            requireTenantRole($conn, $context, $id_rol, true);
             $stmt = $conn->prepare("INSERT INTO usuario_rol (id_user, id_rol) VALUES (?, ?)");
             $stmt->bind_param("ii", $id_user, $id_rol);
             $stmt->execute();
@@ -1134,10 +1184,11 @@ function crearCredenciales($conn, $uid, $input) {
    ELIMINAR EMPLEADO
    ═══════════════════════════════════════════ */
 function eliminarEmpleado($conn, $uid, $input) {
+    $context = requireTenantContext($uid);
     $id = (int)($input['id_empleado'] ?? 0);
     if (!$id) json(['error'=>'ID requerido'],400);
-    $stmt = $conn->prepare("SELECT id_empleado, nombres, apellidos, id_user FROM empleado WHERE id_empleado = ?");
-    $stmt->bind_param("i", $id);
+    $stmt = $conn->prepare("SELECT id_empleado, nombres, apellidos, id_user FROM empleado WHERE id_empleado = ? AND id_cuenta = ?");
+    $stmt->bind_param("ii", $id, $context->accountId);
     $stmt->execute();
     $emp = $stmt->get_result()->fetch_assoc();
     $stmt->close();
@@ -1145,8 +1196,8 @@ function eliminarEmpleado($conn, $uid, $input) {
     $conn->begin_transaction();
     try {
         // Desactivar solo la credencial propia del empleado, nunca al usuario propietario.
-        $stmt = $conn->prepare("UPDATE usuario SET activo=0 WHERE id_empleado = ?");
-        $stmt->bind_param("i", $id); $stmt->execute(); $stmt->close();
+        $stmt = $conn->prepare("UPDATE usuario SET activo=0 WHERE id_empleado = ? AND id_cuenta = ?");
+        $stmt->bind_param("ii", $id, $context->accountId); $stmt->execute(); $stmt->close();
         // Auditoría ANTES de eliminar
         $ip = $_SERVER['REMOTE_ADDR'] ?? '';
         $detalle = "Empleado {$emp['nombres']} {$emp['apellidos']} eliminado";
@@ -1155,8 +1206,8 @@ function eliminarEmpleado($conn, $uid, $input) {
         $stmt->execute();
         $stmt->close();
         // Eliminar empleado
-        $stmt = $conn->prepare("DELETE FROM empleado WHERE id_empleado = ?");
-        $stmt->bind_param("i", $id);
+        $stmt = $conn->prepare("DELETE FROM empleado WHERE id_empleado = ? AND id_cuenta = ?");
+        $stmt->bind_param("ii", $id, $context->accountId);
         $stmt->execute();
         $stmt->close();
         $conn->commit();
@@ -1171,30 +1222,32 @@ function eliminarEmpleado($conn, $uid, $input) {
    VINCULAR USUARIO
    ═══════════════════════════════════════════ */
 function vincularUsuario($conn, $uid, $input) {
+    $context = requireTenantContext($uid);
     $id_emp = (int)($input['id_empleado'] ?? 0);
     $id_user_v = (int)($input['id_user'] ?? 0);
     if (!$id_emp || !$id_user_v) json(['error' => 'Datos requeridos'], 400);
     // Verify empleado belongs to user
-    $stmt = $conn->prepare("SELECT id_empleado FROM empleado WHERE id_empleado = ? AND id_user = ?");
-    $stmt->bind_param("ii", $id_emp, $uid);
+    $stmt = $conn->prepare("SELECT id_empleado FROM empleado WHERE id_empleado = ? AND id_cuenta = ?");
+    $stmt->bind_param("ii", $id_emp, $context->accountId);
     $stmt->execute();
     $r = $stmt->get_result();
     if (!$r->num_rows) { $stmt->close(); json(['error' => 'No autorizado'], 403); }
     $stmt->close();
-    $stmt = $conn->prepare("UPDATE empleado SET id_user = ? WHERE id_empleado = ?");
-    $stmt->bind_param("ii", $id_user_v, $id_emp);
+    requireTenantUser($conn, $context, $id_user_v);
+    $stmt = $conn->prepare("UPDATE empleado SET id_user = ? WHERE id_empleado = ? AND id_cuenta = ?");
+    $stmt->bind_param("iii", $id_user_v, $id_emp, $context->accountId);
     $stmt->execute();
     $stmt->close();
     // Also update usuario with empleado data
-    $stmt = $conn->prepare("SELECT nombres, apellidos, correo_corporativo FROM empleado WHERE id_empleado = ?");
-    $stmt->bind_param("i", $id_emp);
+    $stmt = $conn->prepare("SELECT nombres, apellidos, correo_corporativo FROM empleado WHERE id_empleado = ? AND id_cuenta = ?");
+    $stmt->bind_param("ii", $id_emp, $context->accountId);
     $stmt->execute();
     $emp = $stmt->get_result()->fetch_assoc();
     $stmt->close();
     if ($emp) {
         $nombre_completo = $emp['nombres'] . ' ' . $emp['apellidos'];
-        $stmt = $conn->prepare("UPDATE usuario SET nombre_completo = ?, id_empleado = ? WHERE id_user = ?");
-        $stmt->bind_param("sii", $nombre_completo, $id_emp, $id_user_v);
+        $stmt = $conn->prepare("UPDATE usuario SET nombre_completo = ?, id_empleado = ? WHERE id_user = ? AND id_cuenta = ?");
+        $stmt->bind_param("siii", $nombre_completo, $id_emp, $id_user_v, $context->accountId);
         $stmt->execute();
         $stmt->close();
     }
@@ -1203,33 +1256,35 @@ function vincularUsuario($conn, $uid, $input) {
 }
 
 function editarCredenciales($conn, $uid, $input) {
+    $context = requireTenantContext($uid);
     $id_emp=(int)($input['id_empleado']??0); $nombre=trim($input['nombre']??''); $correo=trim($input['correo']??'');
     $password=$input['password']??''; $activo=!empty($input['activo'])?1:0;
     if(!$id_emp||$nombre==='') json(['error'=>'Empleado y usuario requeridos'],400);
     if($correo!==''&&!filter_var($correo,FILTER_VALIDATE_EMAIL)) json(['error'=>'Correo no válido'],400);
     if($password!==''&&strlen($password)<6) json(['error'=>'La contraseña debe tener al menos 6 caracteres'],400);
-    $stmt=$conn->prepare("SELECT u.id_user FROM usuario u JOIN empleado e ON e.id_empleado=u.id_empleado WHERE e.id_empleado=? AND e.id_user=? LIMIT 1");
-    $stmt->bind_param("ii",$id_emp,$uid);$stmt->execute();$row=$stmt->get_result()->fetch_assoc();$stmt->close();
+    $stmt=$conn->prepare("SELECT u.id_user FROM usuario u JOIN empleado e ON e.id_empleado=u.id_empleado AND e.id_cuenta=u.id_cuenta WHERE e.id_empleado=? AND e.id_cuenta=? LIMIT 1");
+    $stmt->bind_param("ii",$id_emp,$context->accountId);$stmt->execute();$row=$stmt->get_result()->fetch_assoc();$stmt->close();
     if(!$row) json(['error'=>'Credenciales no encontradas'],404); $id_user=(int)$row['id_user'];
     $stmt=$conn->prepare("SELECT id_user FROM usuario WHERE (nombre=? OR (?<>'' AND correo=?)) AND id_user<>? LIMIT 1");
     $stmt->bind_param("sssi",$nombre,$correo,$correo,$id_user);$stmt->execute();$dup=$stmt->get_result()->fetch_assoc();$stmt->close();
     if($dup) json(['error'=>'El usuario o correo ya está registrado'],400);
-    if($password!==''){$hash=password_hash($password,PASSWORD_DEFAULT);$stmt=$conn->prepare("UPDATE usuario SET nombre=?,correo=?,password=?,activo=? WHERE id_user=?");$stmt->bind_param("sssii",$nombre,$correo,$hash,$activo,$id_user);}
-    else{$stmt=$conn->prepare("UPDATE usuario SET nombre=?,correo=?,activo=? WHERE id_user=?");$stmt->bind_param("ssii",$nombre,$correo,$activo,$id_user);}
+    if($password!==''){$hash=password_hash($password,PASSWORD_DEFAULT);$stmt=$conn->prepare("UPDATE usuario SET nombre=?,correo=?,password=?,activo=? WHERE id_user=? AND id_cuenta=?");$stmt->bind_param("sssiii",$nombre,$correo,$hash,$activo,$id_user,$context->accountId);}
+    else{$stmt=$conn->prepare("UPDATE usuario SET nombre=?,correo=?,activo=? WHERE id_user=? AND id_cuenta=?");$stmt->bind_param("ssiii",$nombre,$correo,$activo,$id_user,$context->accountId);}
     $stmt->execute();$stmt->close(); addAuditoria($conn,$id_emp,$uid,'EDITAR_CREDENCIALES',"Usuario #$id_user actualizado");
     json(['success'=>true,'usuario'=>$nombre,'correo'=>$correo,'activo'=>$activo]);
 }
 
 function eliminarCredenciales($conn, $uid, $input) {
+    $context = requireTenantContext($uid);
     $id_emp=(int)($input['id_empleado']??0); if(!$id_emp) json(['error'=>'ID requerido'],400);
-    $stmt=$conn->prepare("SELECT u.id_user,u.correo FROM usuario u JOIN empleado e ON e.id_empleado=u.id_empleado WHERE e.id_empleado=? AND e.id_user=? LIMIT 1");
-    $stmt->bind_param("ii",$id_emp,$uid);$stmt->execute();$row=$stmt->get_result()->fetch_assoc();$stmt->close();
+    $stmt=$conn->prepare("SELECT u.id_user,u.correo FROM usuario u JOIN empleado e ON e.id_empleado=u.id_empleado AND e.id_cuenta=u.id_cuenta WHERE e.id_empleado=? AND e.id_cuenta=? LIMIT 1");
+    $stmt->bind_param("ii",$id_emp,$context->accountId);$stmt->execute();$row=$stmt->get_result()->fetch_assoc();$stmt->close();
     if(!$row) json(['error'=>'Credenciales no encontradas'],404); $id_user=(int)$row['id_user'];
     if($id_user===$uid) json(['error'=>'No puede eliminar la cuenta con la que inició sesión'],400);
     $conn->begin_transaction();
     try {
         $stmt=$conn->prepare("DELETE FROM usuario_rol WHERE id_user=?");$stmt->bind_param("i",$id_user);$stmt->execute();$stmt->close();
-        $stmt=$conn->prepare("DELETE FROM usuario WHERE id_user=? AND id_empleado=?");$stmt->bind_param("ii",$id_user,$id_emp);$stmt->execute();
+        $stmt=$conn->prepare("DELETE FROM usuario WHERE id_user=? AND id_empleado=? AND id_cuenta=?");$stmt->bind_param("iii",$id_user,$id_emp,$context->accountId);$stmt->execute();
         if($stmt->affected_rows!==1) throw new Exception('No se pudo eliminar la cuenta');$stmt->close();
         addAuditoria($conn,$id_emp,$uid,'ELIMINAR_CREDENCIALES',"Usuario #$id_user eliminado");
         $conn->commit(); json(['success'=>true]);

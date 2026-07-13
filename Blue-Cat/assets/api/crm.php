@@ -2,6 +2,7 @@
 require_once __DIR__ . '/_db.php';
 $uid = requireUser();
 $conn = getDB();
+$accountId = tenantContext($uid)->accountId;
 $input = getJsonInput();
 $accion = $input['accion'] ?? '';
 
@@ -20,31 +21,39 @@ function requierePermiso($modulo, $accion) {
     }
 }
 
+$crmReadActions = ['dashboard','clientes','cliente_obtener','cliente','actividades','creditos','etiquetas','cliente_etiquetas','reporte_abc','reporte_morosidad','auditoria'];
+$crmCreateActions = ['contacto_crear','direccion_crear','actividad_crear'];
+$crmEditActions = ['credito_crear','credito_editar','actividad_completar','cliente_etiqueta_toggle'];
+if (in_array($accion, $crmReadActions, true)) requierePermiso('crm','ver');
+if (in_array($accion, $crmCreateActions, true)) requierePermiso('crm','crear');
+if (in_array($accion, $crmEditActions, true)) requierePermiso('crm','editar');
+if ($accion === 'contacto_eliminar') requierePermiso('crm','eliminar');
+
 switch ($accion) {
 
 // ═══ DASHBOARD ═══
 case 'dashboard':
     $d = [];
-    $d['total_clientes'] = (int)$conn->query("SELECT COUNT(*) AS t FROM cliente")->fetch_assoc()['t'];
-    $d['clientes_activos'] = (int)$conn->query("SELECT COUNT(*) AS t FROM cliente WHERE activo=1")->fetch_assoc()['t'];
-    $d['clientes_nuevos_hoy'] = (int)$conn->query("SELECT COUNT(*) AS t FROM cliente WHERE DATE(fecha_creacion)=CURDATE()")->fetch_assoc()['t'];
-    $d['clientes_nuevos_mes'] = (int)$conn->query("SELECT COUNT(*) AS t FROM cliente WHERE YEAR(fecha_creacion)=YEAR(CURDATE()) AND MONTH(fecha_creacion)=MONTH(CURDATE())")->fetch_assoc()['t'];
-    $d['clientes_vip'] = (int)$conn->query("SELECT COUNT(*) AS t FROM cliente WHERE estado='vip'")->fetch_assoc()['t'];
-    $d['clientes_morosos'] = (int)$conn->query("SELECT COUNT(DISTINCT id_cliente) AS t FROM factura WHERE (estado='VENCIDA' OR estado='PENDIENTE') AND id_cliente IS NOT NULL")->fetch_assoc()['t'];
-    $r = $conn->query("SELECT COALESCE(SUM(limite_credito),0) AS total_otorgado, COALESCE(SUM(credito_utilizado),0) AS total_utilizado FROM cliente_credito");
+    $d['total_clientes'] = (int)$conn->query("SELECT COUNT(*) AS t FROM cliente WHERE id_cuenta=$accountId")->fetch_assoc()['t'];
+    $d['clientes_activos'] = (int)$conn->query("SELECT COUNT(*) AS t FROM cliente WHERE id_cuenta=$accountId AND activo=1")->fetch_assoc()['t'];
+    $d['clientes_nuevos_hoy'] = (int)$conn->query("SELECT COUNT(*) AS t FROM cliente WHERE id_cuenta=$accountId AND DATE(fecha_creacion)=CURDATE()")->fetch_assoc()['t'];
+    $d['clientes_nuevos_mes'] = (int)$conn->query("SELECT COUNT(*) AS t FROM cliente WHERE id_cuenta=$accountId AND YEAR(fecha_creacion)=YEAR(CURDATE()) AND MONTH(fecha_creacion)=MONTH(CURDATE())")->fetch_assoc()['t'];
+    $d['clientes_vip'] = (int)$conn->query("SELECT COUNT(*) AS t FROM cliente WHERE id_cuenta=$accountId AND estado='vip'")->fetch_assoc()['t'];
+    $d['clientes_morosos'] = (int)$conn->query("SELECT COUNT(DISTINCT id_cliente) AS t FROM factura WHERE id_cuenta=$accountId AND (estado='VENCIDA' OR estado='PENDIENTE') AND id_cliente IS NOT NULL")->fetch_assoc()['t'];
+    $r = $conn->query("SELECT COALESCE(SUM(limite_credito),0) AS total_otorgado, COALESCE(SUM(credito_utilizado),0) AS total_utilizado FROM cliente_credito cr JOIN cliente c ON c.id_cliente=cr.id_cliente WHERE c.id_cuenta=$accountId");
     $cred = $r->fetch_assoc();
     $d['credito_total_otorgado'] = (int)$cred['total_otorgado'];
     $d['credito_utilizado'] = (int)$cred['total_utilizado'];
-    $d['actividades_pendientes'] = (int)$conn->query("SELECT COUNT(*) AS t FROM cliente_actividad WHERE estado='pendiente'")->fetch_assoc()['t'];
-    $r = $conn->query("SELECT COALESCE(SUM(p.precio_total),0) AS t FROM pedido p WHERE p.id_cliente IS NOT NULL AND MONTH(p.fecha)=MONTH(CURDATE()) AND YEAR(p.fecha)=YEAR(CURDATE()) AND p.anulado=0");
+    $d['actividades_pendientes'] = (int)$conn->query("SELECT COUNT(*) AS t FROM cliente_actividad a JOIN cliente c ON c.id_cliente=a.id_cliente WHERE c.id_cuenta=$accountId AND a.estado='pendiente'")->fetch_assoc()['t'];
+    $r = $conn->query("SELECT COALESCE(SUM(p.precio_total),0) AS t FROM pedido p WHERE p.id_cuenta=$accountId AND p.id_cliente IS NOT NULL AND MONTH(p.fecha)=MONTH(CURDATE()) AND YEAR(p.fecha)=YEAR(CURDATE()) AND p.anulado=0");
     $d['ventas_mes'] = (int)$r->fetch_assoc()['t'];
-    $r = $conn->query("SELECT id_cliente, codigo, rut, razon_social, nombre, correo, telefono, ciudad, estado, fecha_creacion FROM cliente ORDER BY fecha_creacion DESC LIMIT 5");
+    $r = $conn->query("SELECT id_cliente, codigo, rut, razon_social, nombre, correo, telefono, ciudad, estado, fecha_creacion FROM cliente WHERE id_cuenta=$accountId ORDER BY fecha_creacion DESC LIMIT 5");
     $d['ultimos_clientes'] = $r->fetch_all(MYSQLI_ASSOC);
-    $r = $conn->query("SELECT c.id_cliente, c.codigo, c.razon_social, c.nombre, COALESCE(SUM(p.precio_total),0) AS total_mes FROM cliente c JOIN pedido p ON c.id_cliente=p.id_cliente WHERE MONTH(p.fecha)=MONTH(CURDATE()) AND YEAR(p.fecha)=YEAR(CURDATE()) AND p.anulado=0 GROUP BY c.id_cliente, c.codigo, c.razon_social, c.nombre ORDER BY total_mes DESC LIMIT 5");
+    $r = $conn->query("SELECT c.id_cliente, c.codigo, c.razon_social, c.nombre, COALESCE(SUM(p.precio_total),0) AS total_mes FROM cliente c JOIN pedido p ON c.id_cliente=p.id_cliente AND p.id_cuenta=c.id_cuenta WHERE c.id_cuenta=$accountId AND MONTH(p.fecha)=MONTH(CURDATE()) AND YEAR(p.fecha)=YEAR(CURDATE()) AND p.anulado=0 GROUP BY c.id_cliente, c.codigo, c.razon_social, c.nombre ORDER BY total_mes DESC LIMIT 5");
     $d['clientes_top'] = $r->fetch_all(MYSQLI_ASSOC);
-    $r = $conn->query("SELECT categoria, COUNT(*) AS total FROM cliente WHERE categoria IS NOT NULL AND categoria != '' GROUP BY categoria ORDER BY total DESC");
+    $r = $conn->query("SELECT categoria, COUNT(*) AS total FROM cliente WHERE id_cuenta=$accountId AND categoria IS NOT NULL AND categoria != '' GROUP BY categoria ORDER BY total DESC");
     $d['chart_categorias'] = $r->fetch_all(MYSQLI_ASSOC);
-    $r = $conn->query("SELECT ciudad, COUNT(*) AS total FROM cliente WHERE ciudad IS NOT NULL AND ciudad != '' GROUP BY ciudad ORDER BY total DESC");
+    $r = $conn->query("SELECT ciudad, COUNT(*) AS total FROM cliente WHERE id_cuenta=$accountId AND ciudad IS NOT NULL AND ciudad != '' GROUP BY ciudad ORDER BY total DESC");
     $d['chart_ciudades'] = $r->fetch_all(MYSQLI_ASSOC);
     json($d);
 
@@ -59,9 +68,9 @@ case 'clientes':
     $tipo = $input['tipo'] ?? '';
     $ciudad = $input['ciudad'] ?? '';
 
-    $where = [];
-    $filterParams = [];
-    $filterTypes = '';
+    $where = ['c.id_cuenta=?'];
+    $filterParams = [$accountId];
+    $filterTypes = 'i';
 
     if ($q) {
         $where[] = "(c.razon_social LIKE ? OR c.rut LIKE ? OR c.nombre LIKE ? OR c.correo LIKE ? OR c.telefono LIKE ? OR c.codigo LIKE ?)";
@@ -125,7 +134,7 @@ case 'cliente':
     $id = (int)($input['id'] ?? $input['id_cliente'] ?? 0);
     if (!$id) json(['error' => 'ID requerido'], 400);
 
-    $stmt = $conn->prepare("SELECT * FROM cliente WHERE id_cliente=? AND id_user=?");
+    $stmt = $conn->prepare("SELECT * FROM cliente WHERE id_cliente=? AND id_cuenta=(SELECT id_cuenta FROM usuario WHERE id_user=?)");
     $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -185,7 +194,7 @@ case 'cliente_crear':
 
     $rut = $input['rut'] ?? '';
     if ($rut) {
-        $stmt = $conn->prepare("SELECT id_cliente FROM cliente WHERE rut=?");
+        $stmt = $conn->prepare("SELECT id_cliente FROM cliente WHERE rut=? AND id_cuenta=$accountId");
         $stmt->bind_param("s", $rut);
         $stmt->execute();
         $r = $stmt->get_result();
@@ -193,9 +202,10 @@ case 'cliente_crear':
         if ($r->num_rows) json(['error' => 'El RUT ya está registrado'], 400);
     }
 
-    $stmt = $conn->prepare("INSERT INTO cliente (id_user, rut, razon_social, nombre, direccion, ciudad, comuna, correo, telefono, giro, tipo, categoria, origen) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)");
-    $stmt->bind_param("issssssssssss",
+    $stmt = $conn->prepare("INSERT INTO cliente (id_user, id_cuenta, rut, razon_social, nombre, direccion, ciudad, comuna, correo, telefono, giro, tipo, categoria, origen) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+    $stmt->bind_param("iissssssssssss",
         $uid,
+        $accountId,
         $input['rut'] ?? '',
         $razon,
         $input['nombre'] ?? '',
@@ -241,7 +251,7 @@ case 'cliente_editar':
 
     if (isset($input['rut']) && $input['rut']) {
         $rutEditar = $input['rut'];
-        $stmt = $conn->prepare("SELECT id_cliente FROM cliente WHERE rut=? AND id_cliente!=?");
+        $stmt = $conn->prepare("SELECT id_cliente FROM cliente WHERE rut=? AND id_cuenta=$accountId AND id_cliente!=?");
         $stmt->bind_param("si", $rutEditar, $id);
         $stmt->execute();
         $r = $stmt->get_result();
@@ -250,8 +260,8 @@ case 'cliente_editar':
     }
 
     $params[] = $id; $types .= 'i';
-    $params[] = $uid; $types .= 'i';
-    $stmt = $conn->prepare("UPDATE cliente SET " . implode(', ', $sets) . " WHERE id_cliente = ? AND id_user = ?");
+    $params[] = $accountId; $types .= 'i';
+    $stmt = $conn->prepare("UPDATE cliente SET " . implode(', ', $sets) . " WHERE id_cliente = ? AND id_cuenta = ?");
     $stmt->bind_param($types, ...$params);
     $stmt->execute();
     $stmt->close();
@@ -265,7 +275,7 @@ case 'cliente_eliminar':
     $id = (int)($input['id_cliente'] ?? 0);
     if (!$id) json(['error' => 'ID requerido'], 400);
 
-    $stmt = $conn->prepare("SELECT id_cliente FROM cliente WHERE id_cliente=? AND id_user=?");
+    $stmt = $conn->prepare("SELECT id_cliente FROM cliente WHERE id_cliente=? AND id_cuenta=(SELECT id_cuenta FROM usuario WHERE id_user=?)");
     $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -282,7 +292,7 @@ case 'cliente_eliminar':
 case 'contacto_crear':
     $id_cliente = (int)($input['id_cliente'] ?? 0);
     if (!$id_cliente) json(['error' => 'ID cliente requerido'], 400);
-    $stmt = $conn->prepare("SELECT id_cliente FROM cliente WHERE id_cliente=? AND id_user=?");
+    $stmt = $conn->prepare("SELECT id_cliente FROM cliente WHERE id_cliente=? AND id_cuenta=(SELECT id_cuenta FROM usuario WHERE id_user=?)");
     $stmt->bind_param("ii", $id_cliente, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -320,7 +330,7 @@ case 'contacto_eliminar':
     $id = (int)($input['id'] ?? 0);
     if (!$id) json(['error' => 'ID requerido'], 400);
 
-    $stmt = $conn->prepare("SELECT cc.id_contacto FROM cliente_contacto cc JOIN cliente c ON cc.id_cliente=c.id_cliente WHERE cc.id_contacto=? AND c.id_user=?");
+    $stmt = $conn->prepare("SELECT cc.id_contacto FROM cliente_contacto cc JOIN cliente c ON cc.id_cliente=c.id_cliente WHERE cc.id_contacto=? AND c.id_cuenta=(SELECT id_cuenta FROM usuario WHERE id_user=?)");
     $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -339,7 +349,7 @@ case 'contacto_eliminar':
 case 'direccion_crear':
     $id_cliente = (int)($input['id_cliente'] ?? 0);
     if (!$id_cliente) json(['error' => 'ID cliente requerido'], 400);
-    $stmt = $conn->prepare("SELECT id_cliente FROM cliente WHERE id_cliente=? AND id_user=?");
+    $stmt = $conn->prepare("SELECT id_cliente FROM cliente WHERE id_cliente=? AND id_cuenta=(SELECT id_cuenta FROM usuario WHERE id_user=?)");
     $stmt->bind_param("ii", $id_cliente, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -375,7 +385,7 @@ case 'credito_crear':
 case 'credito_editar':
     $id_cliente = (int)($input['id_cliente'] ?? 0);
     if (!$id_cliente) json(['error' => 'ID cliente requerido'], 400);
-    $stmt = $conn->prepare("SELECT id_cliente FROM cliente WHERE id_cliente=? AND id_user=?");
+    $stmt = $conn->prepare("SELECT id_cliente FROM cliente WHERE id_cliente=? AND id_cuenta=(SELECT id_cuenta FROM usuario WHERE id_user=?)");
     $stmt->bind_param("ii", $id_cliente, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -411,7 +421,7 @@ case 'credito_editar':
 case 'actividad_crear':
     $id_cliente = (int)($input['id_cliente'] ?? 0);
     if (!$id_cliente) json(['error' => 'ID cliente requerido'], 400);
-    $stmt = $conn->prepare("SELECT id_cliente FROM cliente WHERE id_cliente=? AND id_user=?");
+    $stmt = $conn->prepare("SELECT id_cliente FROM cliente WHERE id_cliente=? AND id_cuenta=(SELECT id_cuenta FROM usuario WHERE id_user=?)");
     $stmt->bind_param("ii", $id_cliente, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -438,7 +448,7 @@ case 'actividad_crear':
 case 'actividad_completar':
     $id = (int)($input['id'] ?? 0);
     if (!$id) json(['error' => 'ID requerido'], 400);
-    $stmt = $conn->prepare("SELECT a.id_actividad FROM cliente_actividad a JOIN cliente c ON a.id_cliente=c.id_cliente WHERE a.id_actividad=? AND c.id_user=?");
+    $stmt = $conn->prepare("SELECT a.id_actividad FROM cliente_actividad a JOIN cliente c ON a.id_cliente=c.id_cliente WHERE a.id_actividad=? AND c.id_cuenta=(SELECT id_cuenta FROM usuario WHERE id_user=?)");
     $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -457,10 +467,10 @@ case 'actividades':
     $page = max(1, (int)($input['page'] ?? 1));
     $limit = min(200, (int)($input['limit'] ?? 50));
     $offset = ($page-1)*$limit;
-    $r = $conn->query("SELECT COUNT(*) as t FROM cliente_actividad");
+    $r = $conn->query("SELECT COUNT(*) as t FROM cliente_actividad a JOIN cliente c ON c.id_cliente=a.id_cliente WHERE c.id_cuenta=$accountId");
     $total = (int)$r->fetch_assoc()['t'];
     $items = [];
-    $stmt = $conn->prepare("SELECT a.*, c.nombre as cliente_nombre, c.razon_social FROM cliente_actividad a JOIN cliente c ON a.id_cliente=c.id_cliente ORDER BY a.fecha_planificada DESC LIMIT ? OFFSET ?");
+    $stmt = $conn->prepare("SELECT a.*, c.nombre as cliente_nombre, c.razon_social FROM cliente_actividad a JOIN cliente c ON a.id_cliente=c.id_cliente WHERE c.id_cuenta=$accountId ORDER BY a.fecha_planificada DESC LIMIT ? OFFSET ?");
     $stmt->bind_param("ii", $limit, $offset);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -472,14 +482,14 @@ case 'actividades':
 // ═══ CREDITOS (list) ═══
 case 'creditos':
     $items = []; 
-    $r = $conn->query("SELECT cr.*, c.nombre as cliente, c.razon_social FROM cliente_credito cr JOIN cliente c ON cr.id_cliente=c.id_cliente ORDER BY c.razon_social");
+    $r = $conn->query("SELECT cr.*, c.nombre as cliente, c.razon_social FROM cliente_credito cr JOIN cliente c ON cr.id_cliente=c.id_cliente WHERE c.id_cuenta=$accountId ORDER BY c.razon_social");
     while ($f = $r->fetch_assoc()) $items[] = $f;
     json($items);
     break;
 
 // ═══ ETIQUETAS ═══
 case 'etiquetas':
-    $r = $conn->query("SELECT * FROM cliente_etiqueta ORDER BY nombre");
+    $r = $conn->query("SELECT * FROM cliente_etiqueta WHERE id_cuenta=$accountId ORDER BY nombre");
     $items = [];
     while ($f = $r->fetch_assoc()) $items[] = $f;
     json($items);
@@ -488,8 +498,9 @@ case 'etiquetas':
 case 'cliente_etiquetas':
     $id_cliente = (int)($input['id_cliente'] ?? 0);
     if (!$id_cliente) json(['error' => 'ID cliente requerido'], 400);
+    requireTenantEntity($conn, tenantContext($uid), 'cliente', $id_cliente);
 
-    $stmt = $conn->prepare("SELECT e.*, CASE WHEN rel.id_rel IS NOT NULL THEN 1 ELSE 0 END AS asignado FROM cliente_etiqueta e LEFT JOIN cliente_etiqueta_rel rel ON e.id_etiqueta=rel.id_etiqueta AND rel.id_cliente=? ORDER BY e.nombre");
+    $stmt = $conn->prepare("SELECT e.*, CASE WHEN rel.id_rel IS NOT NULL THEN 1 ELSE 0 END AS asignado FROM cliente_etiqueta e LEFT JOIN cliente_etiqueta_rel rel ON e.id_etiqueta=rel.id_etiqueta AND rel.id_cliente=? WHERE e.id_cuenta=$accountId ORDER BY e.nombre");
     $stmt->bind_param("i", $id_cliente);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -503,12 +514,18 @@ case 'cliente_etiqueta_toggle':
     $id_cliente = (int)($input['id_cliente'] ?? 0);
     $id_etiqueta = (int)($input['id_etiqueta'] ?? 0);
     if (!$id_cliente || !$id_etiqueta) json(['error' => 'Datos requeridos'], 400);
-    $stmt = $conn->prepare("SELECT id_cliente FROM cliente WHERE id_cliente=? AND id_user=?");
+    $stmt = $conn->prepare("SELECT id_cliente FROM cliente WHERE id_cliente=? AND id_cuenta=(SELECT id_cuenta FROM usuario WHERE id_user=?)");
     $stmt->bind_param("ii", $id_cliente, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
     $stmt->close();
     if (!$r->num_rows) json(['error'=>'No autorizado'], 403);
+    $stmt = $conn->prepare("SELECT id_etiqueta FROM cliente_etiqueta WHERE id_etiqueta=? AND id_cuenta=?");
+    $stmt->bind_param("ii", $id_etiqueta, $accountId);
+    $stmt->execute();
+    $tagResult = $stmt->get_result();
+    $stmt->close();
+    if (!$tagResult->num_rows) json(['error'=>'No autorizado'], 403);
 
     $stmt = $conn->prepare("SELECT id_rel FROM cliente_etiqueta_rel WHERE id_cliente=? AND id_etiqueta=?");
     $stmt->bind_param("ii", $id_cliente, $id_etiqueta);
@@ -533,7 +550,7 @@ case 'cliente_etiqueta_toggle':
 
 // ═══ REPORTE ABC ═══
 case 'reporte_abc':
-    $r = $conn->query("SELECT c.id_cliente, c.nombre, c.razon_social, COALESCE(SUM(p.precio_total),0) AS total_compras FROM cliente c JOIN pedido p ON c.id_cliente=p.id_cliente WHERE p.anulado=0 GROUP BY c.id_cliente, c.nombre, c.razon_social ORDER BY total_compras DESC");
+    $r = $conn->query("SELECT c.id_cliente, c.nombre, c.razon_social, COALESCE(SUM(p.precio_total),0) AS total_compras FROM cliente c JOIN pedido p ON c.id_cliente=p.id_cliente AND p.id_cuenta=c.id_cuenta WHERE c.id_cuenta=$accountId AND p.anulado=0 GROUP BY c.id_cliente, c.nombre, c.razon_social ORDER BY total_compras DESC");
     $items = [];
     while ($f = $r->fetch_assoc()) $items[] = $f;
 
@@ -553,7 +570,7 @@ case 'reporte_abc':
 
 // ═══ REPORTE MOROSIDAD ═══
 case 'reporte_morosidad':
-    $r = $conn->query("SELECT c.id_cliente, c.razon_social, c.nombre, c.rut, c.correo, c.telefono, f.id_factura, f.numero, f.tipo, f.total, f.saldo, f.estado, f.fecha_emision, f.fecha_vencimiento, DATEDIFF(CURDATE(), f.fecha_vencimiento) AS dias_vencidos FROM factura f JOIN cliente c ON f.id_cliente=c.id_cliente WHERE (f.estado='VENCIDA' OR f.estado='PENDIENTE') ORDER BY f.fecha_vencimiento ASC");
+    $r = $conn->query("SELECT c.id_cliente, c.razon_social, c.nombre, c.rut, c.correo, c.telefono, f.id_factura, f.numero, f.tipo, f.total, f.saldo, f.estado, f.fecha_emision, f.fecha_vencimiento, DATEDIFF(CURDATE(), f.fecha_vencimiento) AS dias_vencidos FROM factura f JOIN cliente c ON f.id_cliente=c.id_cliente WHERE f.id_cuenta=$accountId AND c.id_cuenta=$accountId AND (f.estado='VENCIDA' OR f.estado='PENDIENTE') ORDER BY f.fecha_vencimiento ASC");
     $items = [];
     while ($f = $r->fetch_assoc()) $items[] = $f;
     json($items);
@@ -564,10 +581,10 @@ case 'auditoria':
     $limit = min(200, (int)($input['limit'] ?? 100));
     $offset = ($page - 1) * $limit;
 
-    $r = $conn->query("SELECT COUNT(*) AS t FROM cliente_auditoria");
+    $r = $conn->query("SELECT COUNT(*) AS t FROM cliente_auditoria a JOIN usuario u ON u.id_user=a.id_user WHERE u.id_cuenta=$accountId");
     $total = (int)$r->fetch_assoc()['t'];
 
-    $stmt = $conn->prepare("SELECT a.*, u.nombre AS user_nombre FROM cliente_auditoria a LEFT JOIN usuario u ON a.id_user=u.id_user ORDER BY a.created_at DESC LIMIT ? OFFSET ?");
+    $stmt = $conn->prepare("SELECT a.*, u.nombre AS user_nombre FROM cliente_auditoria a LEFT JOIN usuario u ON a.id_user=u.id_user WHERE u.id_cuenta=$accountId ORDER BY a.created_at DESC LIMIT ? OFFSET ?");
     $stmt->bind_param("ii", $limit, $offset);
     $stmt->execute();
     $r = $stmt->get_result();

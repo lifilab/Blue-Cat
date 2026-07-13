@@ -2,7 +2,8 @@
 date_default_timezone_set('America/Santiago');
 
 require_once __DIR__ . '/env_loader.php';
-loadEnv(dirname(__DIR__, 2) . '/.env');
+$configuredEnv = getenv('BLUECAT_ENV_FILE');
+loadEnv($configuredEnv !== false && $configuredEnv !== '' ? $configuredEnv : dirname(__DIR__, 2) . '/.env');
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Blue-Cat ERP v1.0 — Core Database Helper
@@ -94,6 +95,18 @@ function makeJsonInputObject(array $data): ArrayObject {
 
 function getJsonInput(): ?ArrayObject {
     $raw = file_get_contents('php://input');
+    $testJson = getenv('BLUECAT_TEST_JSON');
+    $testJsonFile = getenv('BLUECAT_TEST_JSON_FILE');
+    if (getenv('APP_ENV') === 'test' && $testJson !== false) {
+        $raw = $testJson;
+    } elseif (getenv('APP_ENV') === 'test' && $testJsonFile !== false) {
+        $realTestFile = realpath($testJsonFile);
+        $realTemp = realpath(sys_get_temp_dir());
+        $tempPrefix = $realTemp ? rtrim($realTemp, '\\/').DIRECTORY_SEPARATOR : '';
+        if ($realTestFile && $tempPrefix !== '' && str_starts_with($realTestFile, $tempPrefix) && filesize($realTestFile) <= 4 * 1024 * 1024) {
+            $raw = file_get_contents($realTestFile);
+        }
+    }
     if ($raw === false || trim($raw) === '') {
         return null;
     }
@@ -121,9 +134,13 @@ function verificarPermiso(string $modulo, string $accion): bool {
               FROM permiso p
               JOIN rol_permiso rp ON p.id_permiso = rp.id_permiso
               JOIN usuario_rol ur ON rp.id_rol = ur.id_rol
+              JOIN rol r ON r.id_rol = ur.id_rol
+              JOIN usuario actor ON actor.id_user = ur.id_user
               WHERE ur.id_user = ?
                 AND p.modulo   = ?
-                AND p.accion   = ?";
+                AND p.accion   = ?
+                AND r.activo = 1
+                AND (r.id_cuenta IS NULL OR r.id_cuenta = actor.id_cuenta)";
     $stmt  = $conn->prepare($sql);
     $stmt->bind_param('iss', $uid, $modulo, $accion);
     $stmt->execute();
@@ -145,15 +162,16 @@ function verificarPermiso(string $modulo, string $accion): bool {
 
 function logAccess(int $uid, string $accion, string $resultado, string $detalle = ''): void {
     $conn = getDB();
+    $idCuenta = getCuentaId($conn, $uid);
     $nivel = ($resultado === 'OK') ? 'INFO' : 'WARN';
-    $sql  = "INSERT INTO core_auditoria (id_user, accion, resultado, valor_nuevo, nivel, created_at)
-             VALUES (?, ?, ?, ?, ?, NOW())";
+    $sql  = "INSERT INTO core_auditoria (id_cuenta, id_user, accion, resultado, valor_nuevo, nivel, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, NOW())";
     $stmt = $conn->prepare($sql);
     if (!$stmt) {
         return;
     }
     $detalleJson = json_encode(['detalle' => $detalle], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    $stmt->bind_param('issss', $uid, $accion, $resultado, $detalleJson, $nivel);
+    $stmt->bind_param('iissss', $idCuenta, $uid, $accion, $resultado, $detalleJson, $nivel);
     try {
         $stmt->execute();
     } catch (mysqli_sql_exception $e) {
@@ -166,8 +184,10 @@ function logAccess(int $uid, string $accion, string $resultado, string $detalle 
 // stock.disponible is the SINGLE source of truth
 
 function getDefaultBodega(mysqli $conn): int {
-    $sql  = "SELECT id_bodega FROM bodega WHERE codigo = 'BOD-001' AND estado = 'ACTIVA' LIMIT 1";
+    $idCuenta = tenantContext()->accountId;
+    $sql  = "SELECT id_bodega FROM bodega WHERE id_cuenta=? AND codigo = 'BOD-001' AND estado = 'ACTIVA' LIMIT 1";
     $stmt = $conn->prepare($sql);
+    $stmt->bind_param('i', $idCuenta);
     $stmt->execute();
     $result = $stmt->get_result();
     if ($row = $result->fetch_assoc()) {
@@ -176,8 +196,9 @@ function getDefaultBodega(mysqli $conn): int {
     }
     $stmt->close();
 
-    $sql  = "SELECT id_bodega FROM bodega WHERE activo = 1 ORDER BY id_bodega ASC LIMIT 1";
+    $sql  = "SELECT id_bodega FROM bodega WHERE id_cuenta=? AND estado='ACTIVA' ORDER BY id_bodega ASC LIMIT 1";
     $stmt = $conn->prepare($sql);
+    $stmt->bind_param('i', $idCuenta);
     $stmt->execute();
     $result = $stmt->get_result();
     if ($row = $result->fetch_assoc()) {
@@ -222,6 +243,14 @@ function actualizarStock(mysqli $conn, int $id_producto, int $id_bodega, string 
     if (abs($delta) < 0.000001) {
         return 0;
     }
+
+    $idCuenta = tenantContext()->accountId;
+    $scope = $conn->prepare("SELECT 1 FROM producto p JOIN bodega b ON b.id_bodega=? AND b.id_cuenta=p.id_cuenta WHERE p.id_producto=? AND p.id_cuenta=? LIMIT 1");
+    $scope->bind_param('iii', $id_bodega, $id_producto, $idCuenta);
+    $scope->execute();
+    $allowedScope = (bool)$scope->get_result()->fetch_row();
+    $scope->close();
+    if (!$allowedScope) throw new RuntimeException('Producto o bodega fuera del contexto de cuenta');
 
     $campoSql = "`{$campo}`";
     $stmt = $conn->prepare("UPDATE stock SET {$campoSql} = {$campoSql} + ? WHERE id_producto=? AND id_bodega=? AND {$campoSql} + ? >= 0 ORDER BY id_stock ASC LIMIT 1");
@@ -385,3 +414,5 @@ function sqlUsuariosCuentaIn(mysqli $conn, int $uid, string $column): string {
     $placeholders = implode(',', array_fill(0, count($ids), '?'));
     return "{$column} IN ({$placeholders})";
 }
+
+require_once __DIR__ . '/_context.php';

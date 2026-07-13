@@ -20,15 +20,18 @@ foreach ([$source,$target] as $schema) {
 $db=new mysqli($_ENV['DB_HOST']??'127.0.0.1',$_ENV['DB_USER']??'',$_ENV['DB_PASSWORD']??'',null,(int)($_ENV['DB_PORT']??3306));
 $stmt=$db->prepare("SELECT TABLE_NAME FROM information_schema.tables WHERE table_schema=? AND table_type='BASE TABLE' ORDER BY TABLE_NAME");
 $stmt->bind_param('s',$source);$stmt->execute();$result=$stmt->get_result();
-$differences=[];$equal=0;
+$differences=[];$expectedGrowth=[];$equal=0;
+$growthTables=['permiso','rol','rol_permiso'];
 while($row=$result->fetch_assoc()){
     $table=$row['TABLE_NAME'];
     $a=(int)$db->query("SELECT COUNT(*) c FROM {$source}.{$table}")->fetch_assoc()['c'];
     $b=(int)$db->query("SELECT COUNT(*) c FROM {$target}.{$table}")->fetch_assoc()['c'];
-    if($a!==$b)$differences[]=['tabla'=>$table,'origen'=>$a,'destino'=>$b];else$equal++;
+    if($a===$b){$equal++;continue;}
+    if(in_array($table,$growthTables,true)&&$b>=$a){$expectedGrowth[]=['tabla'=>$table,'origen'=>$a,'destino'=>$b];continue;}
+    $differences[]=['tabla'=>$table,'origen'=>$a,'destino'=>$b];
 }
 $stmt->close();
 $fk=(int)$db->query("SELECT COUNT(*) c FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA='{$target}'")->fetch_assoc()['c'];
-$report=['source'=>$source,'target'=>$target,'tablas_iguales'=>$equal,'diferencias'=>$differences,'foreign_keys'=>$fk,'ok'=>count($differences)===0];
+$report=['source'=>$source,'target'=>$target,'tablas_iguales'=>$equal,'crecimientos_esperados'=>$expectedGrowth,'diferencias'=>$differences,'foreign_keys'=>$fk,'ok'=>count($differences)===0];
 echo json_encode($report,JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE).PHP_EOL;
 exit($report['ok']?0:1);
