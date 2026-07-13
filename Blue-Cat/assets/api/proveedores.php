@@ -13,6 +13,7 @@ $method = $_SERVER['REQUEST_METHOD'];
 
 switch ($method) {
     case 'GET':
+        requierePermiso('proveedores','ver');
         $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
         if ($id) getProveedor($conn, $uid, $id);
         else listProveedores($conn, $uid);
@@ -25,17 +26,18 @@ switch ($method) {
         elseif ($accion === 'cambiar_estado') { requierePermiso('proveedores','editar'); cambiarEstado($conn, $uid, $input); }
         elseif ($accion === 'contacto_crear') { requierePermiso('proveedores','crear'); crearContacto($conn, $uid, $input); }
         elseif ($accion === 'contacto_editar') { requierePermiso('proveedores','editar'); editarContacto($conn, $uid, $input); }
-        elseif ($accion === 'contacto_eliminar') eliminarContacto($conn, $uid, $input);
+        elseif ($accion === 'contacto_eliminar') { requierePermiso('proveedores','eliminar'); eliminarContacto($conn, $uid, $input); }
         elseif ($accion === 'banco_crear') { requierePermiso('proveedores','crear'); crearBanco($conn, $uid, $input); }
-        elseif ($accion === 'banco_eliminar') eliminarBanco($conn, $uid, $input);
+        elseif ($accion === 'banco_eliminar') { requierePermiso('proveedores','eliminar'); eliminarBanco($conn, $uid, $input); }
         elseif ($accion === 'producto_asociar') { requierePermiso('proveedores','editar'); asociarProducto($conn, $uid, $input); }
-        elseif ($accion === 'producto_eliminar') eliminarProductoAsoc($conn, $uid, $input);
+        elseif ($accion === 'producto_eliminar') { requierePermiso('proveedores','eliminar'); eliminarProductoAsoc($conn, $uid, $input); }
         else json(['error'=>'Acción no válida'], 400);
         break;
     default: json(['error'=>'Método no soportado'], 405);
 }
 
 function listProveedores($conn, $uid) {
+    $accountId = tenantContext($uid)->accountId;
     $q = $_GET['q'] ?? '';
     $estado = $_GET['estado'] ?? '';
     $categoria = $_GET['categoria'] ?? '';
@@ -44,7 +46,7 @@ function listProveedores($conn, $uid) {
     $limit = min(100, max(10, (int)($_GET['limit'] ?? 50)));
     $offset = ($page-1)*$limit;
 
-    $where = " WHERE p.id_user = $uid";
+    $where = " WHERE p.id_cuenta = $accountId";
     $params = []; $types = '';
 
     if ($q) {
@@ -74,8 +76,25 @@ function listProveedores($conn, $uid) {
     json(['items'=>$items, 'total'=>$total, 'page'=>$page]);
 }
 
+function requireProveedorChild($conn, $uid, $table, $primaryKey, $id) {
+    $allowed = [
+        'proveedor_contacto' => 'id_contacto',
+        'proveedor_banco' => 'id_banco',
+        'proveedor_producto' => 'id_prov_producto',
+    ];
+    if (!isset($allowed[$table]) || $allowed[$table] !== $primaryKey) json(['error'=>'Entidad no valida'], 400);
+    $accountId = tenantContext($uid)->accountId;
+    $stmt = $conn->prepare("SELECT x.id_proveedor FROM $table x JOIN proveedor p ON p.id_proveedor=x.id_proveedor WHERE x.$primaryKey=? AND p.id_cuenta=?");
+    $stmt->bind_param("ii", $id, $accountId);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    if (!$row) json(['error'=>'No autorizado'], 403);
+    return (int)$row['id_proveedor'];
+}
+
 function getProveedor($conn, $uid, $id) {
-    $stmt = $conn->prepare("SELECT * FROM proveedor WHERE id_proveedor = ? AND id_user = ?");
+    $stmt = $conn->prepare("SELECT * FROM proveedor WHERE id_proveedor = ? AND id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user=?)");
     $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
     $p = $stmt->get_result()->fetch_assoc();
@@ -108,7 +127,7 @@ function crearProveedor($conn, $uid, $input) {
     if (empty($razon)) json(['error'=>'Razón social es obligatoria'], 400);
 
     // Auto code
-    $stmt = $conn->prepare("SELECT COALESCE(MAX(id_proveedor),0)+1 as n FROM proveedor WHERE id_user = ?");
+    $stmt = $conn->prepare("SELECT COALESCE(MAX(id_proveedor),0)+1 as n FROM proveedor WHERE id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user=?)");
     $stmt->bind_param("i", $uid);
     $stmt->execute();
     $r = $stmt->get_result()->fetch_assoc();
@@ -173,7 +192,7 @@ function editarProveedor($conn, $uid, $input) {
     if (empty($sets)) json(['error'=>'Sin cambios'], 400);
     $params[] = $id; $types .= 'i';
     $params[] = $uid; $types .= 'i';
-    $sql = "UPDATE proveedor SET " . implode(', ', $sets) . " WHERE id_proveedor = ? AND id_user = ?";
+    $sql = "UPDATE proveedor SET " . implode(', ', $sets) . " WHERE id_proveedor = ? AND id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user=?)";
     $stmt = $conn->prepare($sql);
     $stmt->bind_param($types, ...$params);
     $stmt->execute();
@@ -186,13 +205,16 @@ function cambiarEstado($conn, $uid, $input) {
     $id = (int)($input['id_proveedor'] ?? 0);
     $estado = $input['estado'] ?? '';
     if (!$id || !$estado) json(['error'=>'Datos inválidos'], 400);
-    $stmt = $conn->prepare("SELECT estado FROM proveedor WHERE id_proveedor = ? AND id_user = ?");
+    $stmt = $conn->prepare("SELECT estado FROM proveedor WHERE id_proveedor = ? AND id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user=?)");
     $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
-    $old = $stmt->get_result()->fetch_assoc()['estado'];
+    $row = $stmt->get_result()->fetch_assoc();
     $stmt->close();
-    $stmt = $conn->prepare("UPDATE proveedor SET estado = ? WHERE id_proveedor = ?");
-    $stmt->bind_param("si", $estado, $id);
+    if (!$row) json(['error'=>'No autorizado'], 403);
+    $old = $row['estado'];
+    $accountId = tenantContext($uid)->accountId;
+    $stmt = $conn->prepare("UPDATE proveedor SET estado = ? WHERE id_proveedor = ? AND id_cuenta = ?");
+    $stmt->bind_param("sii", $estado, $id, $accountId);
     $stmt->execute();
     $stmt->close();
     addProvHistorial($conn, $id, $uid, 'ESTADO', $old, $estado);
@@ -204,6 +226,7 @@ function crearContacto($conn, $uid, $input) {
     $id_prov = (int)($input['id_proveedor'] ?? 0);
     $nombre = $input['nombre'] ?? '';
     if (!$id_prov || empty($nombre)) json(['error'=>'Datos inválidos'], 400);
+    requireTenantEntity($conn, tenantContext($uid), 'proveedor', $id_prov);
     $cargo = $input['cargo'] ?? '';
     $depto = $input['departamento'] ?? '';
     $correo = $input['correo'] ?? '';
@@ -230,6 +253,7 @@ function crearContacto($conn, $uid, $input) {
 function editarContacto($conn, $uid, $input) {
     $id = (int)($input['id_contacto'] ?? 0);
     if (!$id) json(['error'=>'ID requerido'], 400);
+    requireProveedorChild($conn, $uid, 'proveedor_contacto', 'id_contacto', $id);
     $fields = ['nombre','cargo','departamento','correo','telefono','celular','whatsapp','notas'];
     $sets = []; $params = []; $types = '';
     foreach ($fields as $f) {
@@ -261,12 +285,7 @@ function editarContacto($conn, $uid, $input) {
 function eliminarContacto($conn, $uid, $input) {
     $id = (int)($input['id_contacto'] ?? 0);
     if (!$id) json(['error'=>'ID requerido'], 400);
-    $stmt = $conn->prepare("SELECT p.id_user FROM proveedor_contacto pc JOIN proveedor p ON pc.id_proveedor = p.id_proveedor WHERE pc.id_contacto = ?");
-    $stmt->bind_param("i", $id);
-    $stmt->execute();
-    $r = $stmt->get_result()->fetch_assoc();
-    $stmt->close();
-    if (!$r || (int)$r['id_user'] !== $uid) json(['error'=>'No autorizado'], 403);
+    requireProveedorChild($conn, $uid, 'proveedor_contacto', 'id_contacto', $id);
     $stmt2 = $conn->prepare("DELETE FROM proveedor_contacto WHERE id_contacto = ?");
     $stmt2->bind_param("i", $id);
     $stmt2->execute();
@@ -279,6 +298,7 @@ function crearBanco($conn, $uid, $input) {
     $id_prov = (int)($input['id_proveedor'] ?? 0);
     $banco = $input['banco'] ?? '';
     if (!$id_prov || empty($banco)) json(['error'=>'Datos inválidos'], 400);
+    requireTenantEntity($conn, tenantContext($uid), 'proveedor', $id_prov);
     $tipo = $input['tipo_cuenta'] ?? '';
     $num = $input['numero_cuenta'] ?? '';
     $titular = $input['titular'] ?? '';
@@ -302,12 +322,7 @@ function crearBanco($conn, $uid, $input) {
 function eliminarBanco($conn, $uid, $input) {
     $id = (int)($input['id_banco'] ?? 0);
     if (!$id) json(['error'=>'ID requerido'], 400);
-    $stmt = $conn->prepare("SELECT p.id_user FROM proveedor_banco pb JOIN proveedor p ON pb.id_proveedor = p.id_proveedor WHERE pb.id_banco = ?");
-    $stmt->bind_param("i", $id);
-    $stmt->execute();
-    $r = $stmt->get_result()->fetch_assoc();
-    $stmt->close();
-    if (!$r || (int)$r['id_user'] !== $uid) json(['error'=>'No autorizado'], 403);
+    requireProveedorChild($conn, $uid, 'proveedor_banco', 'id_banco', $id);
     $stmt2 = $conn->prepare("DELETE FROM proveedor_banco WHERE id_banco = ?");
     $stmt2->bind_param("i", $id);
     $stmt2->execute();
@@ -323,7 +338,8 @@ function asociarProducto($conn, $uid, $input) {
     $precio = (int)($input['precio_compra'] ?? 0);
     if (!$id_prov || !$id_prod) json(['error'=>'Datos inválidos'], 400);
 
-    $stmt = $conn->prepare("SELECT nombre_producto, codigo_de_barras, precio_venta, categoria FROM producto WHERE id_producto = ? AND id_user = ?");
+    requireTenantEntity($conn, tenantContext($uid), 'proveedor', $id_prov);
+    $stmt = $conn->prepare("SELECT nombre_producto, codigo_de_barras, precio_venta, categoria FROM producto WHERE id_producto = ? AND id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user=?)");
     $stmt->bind_param("ii", $id_prod, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -345,12 +361,7 @@ function asociarProducto($conn, $uid, $input) {
 function eliminarProductoAsoc($conn, $uid, $input) {
     $id = (int)($input['id_prov_producto'] ?? 0);
     if (!$id) json(['error'=>'ID requerido'], 400);
-    $stmt = $conn->prepare("SELECT p.id_user FROM proveedor_producto pp JOIN proveedor p ON pp.id_proveedor = p.id_proveedor WHERE pp.id_prov_producto = ?");
-    $stmt->bind_param("i", $id);
-    $stmt->execute();
-    $r = $stmt->get_result()->fetch_assoc();
-    $stmt->close();
-    if (!$r || (int)$r['id_user'] !== $uid) json(['error'=>'No autorizado'], 403);
+    requireProveedorChild($conn, $uid, 'proveedor_producto', 'id_prov_producto', $id);
     $stmt2 = $conn->prepare("DELETE FROM proveedor_producto WHERE id_prov_producto = ?");
     $stmt2->bind_param("i", $id);
     $stmt2->execute();

@@ -59,15 +59,23 @@ if ($accion === 'registrar' && $method === 'POST') {
     $hash=password_hash($password,PASSWORD_DEFAULT);
     $conn->begin_transaction();
     try {
-        $stmt=$conn->prepare('INSERT INTO usuario (nombre,correo,password,validar_sesion,activo) VALUES (?,?,?,0,1)');
-        $stmt->bind_param('sss',$nombre,$correo,$hash); $stmt->execute();
-        $uid=(int)$conn->insert_id; $stmt->close();
-        $stmt=$conn->prepare('UPDATE usuario SET id_cuenta=? WHERE id_user=? AND COALESCE(id_cuenta,0)=0');
-        $stmt->bind_param('ii',$uid,$uid); $stmt->execute(); $stmt->close();
         if ($total === 0) {
+            $stmt=$conn->prepare("INSERT INTO cuenta (nombre,estado) VALUES (?,'ACTIVA')");
+            $stmt->bind_param('s',$nombre); $stmt->execute();
+            $idCuenta=(int)$conn->insert_id; $stmt->close();
+        } else {
+            $idCuenta=requireTenantContext()->accountId;
+        }
+        $stmt=$conn->prepare('INSERT INTO usuario (id_cuenta,nombre,correo,password,validar_sesion,activo) VALUES (?,?,?,?,0,1)');
+        $stmt->bind_param('isss',$idCuenta,$nombre,$correo,$hash); $stmt->execute();
+        $uid=(int)$conn->insert_id; $stmt->close();
+        if ($total === 0) {
+            $stmt=$conn->prepare('UPDATE cuenta SET id_usuario_propietario=? WHERE id_cuenta=?');
+            $stmt->bind_param('ii',$uid,$idCuenta); $stmt->execute(); $stmt->close();
+            provisionTenantRoles($conn,$idCuenta);
             $rol='Administrador';
-            $stmt=$conn->prepare('INSERT IGNORE INTO usuario_rol (id_user,id_rol) SELECT ?,id_rol FROM rol WHERE nombre=? LIMIT 1');
-            $stmt->bind_param('is',$uid,$rol); $stmt->execute(); $stmt->close();
+            $stmt=$conn->prepare('INSERT IGNORE INTO usuario_rol (id_user,id_rol) SELECT ?,id_rol FROM rol WHERE nombre=? AND id_cuenta=? AND es_plantilla=0 LIMIT 1');
+            $stmt->bind_param('isi',$uid,$rol,$idCuenta); $stmt->execute(); $stmt->close();
         }
         $conn->commit();
         authOk('Cuenta creada exitosamente.',['id_user'=>$uid,'rol'=>$total===0?'Administrador':''],201);

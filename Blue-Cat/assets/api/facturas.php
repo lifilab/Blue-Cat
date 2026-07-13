@@ -13,6 +13,7 @@ $method = $_SERVER['REQUEST_METHOD'];
 
 switch ($method) {
     case 'GET':
+        requierePermiso('facturas','ver');
         $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
         if ($id) getFactura($conn, $uid, $id);
         else listFacturas($conn, $uid);
@@ -35,7 +36,7 @@ function listFacturas($conn, $uid) {
     $limit = min(100, max(10, (int)($_GET['limit'] ?? 50)));
     $offset = ($page - 1) * $limit;
 
-    $where = "WHERE f.id_user = ?";
+    $where = "WHERE f.id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user=?)";
     $params = [$uid];
     $types = 'i';
 
@@ -90,7 +91,7 @@ function listFacturas($conn, $uid) {
 
 function getFactura($conn, $uid, $id) {
     $stmt = $conn->prepare("SELECT f.*, c.razon_social, c.rut, c.nombre as cliente_nombre, c.direccion, c.correo, c.telefono, c.giro
-        FROM factura f LEFT JOIN cliente c ON f.id_cliente = c.id_cliente WHERE f.id_factura = ? AND f.id_user = ?");
+        FROM factura f LEFT JOIN cliente c ON f.id_cliente = c.id_cliente WHERE f.id_factura = ? AND f.id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user=?)");
     $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
     $factura = $stmt->get_result()->fetch_assoc();
@@ -127,11 +128,18 @@ function crearFactura($conn, $uid, $input) {
     $vendedor = $input['vendedor'] ?? '';
     $observaciones = $input['observaciones'] ?? '';
     $orden_compra = $input['orden_compra'] ?? '';
+    $tenant = tenantContext($uid);
+    if ($id_cliente) requireTenantEntity($conn, $tenant, 'cliente', $id_cliente);
+    if ($id_pedido) requireTenantEntity($conn, $tenant, 'pedido', $id_pedido);
+    foreach (($input['items'] ?? []) as $facturaItem) {
+        $productoId = (int)($facturaItem['id_producto'] ?? 0);
+        if ($productoId) requireTenantEntity($conn, $tenant, 'producto', $productoId);
+    }
 
     $conn->begin_transaction();
     try {
         // Get next folio
-        $stmt = $conn->prepare("SELECT COALESCE(MAX(folio),0)+1 as next_folio FROM factura WHERE id_user = ?");
+        $stmt = $conn->prepare("SELECT COALESCE(MAX(folio),0)+1 as next_folio FROM factura WHERE id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user=?)");
         $stmt->bind_param("i", $uid);
         $stmt->execute();
         $folio = (int)$stmt->get_result()->fetch_assoc()['next_folio'];
@@ -171,8 +179,8 @@ function crearFactura($conn, $uid, $input) {
 
             // Deduct stock
             if ($id_producto) {
-                $stmt_stock = $conn->prepare("UPDATE producto SET cantidad = GREATEST(cantidad - ?, 0) WHERE id_producto = ?");
-                $stmt_stock->bind_param("ii", $cantidad, $id_producto);
+                $stmt_stock = $conn->prepare("UPDATE producto SET cantidad = GREATEST(cantidad - ?, 0) WHERE id_producto = ? AND id_cuenta = ?");
+                $stmt_stock->bind_param("iii", $cantidad, $id_producto, $tenant->accountId);
                 $stmt_stock->execute();
                 $stmt_stock->close();
             }
@@ -206,7 +214,7 @@ function registrarPago($conn, $uid, $input) {
 
     $conn->begin_transaction();
     try {
-        $stmt = $conn->prepare("SELECT total, pagado, saldo, estado FROM factura WHERE id_factura = ? AND id_user = ?");
+        $stmt = $conn->prepare("SELECT total, pagado, saldo, estado FROM factura WHERE id_factura = ? AND id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user=?)");
         $stmt->bind_param("ii", $id_factura, $uid);
         $stmt->execute();
         $f = $stmt->get_result()->fetch_assoc();
@@ -243,7 +251,7 @@ function anularFactura($conn, $uid, $input) {
 
     $conn->begin_transaction();
     try {
-        $stmt = $conn->prepare("SELECT id_factura, numero, total, estado FROM factura WHERE id_factura = ? AND id_user = ?");
+        $stmt = $conn->prepare("SELECT id_factura, numero, total, estado FROM factura WHERE id_factura = ? AND id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user=?)");
         $stmt->bind_param("ii", $id_factura, $uid);
         $stmt->execute();
         $f = $stmt->get_result()->fetch_assoc();
@@ -261,8 +269,9 @@ function anularFactura($conn, $uid, $input) {
             if ($d['id_producto']) {
                 $cant = $d['cantidad'];
                 $prod = $d['id_producto'];
-                $stmt_rest = $conn->prepare("UPDATE producto SET cantidad = cantidad + ? WHERE id_producto = ?");
-                $stmt_rest->bind_param("ii", $cant, $prod);
+                $accountId = tenantContext($uid)->accountId;
+                $stmt_rest = $conn->prepare("UPDATE producto SET cantidad = cantidad + ? WHERE id_producto = ? AND id_cuenta = ?");
+                $stmt_rest->bind_param("iii", $cant, $prod, $accountId);
                 $stmt_rest->execute();
                 $stmt_rest->close();
             }
@@ -287,17 +296,22 @@ function crearNotaCredito($conn, $uid, $input) {
     $id_factura_original = (int)($input['id_factura'] ?? 0);
     $items = $input['items'] ?? [];
     $motivo = $input['motivo'] ?? 'Nota de crédito';
+    $tenant = tenantContext($uid);
+    foreach ($items as $notaItem) {
+        $productoId = (int)($notaItem['id_producto'] ?? 0);
+        if ($productoId) requireTenantEntity($conn, $tenant, 'producto', $productoId);
+    }
 
     $conn->begin_transaction();
     try {
-        $stmt = $conn->prepare("SELECT * FROM factura WHERE id_factura = ? AND id_user = ?");
+        $stmt = $conn->prepare("SELECT * FROM factura WHERE id_factura = ? AND id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user=?)");
         $stmt->bind_param("ii", $id_factura_original, $uid);
         $stmt->execute();
         $orig = $stmt->get_result()->fetch_assoc();
         $stmt->close();
         if (!$orig) json(['error'=>'Factura original no encontrada'], 404);
 
-        $stmt_nc = $conn->prepare("SELECT COALESCE(MAX(folio),0)+1 as next FROM factura WHERE id_user = ? AND tipo='NOTA_CREDITO'");
+        $stmt_nc = $conn->prepare("SELECT COALESCE(MAX(folio),0)+1 as next FROM factura WHERE id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user=?) AND tipo='NOTA_CREDITO'");
         $stmt_nc->bind_param("i", $uid);
         $stmt_nc->execute();
         $folio_nc = (int)$stmt_nc->get_result()->fetch_assoc()['next'];
@@ -331,8 +345,8 @@ function crearNotaCredito($conn, $uid, $input) {
             $stmt_det->close();
 
             if ($id_producto) {
-                $stmt_stk = $conn->prepare("UPDATE producto SET cantidad = cantidad + ? WHERE id_producto = ?");
-                $stmt_stk->bind_param("ii", $cantidad, $id_producto);
+                $stmt_stk = $conn->prepare("UPDATE producto SET cantidad = cantidad + ? WHERE id_producto = ? AND id_cuenta = ?");
+                $stmt_stk->bind_param("iii", $cantidad, $id_producto, $tenant->accountId);
                 $stmt_stk->execute();
                 $stmt_stk->close();
             }
@@ -381,14 +395,14 @@ function crearNotaDebito($conn, $uid, $input) {
 
     $conn->begin_transaction();
     try {
-        $stmt = $conn->prepare("SELECT * FROM factura WHERE id_factura = ? AND id_user = ?");
+        $stmt = $conn->prepare("SELECT * FROM factura WHERE id_factura = ? AND id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user=?)");
         $stmt->bind_param("ii", $id_factura_original, $uid);
         $stmt->execute();
         $orig = $stmt->get_result()->fetch_assoc();
         $stmt->close();
         if (!$orig) json(['error'=>'Factura original no encontrada'], 404);
 
-        $stmt_nd = $conn->prepare("SELECT COALESCE(MAX(folio),0)+1 as next FROM factura WHERE id_user = ? AND tipo='NOTA_DEBITO'");
+        $stmt_nd = $conn->prepare("SELECT COALESCE(MAX(folio),0)+1 as next FROM factura WHERE id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user=?) AND tipo='NOTA_DEBITO'");
         $stmt_nd->bind_param("i", $uid);
         $stmt_nd->execute();
         $folio_nd = (int)$stmt_nd->get_result()->fetch_assoc()['next'];

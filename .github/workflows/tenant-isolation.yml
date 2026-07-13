@@ -1,0 +1,46 @@
+name: tenant-isolation
+
+on:
+  push:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  mysql-isolation:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+          MYSQL_DATABASE: bluecat_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - name: PHP runtime
+        run: php --version
+      - name: Configure isolated database
+        shell: bash
+        run: |
+          printf '%s\n' \
+            'APP_ENV=test' \
+            'DB_HOST=127.0.0.1' \
+            'DB_PORT=3306' \
+            'DB_NAME=bluecat_test' \
+            'DB_USER=root' \
+            'DB_PASSWORD=' > Blue-Cat/.env.ci
+      - name: Apply all migrations
+        run: php Blue-Cat/scripts/migrate.php --env=.env.ci
+      - name: Verify tenant isolation
+        run: php Blue-Cat/scripts/test-tenant-isolation.php --env=.env.ci
+      - name: Verify API tenant isolation
+        run: php Blue-Cat/scripts/test-api-tenant-isolation.php --env=.env.ci

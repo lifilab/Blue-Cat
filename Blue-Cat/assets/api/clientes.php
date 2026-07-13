@@ -4,8 +4,13 @@ $uid = requireUser();
 $conn = getDB();
 $method = $_SERVER['REQUEST_METHOD'];
 
+function requierePermisoCliente(string $accion): void {
+    if (!verificarPermiso('crm', $accion)) json(['error'=>'Permiso denegado: crm.'.$accion], 403);
+}
+
 switch ($method) {
     case 'GET':
+        requierePermisoCliente('ver');
         $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
         if ($id) getCliente($conn, $uid, $id);
         else listClientes($conn, $uid);
@@ -13,20 +18,21 @@ switch ($method) {
     case 'POST':
         $input = getJsonInput();
         $input['accion'] = $input['accion'] ?? 'crear';
-        if ($input['accion'] === 'crear') crearCliente($conn, $uid, $input);
-        elseif ($input['accion'] === 'editar') editarCliente($conn, $uid, $input);
+        if ($input['accion'] === 'crear') { requierePermisoCliente('crear'); crearCliente($conn, $uid, $input); }
+        elseif ($input['accion'] === 'editar') { requierePermisoCliente('editar'); editarCliente($conn, $uid, $input); }
         else json(['error'=>'Acción no válida'], 400);
         break;
     default: json(['error'=>'Método no soportado'], 405);
 }
 
 function listClientes($conn, $uid) {
+    $accountId = tenantContext($uid)->accountId;
     $q = $_GET['q'] ?? '';
     $page = max(1, (int)($_GET['page'] ?? 1));
     $limit = min(100, max(10, (int)($_GET['limit'] ?? 50)));
     $offset = ($page-1)*$limit;
 
-    $where = " WHERE id_user = $uid";
+    $where = " WHERE id_cuenta = $accountId";
     $params = []; $types = '';
 
     if ($q) {
@@ -53,15 +59,16 @@ function listClientes($conn, $uid) {
 }
 
 function getCliente($conn, $uid, $id) {
-    $stmt = $conn->prepare("SELECT * FROM cliente WHERE id_cliente = ? AND id_user = ?");
-    $stmt->bind_param("ii", $id, $uid);
+    $accountId = tenantContext($uid)->accountId;
+    $stmt = $conn->prepare("SELECT * FROM cliente WHERE id_cliente = ? AND id_cuenta = ?");
+    $stmt->bind_param("ii", $id, $accountId);
     $stmt->execute();
     $c = $stmt->get_result()->fetch_assoc();
     $stmt->close();
     if (!$c) json(['error'=>'Cliente no encontrado'], 404);
     // Get last 10 invoices
-    $stmt = $conn->prepare("SELECT id_factura, numero, total, estado, fecha_emision FROM factura WHERE id_cliente = ? AND id_user = ? ORDER BY id_factura DESC LIMIT 10");
-    $stmt->bind_param("ii", $id, $uid);
+    $stmt = $conn->prepare("SELECT id_factura, numero, total, estado, fecha_emision FROM factura WHERE id_cliente = ? AND id_cuenta = ? ORDER BY id_factura DESC LIMIT 10");
+    $stmt->bind_param("ii", $id, $accountId);
     $stmt->execute();
     $c['facturas'] = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     $stmt->close();
@@ -69,6 +76,7 @@ function getCliente($conn, $uid, $id) {
 }
 
 function crearCliente($conn, $uid, $input) {
+    $accountId = tenantContext($uid)->accountId;
     $rut = $input['rut'] ?? '';
     $razon = $input['razon_social'] ?? '';
     $nombre = $input['nombre'] ?? '';
@@ -81,8 +89,8 @@ function crearCliente($conn, $uid, $input) {
 
     if (empty($razon)) json(['error'=>'Razón social es obligatoria'], 400);
 
-    $stmt = $conn->prepare("INSERT INTO cliente (id_user, rut, razon_social, nombre, direccion, ciudad, comuna, correo, telefono, giro) VALUES (?,?,?,?,?,?,?,?,?,?)");
-    $stmt->bind_param("isssssssss", $uid, $rut, $razon, $nombre, $direccion, $ciudad, $comuna, $correo, $telefono, $giro);
+    $stmt = $conn->prepare("INSERT INTO cliente (id_user, id_cuenta, rut, razon_social, nombre, direccion, ciudad, comuna, correo, telefono, giro) VALUES (?,?,?,?,?,?,?,?,?,?,?)");
+    $stmt->bind_param("iisssssssss", $uid, $accountId, $rut, $razon, $nombre, $direccion, $ciudad, $comuna, $correo, $telefono, $giro);
     $stmt->execute();
     $id = (int)$conn->insert_id;
     $stmt->close();
@@ -90,6 +98,7 @@ function crearCliente($conn, $uid, $input) {
 }
 
 function editarCliente($conn, $uid, $input) {
+    $accountId = tenantContext($uid)->accountId;
     $id = (int)($input['id_cliente'] ?? 0);
     if (!$id) json(['error'=>'ID requerido'], 400);
 
@@ -104,8 +113,8 @@ function editarCliente($conn, $uid, $input) {
     }
     if (empty($sets)) json(['error'=>'Sin campos para actualizar'], 400);
     $params[] = $id; $types .= 'i';
-    $sql = "UPDATE cliente SET " . implode(', ', $sets) . " WHERE id_cliente = ? AND id_user = ?";
-    $params[] = $uid; $types .= 'i';
+    $sql = "UPDATE cliente SET " . implode(', ', $sets) . " WHERE id_cliente = ? AND id_cuenta = ?";
+    $params[] = $accountId; $types .= 'i';
     $stmt = $conn->prepare($sql);
     $stmt->bind_param($types, ...$params);
     $stmt->execute();

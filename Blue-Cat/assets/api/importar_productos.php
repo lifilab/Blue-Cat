@@ -3,7 +3,7 @@ require_once __DIR__ . '/_db.php';
 $uid = requireUser();
 if (!verificarPermiso('inventario','importar')) json(['success'=>false,'msg'=>'Permiso denegado'],403);
 $conn = getDB();
-$id_user = getCuentaId($conn, $uid);
+$accountId = tenantContext($uid)->accountId;
 
 
 function importarNumero($valor) {
@@ -41,10 +41,10 @@ if ($type==='csv') {
 }
 if (!$rows) json(['success'=>false,'msg'=>'El archivo no contiene productos'],400);
 
-$byCode=$conn->prepare('SELECT id_producto FROM producto WHERE id_user=? AND codigo_de_barras=? LIMIT 1');
-$byName=$conn->prepare('SELECT id_producto FROM producto WHERE id_user=? AND nombre_producto=? LIMIT 1');
-$update=$conn->prepare('UPDATE producto SET nombre_producto=?,precio_venta=?,codigo_de_barras=?,cantidad=?,categoria=? WHERE id_producto=? AND id_user=?');
-$insert=$conn->prepare('INSERT INTO producto (id_user,nombre_producto,precio_venta,codigo_de_barras,cantidad,categoria) VALUES (?,?,?,?,?,?)');
+$byCode=$conn->prepare('SELECT id_producto FROM producto WHERE id_cuenta=? AND codigo_de_barras=? LIMIT 1');
+$byName=$conn->prepare('SELECT id_producto FROM producto WHERE id_cuenta=? AND nombre_producto=? LIMIT 1');
+$update=$conn->prepare('UPDATE producto SET nombre_producto=?,precio_venta=?,codigo_de_barras=?,cantidad=?,categoria=? WHERE id_producto=? AND id_cuenta=?');
+$insert=$conn->prepare('INSERT INTO producto (id_user,id_cuenta,nombre_producto,precio_venta,codigo_de_barras,cantidad,categoria) VALUES (?,?,?,?,?,?,?)');
 if(!$byCode||!$byName||!$update||!$insert) json(['success'=>false,'msg'=>'Error al preparar la importación'],500);
 
 $insertados=0;$actualizados=0;$errores=0;$total=0;
@@ -57,14 +57,14 @@ foreach($rows as $data) {
     $cantidad=importarNumero($data[3]);
     $categoria=isset($data[4])?trim((string)$data[4]):'';
     if($nombre===''||$precio===null||$cantidad===null){$errores++;continue;}
-    if($codigo!==''){$byCode->bind_param('is',$id_user,$codigo);$byCode->execute();$result=$byCode->get_result();}
-    else{$byName->bind_param('is',$id_user,$nombre);$byName->execute();$result=$byName->get_result();}
+    if($codigo!==''){$byCode->bind_param('is',$accountId,$codigo);$byCode->execute();$result=$byCode->get_result();}
+    else{$byName->bind_param('is',$accountId,$nombre);$byName->execute();$result=$byName->get_result();}
     if($result&&$result->num_rows){
         $id=(int)$result->fetch_assoc()['id_producto'];
-        $update->bind_param('sdsdsii',$nombre,$precio,$codigo,$cantidad,$categoria,$id,$id_user);
+        $update->bind_param('sdsdsii',$nombre,$precio,$codigo,$cantidad,$categoria,$id,$accountId);
         $update->execute()?$actualizados++:$errores++;
     } else {
-        $insert->bind_param('isdsds',$id_user,$nombre,$precio,$codigo,$cantidad,$categoria);
+        $insert->bind_param('iisdsds',$uid,$accountId,$nombre,$precio,$codigo,$cantidad,$categoria);
         $insert->execute()?$insertados++:$errores++;
     }
 }

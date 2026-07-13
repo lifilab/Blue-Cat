@@ -2,6 +2,7 @@
 require_once __DIR__ . '/_db.php';
 $uid = requireUser();
 $conn = getDB();
+$tenant = tenantContext($uid);
 $method = $_SERVER['REQUEST_METHOD'];
 
 function buildCuentaFilter($conn, $uid, $column) {
@@ -108,7 +109,7 @@ if ($method === 'GET') {
 // ============================================================
 
 function GET_dashboard() {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
 
     $cuenta = buildCuentaFilter($conn, $uid, 's.id_user');
 
@@ -248,7 +249,7 @@ function GET_dashboard() {
 }
 
 function GET_productos() {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
 
     $pagina    = max(1, (int) ($_GET['pagina'] ?? 1));
     $porPagina = max(1, min(100, (int) ($_GET['por_pagina'] ?? 20)));
@@ -341,7 +342,7 @@ function GET_productos() {
 }
 
 function GET_clientes() {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
     $search = $_GET['q'] ?? '';
     $pagina = max(1, (int) ($_GET['pagina'] ?? 1));
     $porPagina = max(1, min(100, (int) ($_GET['por_pagina'] ?? 20)));
@@ -393,7 +394,7 @@ function GET_clientes() {
 }
 
 function GET_caja_estado() {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
     $caja = getOpenCaja($conn, $uid);
     if (!$caja) {
         json(['abierta' => false, 'caja' => null, 'movimientos' => []]);
@@ -415,7 +416,7 @@ function GET_caja_estado() {
 }
 
 function GET_ventas_hoy() {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
     $cuenta = buildCuentaFilter($conn, $uid, 's.id_user');
     $sql = "SELECT p.*, s.empleado
             FROM pedido p
@@ -470,7 +471,7 @@ function GET_ventas_hoy() {
 }
 
 function GET_historial() {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
     $pagina    = max(1, (int) ($_GET['pagina'] ?? 1));
     $porPagina = max(1, min(100, (int) ($_GET['por_pagina'] ?? 20)));
     $offset    = ($pagina - 1) * $porPagina;
@@ -515,7 +516,7 @@ function GET_historial() {
 }
 
 function GET_promociones() {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
 
     $sql = "SELECT pp.*,
                    GROUP_CONCAT(DISTINCT CONCAT(ppp.id_producto, ':', pr.nombre_producto) SEPARATOR '||') AS productos
@@ -539,7 +540,7 @@ function GET_promociones() {
 }
 
 function GET_cotizaciones() {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
 
     $sql = "SELECT * FROM pos_cotizacion WHERE id_user = ? ORDER BY id_cotizacion DESC";
     $stmt = $conn->prepare($sql);
@@ -572,7 +573,7 @@ function GET_cotizaciones() {
 }
 
 function GET_reservas() {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
 
     $sql = "SELECT * FROM pos_reserva WHERE id_user = ? ORDER BY created_at DESC";
     $stmt = $conn->prepare($sql);
@@ -589,7 +590,7 @@ function GET_reservas() {
 }
 
 function GET_venta_detalle() {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
     $pedidoId = (int) ($_GET['id'] ?? 0);
     if ($pedidoId <= 0) {
         json(['error' => true, 'message' => 'ID de pedido requerido'], 400);
@@ -641,7 +642,7 @@ function GET_venta_detalle() {
 }
 
 function GET_reporte_ventas_hora() {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
     $cuenta = buildCuentaFilter($conn, $uid, 's.id_user');
 
     $sql = "SELECT HOUR(p.fecha) AS hora, COUNT(*) AS total_ventas, COALESCE(SUM(p.precio_total),0) AS total
@@ -666,7 +667,7 @@ function GET_reporte_ventas_hora() {
 }
 
 function GET_reporte_ventas_cajero() {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
     $cuenta = buildCuentaFilter($conn, $uid, 's.id_user');
 
     $sql = "SELECT s.empleado, COUNT(*) AS total_ventas, COALESCE(SUM(p.precio_total),0) AS total
@@ -691,7 +692,7 @@ function GET_reporte_ventas_cajero() {
 }
 
 function GET_reporte_productos_top() {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
     $cuenta = buildCuentaFilter($conn, $uid, 'p.id_user');
 
     $sql = "SELECT pr.id_producto, pr.nombre_producto, SUM(dp.cantidad_pedida) AS total_cantidad, SUM(dp.precio_total) AS total_venta
@@ -718,7 +719,7 @@ function GET_reporte_productos_top() {
 }
 
 function GET_config_boleta() {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
 
     $sql = "SELECT * FROM config_boleta WHERE id_user = ? AND activo = 1 ORDER BY id_config DESC LIMIT 1";
     $stmt = $conn->prepare($sql);
@@ -732,7 +733,7 @@ function GET_config_boleta() {
 }
 
 function GET_permisos_usuario() {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
 
     $sql = "SELECT p.modulo, p.accion, p.descripcion
             FROM permiso p
@@ -770,7 +771,7 @@ function GET_permisos_usuario() {
 // ============================================================
 
 function POST_caja_abrir($data) {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
 
     $codigo         = $data->codigo ?? '';
     $nombreCaja     = $data->nombre ?? $data->nombre_caja ?? 'Caja Principal';
@@ -803,19 +804,19 @@ function POST_caja_abrir($data) {
         $stmt->close();
 
         // INSERT sesion
-        $sql = "INSERT INTO sesion (id_user, fecha_ingreso, monto_apertura, empleado)
-                VALUES (?, NOW(), ?, ?)";
+        $sql = "INSERT INTO sesion (id_user, id_cuenta, fecha_ingreso, monto_apertura, empleado)
+                VALUES (?, ?, NOW(), ?, ?)";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param('iis', $uid, $montoApertura, $empleado);
+        $stmt->bind_param('iiis', $uid, $tenant->accountId, $montoApertura, $empleado);
         $stmt->execute();
         $idSesion = $conn->insert_id;
         $stmt->close();
 
         // INSERT pos_caja
-        $sql = "INSERT INTO pos_caja (id_user, codigo, nombre, sucursal, estado, monto_apertura, monto_actual, fecha_apertura, id_sesion)
-                VALUES (?, ?, ?, ?, 'ABIERTA', ?, ?, NOW(), ?)";
+        $sql = "INSERT INTO pos_caja (id_user, id_cuenta, codigo, nombre, sucursal, estado, monto_apertura, monto_actual, fecha_apertura, id_sesion)
+                VALUES (?, ?, ?, ?, ?, 'ABIERTA', ?, ?, NOW(), ?)";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param('isssiii', $uid, $codigo, $nombreCaja, $sucursal, $montoApertura, $montoApertura, $idSesion);
+        $stmt->bind_param('iisssiii', $uid, $tenant->accountId, $codigo, $nombreCaja, $sucursal, $montoApertura, $montoApertura, $idSesion);
         $stmt->execute();
         $idCaja = $conn->insert_id;
         $stmt->close();
@@ -853,7 +854,7 @@ function POST_caja_abrir($data) {
 }
 
 function POST_caja_cerrar($data) {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
 
     $montoReal = (int) ($data->monto_real ?? 0);
 
@@ -922,7 +923,7 @@ function POST_caja_cerrar($data) {
 }
 
 function POST_caja_movimiento($data) {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
 
     $tipo     = strtoupper($data->tipo ?? 'INGRESO');
     $monto    = (int) ($data->monto ?? 0);
@@ -978,7 +979,7 @@ function POST_caja_movimiento($data) {
 }
 
 function POST_venta_crear($data) {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
 
     $items          = $data->items ?? [];
     $pagos          = $data->pagos ?? [];
@@ -1076,12 +1077,12 @@ function POST_venta_crear($data) {
         $diferenciaPedido = $pagoTotal - $precioFinal;
 
         // INSERT pedido
-        $sql = "INSERT INTO pedido (id_sesion, id_cliente, id_caja, id_bodega, tipo_documento,
+        $sql = "INSERT INTO pedido (id_cuenta, id_sesion, id_cliente, id_caja, id_bodega, tipo_documento,
                     cliente_nombre, cliente_rut, cliente_correo, cliente_telefono,
                     precio_total, pago_total, diferencia, fecha)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param('iiisssssiiii', $idSesion, $idCliente, $idCaja, $idBodega, $tipoDocumento,
+        $stmt->bind_param('iiiisssssiiii', $tenant->accountId, $idSesion, $idCliente, $idCaja, $idBodega, $tipoDocumento,
             $clienteNombre, $clienteRut, $clienteCorreo, $clienteTelefono,
             $precioFinal, $pagoTotal, $diferenciaPedido);
         $stmt->execute();
@@ -1100,9 +1101,9 @@ function POST_venta_crear($data) {
             }
 
             // Check product exists and get data
-            $sql = "SELECT * FROM producto WHERE id_producto = ? AND activo = 1";
+            $sql = "SELECT * FROM producto WHERE id_producto = ? AND id_cuenta = ? AND activo = 1";
             $stmt = $conn->prepare($sql);
-            $stmt->bind_param('i', $idProducto);
+            $stmt->bind_param('ii', $idProducto, $tenant->accountId);
             $stmt->execute();
             $result = $stmt->get_result();
             $producto = $result->fetch_assoc();
@@ -1206,7 +1207,7 @@ function POST_venta_crear($data) {
 }
 
 function POST_venta_anular($data) {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
 
     $pedidoId = (int) ($data->id_pedido ?? 0);
     if ($pedidoId <= 0) {
@@ -1354,7 +1355,7 @@ function POST_venta_anular($data) {
 }
 
 function POST_cliente_crear($data) {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
 
     $nombre    = $data->nombre ?? '';
     $rut       = $data->rut ?? '';
@@ -1370,11 +1371,11 @@ function POST_cliente_crear($data) {
         json(['error' => true, 'message' => 'Nombre es requerido'], 400);
     }
 
-    $sql = "INSERT INTO cliente (id_user, codigo, rut, razon_social, nombre, correo, telefono, direccion, ciudad, giro, categoria)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    $sql = "INSERT INTO cliente (id_user, id_cuenta, codigo, rut, razon_social, nombre, correo, telefono, direccion, ciudad, giro, categoria)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     $codigo = 'CLI-' . str_pad((string) rand(1000, 9999), 4, '0', STR_PAD_LEFT);
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param('issssssssss', $uid, $codigo, $rut, $razonSocial, $nombre, $correo, $telefono, $direccion, $ciudad, $giro, $categoria);
+    $stmt->bind_param('iissssssssss', $uid, $tenant->accountId, $codigo, $rut, $razonSocial, $nombre, $correo, $telefono, $direccion, $ciudad, $giro, $categoria);
     $stmt->execute();
     $idCliente = $conn->insert_id;
     $stmt->close();
@@ -1383,7 +1384,7 @@ function POST_cliente_crear($data) {
 }
 
 function POST_promocion_crear($data) {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
 
     $codigo       = $data->codigo ?? '';
     $nombre       = $data->nombre ?? '';
@@ -1407,11 +1408,11 @@ function POST_promocion_crear($data) {
 
     $conn->begin_transaction();
     try {
-        $sql = "INSERT INTO pos_promocion (id_user, codigo, nombre, tipo, valor, monto_minimo, cantidad_minima,
+        $sql = "INSERT INTO pos_promocion (id_user, id_cuenta, codigo, nombre, tipo, valor, monto_minimo, cantidad_minima,
                     fecha_inicio, fecha_fin, dias_semana, hora_inicio, hora_fin, aplica_categoria, aplica_marca, combinable)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param('isssiiisssssssi', $uid, $codigo, $nombre, $tipo, $valor, $montoMinimo, $cantidadMinima,
+        $stmt->bind_param('iisssiiisssssssi', $uid, $tenant->accountId, $codigo, $nombre, $tipo, $valor, $montoMinimo, $cantidadMinima,
             $fechaInicio, $fechaFin, $diasSemana, $horaInicio, $horaFin, $aplicaCategoria, $aplicaMarca, $combinable);
         $stmt->execute();
         $idPromocion = $conn->insert_id;
@@ -1442,7 +1443,7 @@ function POST_promocion_crear($data) {
 }
 
 function POST_promocion_validar($data) {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
 
     $codigo = $data->codigo ?? '';
     $subtotal = (int) ($data->subtotal ?? 0);
@@ -1511,7 +1512,7 @@ function POST_promocion_validar($data) {
 }
 
 function POST_promocion_eliminar($data) {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
 
     $idPromocion = (int) ($data->id_promocion ?? 0);
     if ($idPromocion <= 0) {
@@ -1533,7 +1534,7 @@ function POST_promocion_eliminar($data) {
 }
 
 function POST_cotizacion_crear($data) {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
 
     $items          = $data->items ?? [];
     $codigo         = $data->codigo ?? ('COT-' . date('Ymd') . '-' . rand(100, 999));
@@ -1565,11 +1566,11 @@ function POST_cotizacion_crear($data) {
             $total = 0;
         }
 
-        $sql = "INSERT INTO pos_cotizacion (id_user, codigo, id_cliente, cliente_nombre, cliente_rut, cliente_correo, cliente_telefono,
+        $sql = "INSERT INTO pos_cotizacion (id_user, id_cuenta, codigo, id_cliente, cliente_nombre, cliente_rut, cliente_correo, cliente_telefono,
                     subtotal, descuento, total, validez, notas)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param('isissssiiiis', $uid, $codigo, $idCliente, $clienteNombre, $clienteRut, $clienteCorreo, $clienteTelefono,
+        $stmt->bind_param('iisissssiiiis', $uid, $tenant->accountId, $codigo, $idCliente, $clienteNombre, $clienteRut, $clienteCorreo, $clienteTelefono,
             $subtotal, $descuento, $total, $validez, $notas);
         $stmt->execute();
         $idCotizacion = $conn->insert_id;
@@ -1606,7 +1607,7 @@ function POST_cotizacion_crear($data) {
 }
 
 function POST_cotizacion_convertir($data) {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
 
     $idCotizacion = (int) ($data->id_cotizacion ?? 0);
     if ($idCotizacion <= 0) {
@@ -1687,12 +1688,12 @@ function POST_cotizacion_convertir($data) {
         $diferenciaPedido = $pagoTotal - $precioTotal;
 
         // INSERT pedido
-        $sql = "INSERT INTO pedido (id_sesion, id_cliente, id_caja, id_bodega, tipo_documento,
+        $sql = "INSERT INTO pedido (id_cuenta, id_sesion, id_cliente, id_caja, id_bodega, tipo_documento,
                     cliente_nombre, cliente_rut, cliente_correo, cliente_telefono,
                     precio_total, pago_total, diferencia, fecha)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param('iiisssssiiii', $idSesion, $idCliente, $idCaja, $idBodega, $tipoDocumento,
+        $stmt->bind_param('iiiisssssiiii', $tenant->accountId, $idSesion, $idCliente, $idCaja, $idBodega, $tipoDocumento,
             $clienteNombre, $clienteRut, $clienteCorreo, $clienteTelefono,
             $precioTotal, $pagoTotal, $diferenciaPedido);
         $stmt->execute();
@@ -1708,9 +1709,9 @@ function POST_cotizacion_convertir($data) {
 
             if ($idProducto > 0) {
                 // Check stock
-                $sql = "SELECT tipo_venta, costo_promedio FROM producto WHERE id_producto = ? AND activo = 1";
+                $sql = "SELECT tipo_venta, costo_promedio FROM producto WHERE id_producto = ? AND id_cuenta = ? AND activo = 1";
                 $stmt = $conn->prepare($sql);
-                $stmt->bind_param('i', $idProducto);
+                $stmt->bind_param('ii', $idProducto, $tenant->accountId);
                 $stmt->execute();
                 $res = $stmt->get_result();
                 $prod = $res->fetch_assoc();
@@ -1791,7 +1792,7 @@ function POST_cotizacion_convertir($data) {
 }
 
 function POST_cotizacion_eliminar($data) {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
 
     $idCotizacion = (int) ($data->id_cotizacion ?? 0);
     if ($idCotizacion <= 0) {
@@ -1813,7 +1814,7 @@ function POST_cotizacion_eliminar($data) {
 }
 
 function POST_reserva_crear($data) {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
 
     $idCliente       = $data->id_cliente ?? null;
     $clienteNombre   = $data->cliente_nombre ?? '';
@@ -1825,10 +1826,10 @@ function POST_reserva_crear($data) {
     $notas           = $data->notas ?? '';
     $idReferencia    = $data->id_referencia ?? null;
 
-    $sql = "INSERT INTO pos_reserva (id_user, id_cliente, id_referencia, cliente_nombre, cliente_telefono, total, abono, fecha_reserva, fecha_vencimiento, notas)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    $sql = "INSERT INTO pos_reserva (id_user, id_cuenta, id_cliente, id_referencia, cliente_nombre, cliente_telefono, total, abono, fecha_reserva, fecha_vencimiento, notas)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param('iiissiisss', $uid, $idCliente, $idReferencia, $clienteNombre, $clienteTelefono, $total, $abono, $fechaReserva, $fechaVencimiento, $notas);
+    $stmt->bind_param('iiiissiisss', $uid, $tenant->accountId, $idCliente, $idReferencia, $clienteNombre, $clienteTelefono, $total, $abono, $fechaReserva, $fechaVencimiento, $notas);
     $stmt->execute();
     $idReserva = $conn->insert_id;
     $stmt->close();
@@ -1837,7 +1838,7 @@ function POST_reserva_crear($data) {
 }
 
 function POST_reserva_cumplir($data) {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
 
     $idReserva = (int) ($data->id_reserva ?? 0);
     if ($idReserva <= 0) {
@@ -1859,7 +1860,7 @@ function POST_reserva_cumplir($data) {
 }
 
 function POST_reserva_cancelar($data) {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
 
     $idReserva = (int) ($data->id_reserva ?? 0);
     if ($idReserva <= 0) {
@@ -1881,7 +1882,7 @@ function POST_reserva_cancelar($data) {
 }
 
 function POST_devolucion_crear($data) {
-    global $conn, $uid;
+    global $conn, $uid, $tenant;
 
     $pedidoId = (int) ($data->id_pedido ?? 0);
     $tipo     = $data->tipo ?? 'TOTAL';

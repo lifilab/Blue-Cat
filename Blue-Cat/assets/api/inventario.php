@@ -3,8 +3,20 @@ require_once __DIR__.'/_db.php';
 
 $uid = requireUser();
 $conn = getDB();
+$accountId = tenantContext($uid)->accountId;
 $input = getJsonInput();
 $accion = $input['accion'] ?? $_GET['accion'] ?? '';
+
+$rootScopeActions = [
+    'producto_editar'=>'producto','producto_eliminar'=>'producto',
+    'categoria_editar'=>'categoria','categoria_eliminar'=>'categoria',
+    'marca_editar'=>'marca','marca_eliminar'=>'marca',
+    'bodega_editar'=>'bodega','bodega_eliminar'=>'bodega',
+];
+if (isset($rootScopeActions[$accion])) {
+    $scopeId = (int)($input['id'] ?? 0);
+    if ($scopeId > 0) requireTenantEntity($conn, tenantContext($uid), $rootScopeActions[$accion], $scopeId);
+}
 
 // ========== HELPERS ==========
 function invLog($conn, $uid, $accion, $entidad, $id_entidad=null, $detalle=null) {
@@ -33,12 +45,15 @@ function requierePermiso($modulo, $accion) {
 }
 
 // ========== DISPATCH ==========
+$inventoryReadActions = ['dashboard','productos','producto','producto_barcode','categorias','subcategorias','marcas','unidades','bodegas','ubicaciones','stock','movimientos','transferencias','ajustes','inventarios_fisicos','inventario_fisico_detalle','kardex','lotes','series','alertas','auditoria','reporte_existencias','reporte_stock_critico','reporte_valorizacion','reporte_rotacion','proveedores_select'];
+if (in_array($accion, $inventoryReadActions, true)) requierePermiso('inventario','ver');
+
 switch ($accion) {
 
 case 'exportar_productos':
     requierePermiso('inventario','exportar');
     $cuenta = getCuentaId($conn, $uid);
-    $stmt = $conn->prepare("SELECT p.nombre_producto, p.precio_venta, p.codigo_de_barras, p.cantidad, COALESCE(c.nombre,p.categoria,'') AS categoria, p.sku, p.precio_costo, p.tipo_venta, COALESCE(u.abreviatura,'u') AS unidad, p.activo FROM producto p LEFT JOIN categoria c ON p.id_categoria=c.id_categoria LEFT JOIN unidad_medida u ON p.id_unidad=u.id_unidad WHERE p.id_user=? ORDER BY p.nombre_producto");
+    $stmt = $conn->prepare("SELECT p.nombre_producto, p.precio_venta, p.codigo_de_barras, p.cantidad, COALESCE(c.nombre,p.categoria,'') AS categoria, p.sku, p.precio_costo, p.tipo_venta, COALESCE(u.abreviatura,'u') AS unidad, p.activo FROM producto p LEFT JOIN categoria c ON p.id_categoria=c.id_categoria LEFT JOIN unidad_medida u ON p.id_unidad=u.id_unidad WHERE p.id_cuenta=? ORDER BY p.nombre_producto");
     $stmt->bind_param("i", $cuenta); $stmt->execute(); $rows=$stmt->get_result()->fetch_all(MYSQLI_ASSOC); $stmt->close();
     header('Content-Type: application/vnd.ms-excel; charset=utf-8');
     header('Content-Disposition: attachment; filename="productos_' . date('Y-m-d') . '.xls"');
@@ -51,29 +66,29 @@ case 'exportar_productos':
 // ─── DASHBOARD ───
 case 'dashboard':
     $data = [];
-    $r = $conn->query("SELECT COUNT(*) AS t FROM producto WHERE activo=1"); $data['total_productos'] = (int)$r->fetch_assoc()['t'];
-    $r = $conn->query("SELECT COUNT(*) AS t FROM producto WHERE cantidad=0 OR cantidad IS NULL"); $data['sin_stock'] = (int)$r->fetch_assoc()['t'];
-    $r = $conn->query("SELECT COUNT(*) AS t FROM producto WHERE cantidad>0 AND cantidad<=stock_minimo AND stock_minimo>0"); $data['stock_critico'] = (int)$r->fetch_assoc()['t'];
-    $r = $conn->query("SELECT COUNT(*) AS t FROM bodega WHERE estado='ACTIVA'"); $data['bodegas'] = (int)$r->fetch_assoc()['t'];
-    $r = $conn->query("SELECT COUNT(*) AS t FROM categoria"); $data['categorias'] = (int)$r->fetch_assoc()['t'];
-    $r = $conn->query("SELECT COUNT(*) AS t FROM marca"); $data['marcas'] = (int)$r->fetch_assoc()['t'];
-    $r = $conn->query("SELECT COALESCE(SUM(cantidad*precio_venta),0) AS v FROM producto WHERE activo=1"); $data['valor_inventario'] = (int)$r->fetch_assoc()['v'];
-    $r = $conn->query("SELECT COALESCE(SUM(entrada),0) AS e FROM kardex WHERE DATE(fecha)=CURDATE()"); $data['entradas_hoy'] = (int)$r->fetch_assoc()['e'];
-    $r = $conn->query("SELECT COALESCE(SUM(salida),0) AS s FROM kardex WHERE DATE(fecha)=CURDATE()"); $data['salidas_hoy'] = (int)$r->fetch_assoc()['s'];
-    $r = $conn->query("SELECT COUNT(*) AS t FROM lote WHERE fecha_vencimiento BETWEEN CURDATE() AND DATE_ADD(CURDATE(),INTERVAL 30 DAY) AND cantidad>0"); $data['proximos_vencer'] = (int)$r->fetch_assoc()['t'];
-    $r = $conn->query("SELECT COUNT(*) AS t FROM lote WHERE fecha_vencimiento < CURDATE() AND cantidad>0"); $data['vencidos'] = (int)$r->fetch_assoc()['t'];
-    $r = $conn->query("SELECT COUNT(*) AS t FROM alerta_stock WHERE leido=0 AND resuelto=0"); $data['alertas'] = (int)$r->fetch_assoc()['t'];
-    $r = $conn->query("SELECT COUNT(*) AS t FROM transferencia WHERE estado='PENDIENTE' OR estado='EN_TRANSITO'"); $data['transferencias_pendientes'] = (int)$r->fetch_assoc()['t'];
-    $r = $conn->query("SELECT COUNT(*) AS t FROM inventario_fisico WHERE estado='PENDIENTE' OR estado='EN_PROGRESO'"); $data['inventarios_pendientes'] = (int)$r->fetch_assoc()['t'];
-    $r = $conn->query("SELECT COALESCE(ROUND(AVG(dias),0),0) AS rotacion FROM (SELECT DATEDIFF(NOW(), MAX(fecha)) AS dias FROM kardex GROUP BY id_producto) sub"); $data['rotacion_promedio'] = (int)$r->fetch_assoc()['rotacion'];
+    $r = $conn->query("SELECT COUNT(*) AS t FROM producto WHERE id_cuenta=$accountId AND activo=1"); $data['total_productos'] = (int)$r->fetch_assoc()['t'];
+    $r = $conn->query("SELECT COUNT(*) AS t FROM producto WHERE id_cuenta=$accountId AND (cantidad=0 OR cantidad IS NULL)"); $data['sin_stock'] = (int)$r->fetch_assoc()['t'];
+    $r = $conn->query("SELECT COUNT(*) AS t FROM producto WHERE id_cuenta=$accountId AND cantidad>0 AND cantidad<=stock_minimo AND stock_minimo>0"); $data['stock_critico'] = (int)$r->fetch_assoc()['t'];
+    $r = $conn->query("SELECT COUNT(*) AS t FROM bodega WHERE id_cuenta=$accountId AND estado='ACTIVA'"); $data['bodegas'] = (int)$r->fetch_assoc()['t'];
+    $r = $conn->query("SELECT COUNT(*) AS t FROM categoria WHERE id_cuenta=$accountId"); $data['categorias'] = (int)$r->fetch_assoc()['t'];
+    $r = $conn->query("SELECT COUNT(*) AS t FROM marca WHERE id_cuenta=$accountId"); $data['marcas'] = (int)$r->fetch_assoc()['t'];
+    $r = $conn->query("SELECT COALESCE(SUM(cantidad*precio_venta),0) AS v FROM producto WHERE id_cuenta=$accountId AND activo=1"); $data['valor_inventario'] = (int)$r->fetch_assoc()['v'];
+    $r = $conn->query("SELECT COALESCE(SUM(k.entrada),0) AS e FROM kardex k JOIN producto p ON p.id_producto=k.id_producto WHERE p.id_cuenta=$accountId AND DATE(k.fecha)=CURDATE()"); $data['entradas_hoy'] = (int)$r->fetch_assoc()['e'];
+    $r = $conn->query("SELECT COALESCE(SUM(k.salida),0) AS s FROM kardex k JOIN producto p ON p.id_producto=k.id_producto WHERE p.id_cuenta=$accountId AND DATE(k.fecha)=CURDATE()"); $data['salidas_hoy'] = (int)$r->fetch_assoc()['s'];
+    $r = $conn->query("SELECT COUNT(*) AS t FROM lote l JOIN producto p ON p.id_producto=l.id_producto WHERE p.id_cuenta=$accountId AND l.fecha_vencimiento BETWEEN CURDATE() AND DATE_ADD(CURDATE(),INTERVAL 30 DAY) AND l.cantidad>0"); $data['proximos_vencer'] = (int)$r->fetch_assoc()['t'];
+    $r = $conn->query("SELECT COUNT(*) AS t FROM lote l JOIN producto p ON p.id_producto=l.id_producto WHERE p.id_cuenta=$accountId AND l.fecha_vencimiento < CURDATE() AND l.cantidad>0"); $data['vencidos'] = (int)$r->fetch_assoc()['t'];
+    $r = $conn->query("SELECT COUNT(*) AS t FROM alerta_stock a JOIN producto p ON p.id_producto=a.id_producto WHERE p.id_cuenta=$accountId AND a.leido=0 AND a.resuelto=0"); $data['alertas'] = (int)$r->fetch_assoc()['t'];
+    $r = $conn->query("SELECT COUNT(*) AS t FROM transferencia t JOIN bodega b ON b.id_bodega=t.id_bodega_origen WHERE b.id_cuenta=$accountId AND (t.estado='PENDIENTE' OR t.estado='EN_TRANSITO')"); $data['transferencias_pendientes'] = (int)$r->fetch_assoc()['t'];
+    $r = $conn->query("SELECT COUNT(*) AS t FROM inventario_fisico f JOIN usuario u ON u.id_user=f.id_user WHERE u.id_cuenta=$accountId AND (f.estado='PENDIENTE' OR f.estado='EN_PROGRESO')"); $data['inventarios_pendientes'] = (int)$r->fetch_assoc()['t'];
+    $r = $conn->query("SELECT COALESCE(ROUND(AVG(dias),0),0) AS rotacion FROM (SELECT DATEDIFF(NOW(), MAX(k.fecha)) AS dias FROM kardex k JOIN producto p ON p.id_producto=k.id_producto WHERE p.id_cuenta=$accountId GROUP BY k.id_producto) sub"); $data['rotacion_promedio'] = (int)$r->fetch_assoc()['rotacion'];
     // Charts
-    $chart_cat = []; $r = $conn->query("SELECT c.nombre, COUNT(p.id_producto) AS t FROM producto p JOIN categoria c ON p.id_categoria=c.id_categoria GROUP BY c.id_categoria, c.nombre ORDER BY t DESC LIMIT 10");
+    $chart_cat = []; $r = $conn->query("SELECT c.nombre, COUNT(p.id_producto) AS t FROM producto p JOIN categoria c ON p.id_categoria=c.id_categoria WHERE p.id_cuenta=$accountId GROUP BY c.id_categoria, c.nombre ORDER BY t DESC LIMIT 10");
     while ($f = $r->fetch_assoc()) $chart_cat[] = ['label'=>$f['nombre'], 'value'=>(int)$f['t']];
     $data['chart_categorias'] = $chart_cat;
-    $chart_stock = []; $r = $conn->query("SELECT b.nombre, COALESCE(SUM(s.disponible),0) AS t FROM bodega b LEFT JOIN stock s ON b.id_bodega=s.id_bodega GROUP BY b.id_bodega, b.nombre ORDER BY t DESC LIMIT 10");
+    $chart_stock = []; $r = $conn->query("SELECT b.nombre, COALESCE(SUM(s.disponible),0) AS t FROM bodega b LEFT JOIN stock s ON b.id_bodega=s.id_bodega WHERE b.id_cuenta=$accountId GROUP BY b.id_bodega, b.nombre ORDER BY t DESC LIMIT 10");
     while ($f = $r->fetch_assoc()) $chart_stock[] = ['label'=>$f['nombre'], 'value'=>(int)$f['t']];
     $data['chart_stock_bodega'] = $chart_stock;
-    $r = $conn->query("SELECT DATE(fecha) AS d, SUM(entrada) AS e, SUM(salida) AS s FROM kardex WHERE fecha>=DATE_SUB(CURDATE(),INTERVAL 14 DAY) GROUP BY DATE(fecha) ORDER BY d");
+    $r = $conn->query("SELECT DATE(k.fecha) AS d, SUM(k.entrada) AS e, SUM(k.salida) AS s FROM kardex k JOIN producto p ON p.id_producto=k.id_producto WHERE p.id_cuenta=$accountId AND k.fecha>=DATE_SUB(CURDATE(),INTERVAL 14 DAY) GROUP BY DATE(k.fecha) ORDER BY d");
     $chart_ent_sal = []; while ($f = $r->fetch_assoc()) $chart_ent_sal[] = ['fecha'=>$f['d'], 'entradas'=>(int)$f['e'], 'salidas'=>(int)$f['s']];
     $data['chart_entradas_salidas'] = $chart_ent_sal;
     json($data);
@@ -89,10 +104,9 @@ case 'productos':
     $limit = min(100, max(10, (int)($input['limit'] ?? $_GET['limit'] ?? 50)));
     $offset = ($page-1)*$limit;
     
-    $cuentaIds = getUsuariosCuentaIds($conn, $uid);
-    $where = ["p.id_user IN (" . implode(",", array_fill(0, count($cuentaIds), "?")) . ")"];
-    $wParams = $cuentaIds;
-    $wTypes = str_repeat("i", count($cuentaIds));
+    $where = ["p.id_cuenta=?"];
+    $wParams = [$accountId];
+    $wTypes = 'i';
     if ($search) {
         $sLike = "%$search%";
         $where[] = "(p.nombre_producto LIKE ? OR p.codigo_de_barras LIKE ? OR p.sku LIKE ? OR p.descripcion LIKE ?)";
@@ -146,7 +160,7 @@ case 'producto':
                        LEFT JOIN categoria c ON p.id_categoria=c.id_categoria
                        LEFT JOIN marca m ON p.id_marca=m.id_marca
                        LEFT JOIN unidad_medida u ON p.id_unidad=u.id_unidad
-                       WHERE p.id_producto=?");
+                       WHERE p.id_producto=? AND p.id_cuenta=$accountId");
     $stmt->bind_param("i", $id);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -178,13 +192,13 @@ case 'producto_barcode':
     if (!$barcode) json(['error'=>'Código requerido'],400);
     $stmt = $conn->prepare("SELECT p.*, c.nombre AS categoria_nombre, m.nombre AS marca_nombre,
         COALESCE(s.disponible,0) AS stock_disponible, b.nombre AS bodega_nombre, b.id_bodega,
-        (SELECT id_bodega FROM bodega WHERE estado='ACTIVA' LIMIT 1) AS id_bodega_default
+        (SELECT id_bodega FROM bodega WHERE id_cuenta=$accountId AND estado='ACTIVA' LIMIT 1) AS id_bodega_default
         FROM producto p
         LEFT JOIN categoria c ON p.id_categoria=c.id_categoria
         LEFT JOIN marca m ON p.id_marca=m.id_marca
         LEFT JOIN stock s ON p.id_producto=s.id_producto
         LEFT JOIN bodega b ON s.id_bodega=b.id_bodega
-        WHERE p.codigo_de_barras=? AND p.activo=1 LIMIT 1");
+        WHERE p.codigo_de_barras=? AND p.id_cuenta=$accountId AND p.activo=1 LIMIT 1");
     $stmt->bind_param("s", $barcode);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -228,7 +242,7 @@ case 'producto_crear':
     $stmt->close();
     
     // Create stock entry in default bodega
-    $r = $conn->query("SELECT id_bodega FROM bodega WHERE codigo='BOD-001' LIMIT 1");
+    $r = $conn->query("SELECT id_bodega FROM bodega WHERE id_cuenta=$accountId AND codigo='BOD-001' LIMIT 1");
     if ($r && $r->num_rows) {
         $id_bodega = (int)$r->fetch_assoc()['id_bodega'];
         $stmt2 = $conn->prepare("INSERT INTO stock (id_producto,id_bodega,disponible) VALUES (?,?,?)");
@@ -286,7 +300,7 @@ case 'producto_eliminar':
     requierePermiso('inventario','eliminar');
     $id = (int)($input['id'] ?? 0);
     if (!$id) json(['error'=>'ID requerido'],400);
-    $stmt2 = $conn->prepare("SELECT id_producto FROM producto WHERE id_producto=? AND id_user=?");
+    $stmt2 = $conn->prepare("SELECT id_producto FROM producto WHERE id_producto=? AND id_cuenta=(SELECT id_cuenta FROM usuario WHERE id_user=?)");
     $stmt2->bind_param("ii", $id, $uid);
     $stmt2->execute();
     $r = $stmt2->get_result();
@@ -304,14 +318,14 @@ case 'categorias':
     $page = max(1, (int)($input['page'] ?? $_GET['page'] ?? 1));
     $limit = min(100, max(10, (int)($input['limit'] ?? $_GET['limit'] ?? 50)));
     $offset = ($page-1)*$limit;
-    $stmt2 = $conn->prepare("SELECT COUNT(*) AS t FROM categoria WHERE id_user=?");
+    $stmt2 = $conn->prepare("SELECT COUNT(*) AS t FROM categoria WHERE id_cuenta=(SELECT id_cuenta FROM usuario WHERE id_user=?)");
     $stmt2->bind_param("i", $uid);
     $stmt2->execute();
     $r = $stmt2->get_result();
     $total = (int)$r->fetch_assoc()['t'];
     $stmt2->close();
     $items = [];
-    $stmt2 = $conn->prepare("SELECT * FROM categoria WHERE id_user=? ORDER BY nombre LIMIT ? OFFSET ?");
+    $stmt2 = $conn->prepare("SELECT * FROM categoria WHERE id_cuenta=(SELECT id_cuenta FROM usuario WHERE id_user=?) ORDER BY nombre LIMIT ? OFFSET ?");
     $stmt2->bind_param("iii", $uid, $limit, $offset);
     $stmt2->execute();
     $r = $stmt2->get_result();
@@ -349,7 +363,7 @@ case 'categoria_eliminar':
     requierePermiso('inventario','eliminar');
     $id = (int)($input['id'] ?? 0);
     if (!$id) json(['error'=>'ID requerido'],400);
-    $stmt2 = $conn->prepare("SELECT id_categoria FROM categoria WHERE id_categoria=? AND id_user=?");
+    $stmt2 = $conn->prepare("SELECT id_categoria FROM categoria WHERE id_categoria=? AND id_cuenta=(SELECT id_cuenta FROM usuario WHERE id_user=?)");
     $stmt2->bind_param("ii", $id, $uid);
     $stmt2->execute();
     $r = $stmt2->get_result();
@@ -384,14 +398,14 @@ case 'marcas':
     $page = max(1, (int)($input['page'] ?? $_GET['page'] ?? 1));
     $limit = min(100, max(10, (int)($input['limit'] ?? $_GET['limit'] ?? 50)));
     $offset = ($page-1)*$limit;
-    $stmt2 = $conn->prepare("SELECT COUNT(*) AS t FROM marca WHERE id_user=?");
+    $stmt2 = $conn->prepare("SELECT COUNT(*) AS t FROM marca WHERE id_cuenta=(SELECT id_cuenta FROM usuario WHERE id_user=?)");
     $stmt2->bind_param("i", $uid);
     $stmt2->execute();
     $r = $stmt2->get_result();
     $total = (int)$r->fetch_assoc()['t'];
     $stmt2->close();
     $items = [];
-    $stmt2 = $conn->prepare("SELECT * FROM marca WHERE id_user=? ORDER BY nombre LIMIT ? OFFSET ?");
+    $stmt2 = $conn->prepare("SELECT * FROM marca WHERE id_cuenta=(SELECT id_cuenta FROM usuario WHERE id_user=?) ORDER BY nombre LIMIT ? OFFSET ?");
     $stmt2->bind_param("iii", $uid, $limit, $offset);
     $stmt2->execute();
     $r = $stmt2->get_result();
@@ -429,7 +443,7 @@ case 'marca_eliminar':
     requierePermiso('inventario','eliminar');
     $id = (int)($input['id'] ?? 0);
     if (!$id) json(['error'=>'ID requerido'],400);
-    $stmt2 = $conn->prepare("SELECT id_marca FROM marca WHERE id_marca=? AND id_user=?");
+    $stmt2 = $conn->prepare("SELECT id_marca FROM marca WHERE id_marca=? AND id_cuenta=(SELECT id_cuenta FROM usuario WHERE id_user=?)");
     $stmt2->bind_param("ii", $id, $uid);
     $stmt2->execute();
     $r = $stmt2->get_result();
@@ -453,10 +467,10 @@ case 'bodegas':
     $page = max(1, (int)($input['page'] ?? $_GET['page'] ?? 1));
     $limit = min(100, max(10, (int)($input['limit'] ?? $_GET['limit'] ?? 50)));
     $offset = ($page-1)*$limit;
-    $r = $conn->query("SELECT COUNT(*) AS t FROM bodega b");
+    $r = $conn->query("SELECT COUNT(*) AS t FROM bodega b WHERE b.id_cuenta=$accountId");
     $total = (int)$r->fetch_assoc()['t'];
     $items = [];
-    $stmt2 = $conn->prepare("SELECT b.*, (SELECT COALESCE(SUM(disponible),0) FROM stock WHERE id_bodega=b.id_bodega) AS total_items FROM bodega b ORDER BY b.nombre LIMIT ? OFFSET ?");
+    $stmt2 = $conn->prepare("SELECT b.*, (SELECT COALESCE(SUM(disponible),0) FROM stock WHERE id_bodega=b.id_bodega) AS total_items FROM bodega b WHERE b.id_cuenta=$accountId ORDER BY b.nombre LIMIT ? OFFSET ?");
     $stmt2->bind_param("ii", $limit, $offset);
     $stmt2->execute();
     $r = $stmt2->get_result();
@@ -500,7 +514,7 @@ case 'bodega_eliminar':
     requierePermiso('inventario','eliminar');
     $id = (int)($input['id'] ?? 0);
     if (!$id) json(['error'=>'ID requerido'],400);
-    $stmt2 = $conn->prepare("SELECT id_bodega FROM bodega WHERE id_bodega=? AND id_user=?");
+    $stmt2 = $conn->prepare("SELECT id_bodega FROM bodega WHERE id_bodega=? AND id_cuenta=(SELECT id_cuenta FROM usuario WHERE id_user=?)");
     $stmt2->bind_param("ii", $id, $uid);
     $stmt2->execute();
     $r = $stmt2->get_result();
@@ -559,7 +573,7 @@ case 'stock':
             JOIN producto p ON s.id_producto=p.id_producto
             JOIN bodega b ON s.id_bodega=b.id_bodega
             LEFT JOIN ubicacion u ON s.id_ubicacion=u.id_ubicacion
-            WHERE p.activo=1";
+            WHERE p.id_cuenta=$accountId AND p.activo=1";
     $stParams = [];
     $stTypes = "";
     if ($id_bodega) { $sql .= " AND s.id_bodega=?"; $stParams[] = $id_bodega; $stTypes .= "i"; }
@@ -580,7 +594,7 @@ case 'stock_actualizar':
     $valor = (int)($input['valor'] ?? 0);
     $allowed = ['disponible','reservado','comprometido','en_transito','danado','bloqueado','devuelto','produccion'];
     if (!$id_stock || !in_array($campo, $allowed)) json(['error'=>'Datos inválidos'],400);
-    $stmt2 = $conn->prepare("SELECT s.id_stock, s.id_producto FROM stock s JOIN bodega b ON s.id_bodega=b.id_bodega WHERE s.id_stock=? AND b.id_user=?");
+    $stmt2 = $conn->prepare("SELECT s.id_stock, s.id_producto FROM stock s JOIN bodega b ON s.id_bodega=b.id_bodega WHERE s.id_stock=? AND b.id_cuenta=(SELECT id_cuenta FROM usuario WHERE id_user=?)");
     $stmt2->bind_param("ii", $id_stock, $uid);
     $stmt2->execute();
     $r = $stmt2->get_result();
@@ -603,7 +617,7 @@ case 'movimientos':
     $tipo = $input['tipo'] ?? $_GET['tipo'] ?? '';
     $id_producto = (int)($input['id_producto'] ?? $_GET['id_producto'] ?? 0);
     
-    $where = ["m.id_user=?"];
+    $where = ["m.id_user IN (SELECT id_user FROM usuario WHERE id_cuenta=(SELECT id_cuenta FROM usuario WHERE id_user=?))"];
     $mParams = [$uid];
     $mTypes = "i";
     if ($tipo) { $where[] = "m.tipo=?"; $mParams[] = $tipo; $mTypes .= "s"; }
@@ -687,10 +701,11 @@ case 'transferencias':
             FROM transferencia t
             JOIN bodega bo ON t.id_bodega_origen=bo.id_bodega
             JOIN bodega bd ON t.id_bodega_destino=bd.id_bodega
-            LEFT JOIN usuario u ON t.id_user=u.id_user";
-    $trfParams = [];
-    $trfTypes = "";
-    if ($estado) { $sql .= " WHERE t.estado=?"; $trfParams[] = $estado; $trfTypes = "s"; }
+            LEFT JOIN usuario u ON t.id_user=u.id_user
+            WHERE bo.id_cuenta=? AND bd.id_cuenta=?";
+    $trfParams = [$accountId, $accountId];
+    $trfTypes = "ii";
+    if ($estado) { $sql .= " AND t.estado=?"; $trfParams[] = $estado; $trfTypes .= "s"; }
     $sql .= " ORDER BY t.fecha_creacion DESC";
     $stmt2 = $conn->prepare($sql);
     if ($trfParams) $stmt2->bind_param($trfTypes, ...$trfParams);
@@ -719,6 +734,11 @@ case 'transferencia_crear':
     $productos = $input['productos'] ?? [];
     if (!$id_origen || !$id_destino || !count($productos)) json(['error'=>'Datos incompletos'],400);
     if ($id_origen === $id_destino) json(['error'=>'Origen y destino deben ser distintos'],400);
+    requireTenantEntity($conn, tenantContext($uid), 'bodega', $id_origen);
+    requireTenantEntity($conn, tenantContext($uid), 'bodega', $id_destino);
+    foreach ($productos as $productoTransferencia) {
+        requireTenantEntity($conn, tenantContext($uid), 'producto', (int)($productoTransferencia['id_producto'] ?? 0));
+    }
     
     $num = generarCodigo($conn, 'transferencia', 'numero', 'TRF-');
     $obs = $input['observaciones'] ?? '';
@@ -749,14 +769,13 @@ case 'transferencia_recibir':
     requierePermiso('inventario','transferencias');
     $id = (int)($input['id'] ?? 0);
     if (!$id) json(['error'=>'ID requerido'],400);
-    $stmt2 = $conn->prepare("SELECT * FROM transferencia WHERE id_transferencia=?");
-    $stmt2->bind_param("i", $id);
+    $stmt2 = $conn->prepare("SELECT t.* FROM transferencia t JOIN bodega b ON b.id_bodega=t.id_bodega_origen WHERE t.id_transferencia=? AND b.id_cuenta=?");
+    $stmt2->bind_param("ii", $id, $accountId);
     $stmt2->execute();
     $r = $stmt2->get_result();
     $stmt2->close();
     if (!$r->num_rows) json(['error'=>'Transferencia no encontrada'],404);
     $trf = $r->fetch_assoc();
-    if ($trf['id_user'] != $uid) json(['error'=>'No autorizado'], 403);
     if ($trf['estado'] !== 'EN_TRANSITO') json(['error'=>'Solo se pueden recibir transferencias EN_TRANSITO'],400);
     
     $stmt2 = $conn->prepare("SELECT * FROM transferencia_detalle WHERE id_transferencia=?");
@@ -786,14 +805,13 @@ case 'transferencia_enviar':
     requierePermiso('inventario','transferencias');
     $id = (int)($input['id'] ?? 0);
     if (!$id) json(['error'=>'ID requerido'],400);
-    $stmt2 = $conn->prepare("SELECT * FROM transferencia WHERE id_transferencia=?");
-    $stmt2->bind_param("i", $id);
+    $stmt2 = $conn->prepare("SELECT t.* FROM transferencia t JOIN bodega b ON b.id_bodega=t.id_bodega_origen WHERE t.id_transferencia=? AND b.id_cuenta=?");
+    $stmt2->bind_param("ii", $id, $accountId);
     $stmt2->execute();
     $r = $stmt2->get_result();
     $stmt2->close();
     if (!$r->num_rows) json(['error'=>'Transferencia no encontrada'],404);
     $trf = $r->fetch_assoc();
-    if ($trf['id_user'] != $uid) json(['error'=>'No autorizado'], 403);
     if ($trf['estado'] !== 'PENDIENTE') json(['error'=>'La transferencia debe estar PENDIENTE'],400);
     
     $stmt2 = $conn->prepare("SELECT * FROM transferencia_detalle WHERE id_transferencia=?");
@@ -821,14 +839,13 @@ case 'transferencia_cancelar':
     requierePermiso('inventario','transferencias');
     $id = (int)($input['id'] ?? 0);
     if (!$id) json(['error'=>'ID requerido'],400);
-    $stmt2 = $conn->prepare("SELECT * FROM transferencia WHERE id_transferencia=?");
-    $stmt2->bind_param("i", $id);
+    $stmt2 = $conn->prepare("SELECT t.* FROM transferencia t JOIN bodega b ON b.id_bodega=t.id_bodega_origen WHERE t.id_transferencia=? AND b.id_cuenta=?");
+    $stmt2->bind_param("ii", $id, $accountId);
     $stmt2->execute();
     $r = $stmt2->get_result();
     $stmt2->close();
     if (!$r->num_rows) json(['error'=>'Transferencia no encontrada'],404);
     $trf = $r->fetch_assoc();
-    if ($trf['id_user'] != $uid) json(['error'=>'No autorizado'], 403);
     if ($trf['estado'] === 'RECIBIDA' || $trf['estado'] === 'CANCELADA') json(['error'=>'No se puede cancelar'],400);
     
     if ($trf['estado'] === 'PENDIENTE') {
@@ -862,7 +879,7 @@ case 'transferencia_cancelar':
 
 // ─── AJUSTES ───
 case 'ajustes':
-    $items = []; $r = $conn->query("SELECT a.*, p.nombre_producto, b.nombre AS bodega_nombre, u.nombre AS user_nombre FROM ajuste_inventario a JOIN producto p ON a.id_producto=p.id_producto JOIN bodega b ON a.id_bodega=b.id_bodega LEFT JOIN usuario u ON a.id_user=u.id_user ORDER BY a.created_at DESC LIMIT 200");
+    $items = []; $r = $conn->query("SELECT a.*, p.nombre_producto, b.nombre AS bodega_nombre, u.nombre AS user_nombre FROM ajuste_inventario a JOIN producto p ON a.id_producto=p.id_producto JOIN bodega b ON a.id_bodega=b.id_bodega LEFT JOIN usuario u ON a.id_user=u.id_user WHERE p.id_cuenta=$accountId AND b.id_cuenta=$accountId ORDER BY a.created_at DESC LIMIT 200");
     while ($f = $r->fetch_assoc()) $items[] = $f;
     json($items);
 
@@ -906,11 +923,11 @@ case 'inventarios_fisicos':
     $page = max(1, (int)($input['page'] ?? $_GET['page'] ?? 1));
     $limit = min(100, max(10, (int)($input['limit'] ?? $_GET['limit'] ?? 50)));
     $offset = ($page-1)*$limit;
-    $r = $conn->query("SELECT COUNT(*) AS t FROM inventario_fisico f LEFT JOIN bodega b ON f.id_bodega=b.id_bodega LEFT JOIN usuario u ON f.id_user=u.id_user");
+    $r = $conn->query("SELECT COUNT(*) AS t FROM inventario_fisico f JOIN usuario u ON f.id_user=u.id_user WHERE u.id_cuenta=$accountId");
     $total = (int)$r->fetch_assoc()['t'];
     $items = [];
-    $stmt2 = $conn->prepare("SELECT f.*, b.nombre AS bodega_nombre, u.nombre AS user_nombre FROM inventario_fisico f LEFT JOIN bodega b ON f.id_bodega=b.id_bodega LEFT JOIN usuario u ON f.id_user=u.id_user ORDER BY f.created_at DESC LIMIT ? OFFSET ?");
-    $stmt2->bind_param("ii", $limit, $offset);
+    $stmt2 = $conn->prepare("SELECT f.*, b.nombre AS bodega_nombre, u.nombre AS user_nombre FROM inventario_fisico f LEFT JOIN bodega b ON f.id_bodega=b.id_bodega JOIN usuario u ON f.id_user=u.id_user WHERE u.id_cuenta=? ORDER BY f.created_at DESC LIMIT ? OFFSET ?");
+    $stmt2->bind_param("iii", $accountId, $limit, $offset);
     $stmt2->execute();
     $r = $stmt2->get_result();
     $stmt2->close();
@@ -922,6 +939,7 @@ case 'inventario_fisico_crear':
     $tipo = $input['tipo'] ?? 'GENERAL';
     $id_bodega = (int)($input['id_bodega'] ?? 0);
     $obs = $input['observaciones'] ?? '';
+    if ($id_bodega) requireTenantEntity($conn, tenantContext($uid), 'bodega', $id_bodega);
     $codigo = generarCodigo($conn, 'inventario_fisico', 'codigo', 'INV-');
     $stmt = $conn->prepare("INSERT INTO inventario_fisico (codigo,tipo,id_bodega,id_user,observaciones,estado,fecha_inicio) VALUES (?,?,?,?,?,'EN_PROGRESO',NOW())");
     $stmt->bind_param("ssiis", $codigo, $tipo, $id_bodega, $uid, $obs);
@@ -934,7 +952,7 @@ case 'inventario_fisico_crear':
         $stmt2 = $conn->prepare("SELECT s.id_producto, s.id_ubicacion, s.disponible FROM stock s WHERE s.id_bodega=? GROUP BY s.id_producto, s.id_ubicacion, s.disponible");
         $stmt2->bind_param("i", $id_bodega);
     } else {
-        $stmt2 = $conn->prepare("SELECT s.id_producto, s.id_ubicacion, s.disponible FROM stock s WHERE s.disponible>0 GROUP BY s.id_producto, s.id_ubicacion, s.disponible");
+        $stmt2 = $conn->prepare("SELECT s.id_producto, s.id_ubicacion, s.disponible FROM stock s JOIN producto p ON p.id_producto=s.id_producto WHERE p.id_cuenta=$accountId AND s.disponible>0 GROUP BY s.id_producto, s.id_ubicacion, s.disponible");
     }
     $stmt2->execute();
     $r = $stmt2->get_result();
@@ -965,8 +983,8 @@ case 'inventario_fisico_conteo':
     $valor = (int)($input['valor'] ?? 0);
     $allowed = ['conteo1','conteo2','conteo3'];
     if (!in_array($ronda, $allowed)) json(['error'=>'Ronda inválida'],400);
-    $stmt2 = $conn->prepare("UPDATE conteo_inventario SET $ronda=? WHERE id_conteo=?");
-    $stmt2->bind_param("ii", $valor, $id_conteo);
+    $stmt2 = $conn->prepare("UPDATE conteo_inventario c JOIN inventario_fisico f ON f.id_inventario=c.id_inventario JOIN usuario u ON u.id_user=f.id_user SET c.$ronda=? WHERE c.id_conteo=? AND u.id_cuenta=?");
+    $stmt2->bind_param("iii", $valor, $id_conteo, $accountId);
     $stmt2->execute();
     $stmt2->close();
     invLog($conn, $uid, 'EDITAR', 'conteo_inventario', $id_conteo, ['ronda'=>$ronda, 'valor'=>$valor]);
@@ -976,12 +994,12 @@ case 'inventario_fisico_cerrar':
     requierePermiso('inventario','conteo_fisico');
     $id = (int)($input['id'] ?? 0);
     if (!$id) json(['error'=>'ID requerido'],400);
-    $stmt2 = $conn->prepare("SELECT id_bodega, id_user FROM inventario_fisico WHERE id_inventario=?");
-    $stmt2->bind_param("i", $id);
+    $stmt2 = $conn->prepare("SELECT f.id_bodega, f.id_user FROM inventario_fisico f JOIN usuario u ON u.id_user=f.id_user WHERE f.id_inventario=? AND u.id_cuenta=?");
+    $stmt2->bind_param("ii", $id, $accountId);
     $stmt2->execute();
     $inv = $stmt2->get_result()->fetch_assoc();
     $stmt2->close();
-    if (!$inv || $inv['id_user'] != $uid) json(['error'=>'No autorizado'], 403);
+    if (!$inv) json(['error'=>'No autorizado'], 403);
     $id_bodega_default = (int)($inv['id_bodega'] ?? 0);
     
     $conn->begin_transaction();
@@ -1028,8 +1046,8 @@ case 'inventario_fisico_detalle':
     $id = (int)($input['id'] ?? $_GET['id'] ?? 0);
     if (!$id) json(['error'=>'ID requerido'],400);
     $items = [];
-    $stmt2 = $conn->prepare("SELECT c.*, p.nombre_producto, p.codigo_de_barras, p.sku, u.codigo AS ubicacion_codigo FROM conteo_inventario c JOIN producto p ON c.id_producto=p.id_producto LEFT JOIN ubicacion u ON c.id_ubicacion=u.id_ubicacion WHERE c.id_inventario=?");
-    $stmt2->bind_param("i", $id);
+    $stmt2 = $conn->prepare("SELECT c.*, p.nombre_producto, p.codigo_de_barras, p.sku, u.codigo AS ubicacion_codigo FROM conteo_inventario c JOIN producto p ON c.id_producto=p.id_producto LEFT JOIN ubicacion u ON c.id_ubicacion=u.id_ubicacion WHERE c.id_inventario=? AND p.id_cuenta=?");
+    $stmt2->bind_param("ii", $id, $accountId);
     $stmt2->execute();
     $r = $stmt2->get_result();
     $stmt2->close();
@@ -1165,11 +1183,11 @@ case 'alertas':
     $page = max(1, (int)($input['page'] ?? $_GET['page'] ?? 1));
     $limit = min(100, max(10, (int)($input['limit'] ?? $_GET['limit'] ?? 50)));
     $offset = ($page-1)*$limit;
-    $r = $conn->query("SELECT COUNT(*) AS t FROM alerta_stock a JOIN producto p ON a.id_producto=p.id_producto WHERE a.resuelto=0");
+    $r = $conn->query("SELECT COUNT(*) AS t FROM alerta_stock a JOIN producto p ON a.id_producto=p.id_producto WHERE p.id_cuenta=$accountId AND a.resuelto=0");
     $total = (int)$r->fetch_assoc()['t'];
     $items = [];
-    $stmt2 = $conn->prepare("SELECT a.*, p.nombre_producto FROM alerta_stock a JOIN producto p ON a.id_producto=p.id_producto WHERE a.resuelto=0 ORDER BY a.created_at DESC LIMIT ? OFFSET ?");
-    $stmt2->bind_param("ii", $limit, $offset);
+    $stmt2 = $conn->prepare("SELECT a.*, p.nombre_producto FROM alerta_stock a JOIN producto p ON a.id_producto=p.id_producto WHERE p.id_cuenta=? AND a.resuelto=0 ORDER BY a.created_at DESC LIMIT ? OFFSET ?");
+    $stmt2->bind_param("iii", $accountId, $limit, $offset);
     $stmt2->execute();
     $r = $stmt2->get_result();
     while ($f = $r->fetch_assoc()) $items[] = $f;
@@ -1180,8 +1198,8 @@ case 'alerta_resolver':
     requierePermiso('inventario','editar');
     $id = (int)($input['id'] ?? 0);
     if (!$id) json(['error'=>'ID requerido'],400);
-    $stmt2 = $conn->prepare("UPDATE alerta_stock SET resuelto=1, leido=1 WHERE id_alerta=?");
-    $stmt2->bind_param("i", $id);
+    $stmt2 = $conn->prepare("UPDATE alerta_stock a JOIN producto p ON p.id_producto=a.id_producto SET a.resuelto=1, a.leido=1 WHERE a.id_alerta=? AND p.id_cuenta=?");
+    $stmt2->bind_param("ii", $id, $accountId);
     $stmt2->execute();
     $stmt2->close();
     invLog($conn, $uid, 'RESOLVER', 'alerta_stock', $id);
@@ -1191,8 +1209,8 @@ case 'alerta_resolver':
 case 'auditoria':
     $items = [];
     $limit = min(200, (int)($input['limit'] ?? $_GET['limit'] ?? 100));
-    $stmt2 = $conn->prepare("SELECT a.*, u.nombre AS user_nombre FROM inventario_auditoria a LEFT JOIN usuario u ON a.id_user=u.id_user ORDER BY a.created_at DESC LIMIT ?");
-    $stmt2->bind_param("i", $limit);
+    $stmt2 = $conn->prepare("SELECT a.*, u.nombre AS user_nombre FROM inventario_auditoria a JOIN usuario u ON a.id_user=u.id_user WHERE u.id_cuenta=? ORDER BY a.created_at DESC LIMIT ?");
+    $stmt2->bind_param("ii", $accountId, $limit);
     $stmt2->execute();
     $r = $stmt2->get_result();
     $stmt2->close();
@@ -1204,7 +1222,7 @@ case 'reporte_existencias':
     $page = max(1, (int)($input['page'] ?? $_GET['page'] ?? 1));
     $limit = min(500, max(10, (int)($input['limit'] ?? $_GET['limit'] ?? 100)));
     $offset = ($page-1)*$limit;
-    $base = "FROM producto p LEFT JOIN stock s ON p.id_producto=s.id_producto LEFT JOIN categoria c ON p.id_categoria=c.id_categoria LEFT JOIN marca m ON p.id_marca=m.id_marca WHERE p.activo=1";
+    $base = "FROM producto p LEFT JOIN stock s ON p.id_producto=s.id_producto LEFT JOIN categoria c ON p.id_categoria=c.id_categoria LEFT JOIN marca m ON p.id_marca=m.id_marca WHERE p.id_cuenta=$accountId AND p.activo=1";
     $r = $conn->query("SELECT COUNT(*) AS t $base");
     $total = (int)$r->fetch_assoc()['t'];
     $items = [];
@@ -1228,7 +1246,7 @@ case 'reporte_stock_critico':
     $page = max(1, (int)($input['page'] ?? $_GET['page'] ?? 1));
     $limit = min(500, max(10, (int)($input['limit'] ?? $_GET['limit'] ?? 100)));
     $offset = ($page-1)*$limit;
-    $base = "FROM producto p LEFT JOIN stock s ON p.id_producto=s.id_producto LEFT JOIN categoria c ON p.id_categoria=c.id_categoria LEFT JOIN marca m ON p.id_marca=m.id_marca WHERE p.activo=1 AND (COALESCE(s.disponible,0) <= p.stock_minimo OR p.cantidad=0 OR p.cantidad IS NULL)";
+    $base = "FROM producto p LEFT JOIN stock s ON p.id_producto=s.id_producto LEFT JOIN categoria c ON p.id_categoria=c.id_categoria LEFT JOIN marca m ON p.id_marca=m.id_marca WHERE p.id_cuenta=$accountId AND p.activo=1 AND (COALESCE(s.disponible,0) <= p.stock_minimo OR p.cantidad=0 OR p.cantidad IS NULL)";
     $r = $conn->query("SELECT COUNT(*) AS t $base");
     $total = (int)$r->fetch_assoc()['t'];
     $items = [];
@@ -1250,7 +1268,7 @@ case 'reporte_stock_critico':
 
 case 'reporte_valorizacion':
     $items = [];
-    $r = $conn->query("SELECT v.*, u.nombre AS user_nombre FROM valorizacion_inventario v LEFT JOIN usuario u ON v.id_user=u.id_user ORDER BY v.fecha DESC LIMIT 50");
+    $r = $conn->query("SELECT v.*, u.nombre AS user_nombre FROM valorizacion_inventario v JOIN usuario u ON v.id_user=u.id_user WHERE u.id_cuenta=$accountId ORDER BY v.fecha DESC LIMIT 50");
     while ($f = $r->fetch_assoc()) $items[] = $f;
     json($items);
 
@@ -1264,14 +1282,14 @@ case 'reporte_rotacion':
         FROM producto p
         LEFT JOIN stock s ON p.id_producto=s.id_producto
         LEFT JOIN categoria c ON p.id_categoria=c.id_categoria
-        WHERE p.activo=1
+        WHERE p.id_cuenta=$accountId AND p.activo=1
         ORDER BY dias_sin_movimiento DESC");
     while ($f = $r->fetch_assoc()) $items[] = $f;
     json($items);
 
 // ─── PROVEEDORES (select aux) ───
 case 'proveedores_select':
-    $items = []; $r = $conn->query("SELECT id_proveedor, nombre_empresa FROM proveedor WHERE activo=1 ORDER BY nombre_empresa");
+    $items = []; $r = $conn->query("SELECT id_proveedor, nombre_empresa FROM proveedor WHERE id_cuenta=$accountId AND activo=1 ORDER BY nombre_empresa");
     while ($f = $r->fetch_assoc()) $items[] = $f;
     json($items);
 

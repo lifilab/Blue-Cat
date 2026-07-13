@@ -2,6 +2,8 @@
 require_once __DIR__ . '/_db.php';
 $uid = requireUser();
 $conn = getDB();
+$context = requireTenantContext();
+$accountId = $context->accountId;
 $input = getJsonInput();
 $accion = $input['accion'] ?? $_GET['accion'] ?? '';
 
@@ -12,11 +14,12 @@ function requierePermiso($modulo, $accion) {
 }
 
 function coreLog($conn, $uid, $accion, $entidad, $id_entidad = null, $detalle = null, $nivel = 'INFO', $va = null, $vn = null) {
+    $idCuenta = tenantContext($uid)->accountId;
     $ip = $_SERVER['REMOTE_ADDR'] ?? '';
     $ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
     $vn = $detalle !== null ? json_encode($detalle, JSON_UNESCAPED_UNICODE) : $vn;
-    $stmt = $conn->prepare("INSERT INTO core_auditoria (id_user, accion, entidad, id_entidad, valor_anterior, valor_nuevo, ip, user_agent, nivel) VALUES (?,?,?,?,?,?,?,?,?)");
-    $stmt->bind_param("ississsss", $uid, $accion, $entidad, $id_entidad, $va, $vn, $ip, $ua, $nivel);
+    $stmt = $conn->prepare("INSERT INTO core_auditoria (id_cuenta,id_user,accion,entidad,id_entidad,valor_anterior,valor_nuevo,ip,user_agent,nivel) VALUES (?,?,?,?,?,?,?,?,?,?)");
+    $stmt->bind_param("iississsss", $idCuenta, $uid, $accion, $entidad, $id_entidad, $va, $vn, $ip, $ua, $nivel);
     $stmt->execute();
     $stmt->close();
 }
@@ -38,21 +41,19 @@ switch ($accion) {
 // ═══ DASHBOARD ═══
 case 'dashboard':
     $d = [];
-    $d['empresas'] = (int)$conn->query("SELECT COUNT(*) AS t FROM empresa WHERE activo=1")->fetch_assoc()['t'];
-    $d['sucursales'] = (int)$conn->query("SELECT COUNT(*) AS t FROM sucursal WHERE activo=1")->fetch_assoc()['t'];
-    $d['usuarios_activos'] = (int)$conn->query("SELECT COUNT(*) AS t FROM usuario WHERE activo=1")->fetch_assoc()['t'];
-    $d['roles'] = (int)$conn->query("SELECT COUNT(*) AS t FROM rol WHERE activo=1")->fetch_assoc()['t'];
-    $d['permisos'] = (int)$conn->query("SELECT COUNT(*) AS t FROM permiso")->fetch_assoc()['t'];
-    $d['monedas'] = (int)$conn->query("SELECT COUNT(*) AS t FROM moneda WHERE activo=1")->fetch_assoc()['t'];
-    $d['impuestos'] = (int)$conn->query("SELECT COUNT(*) AS t FROM impuesto WHERE activo=1")->fetch_assoc()['t'];
-    $r = $conn->query("SELECT COUNT(*) AS t FROM core_auditoria WHERE DATE(created_at)=CURDATE()");
-    $d['auditoria_hoy'] = (int)$r->fetch_assoc()['t'];
-    $r = $conn->query("SELECT COUNT(*) AS t FROM core_auditoria WHERE nivel='ERROR' AND DATE(created_at)=CURDATE()");
-    $d['errores_hoy'] = (int)$r->fetch_assoc()['t'];
-    $r = $conn->query("SELECT u.nombre, u.nombre_completo, u.ultimo_acceso FROM usuario u WHERE u.activo=1 AND u.ultimo_acceso IS NOT NULL ORDER BY u.ultimo_acceso DESC LIMIT 10");
+    $d['empresas'] = (int)$conn->query("SELECT COUNT(*) t FROM empresa WHERE id_cuenta={$accountId} AND activo=1")->fetch_assoc()['t'];
+    $d['sucursales'] = (int)$conn->query("SELECT COUNT(*) t FROM sucursal WHERE id_cuenta={$accountId} AND activo=1")->fetch_assoc()['t'];
+    $d['usuarios_activos'] = (int)$conn->query("SELECT COUNT(*) t FROM usuario WHERE id_cuenta={$accountId} AND activo=1")->fetch_assoc()['t'];
+    $d['roles'] = (int)$conn->query("SELECT COUNT(*) t FROM rol WHERE id_cuenta={$accountId} AND activo=1")->fetch_assoc()['t'];
+    $d['permisos'] = (int)$conn->query("SELECT COUNT(*) t FROM permiso")->fetch_assoc()['t'];
+    $d['monedas'] = (int)$conn->query("SELECT COUNT(*) t FROM moneda WHERE activo=1")->fetch_assoc()['t'];
+    $d['impuestos'] = (int)$conn->query("SELECT COUNT(*) t FROM impuesto WHERE activo=1")->fetch_assoc()['t'];
+    $d['auditoria_hoy'] = (int)$conn->query("SELECT COUNT(*) t FROM core_auditoria WHERE id_cuenta={$accountId} AND DATE(created_at)=CURDATE()")->fetch_assoc()['t'];
+    $d['errores_hoy'] = (int)$conn->query("SELECT COUNT(*) t FROM core_auditoria WHERE id_cuenta={$accountId} AND nivel='ERROR' AND DATE(created_at)=CURDATE()")->fetch_assoc()['t'];
+    $r = $conn->query("SELECT nombre,nombre_completo,ultimo_acceso FROM usuario WHERE id_cuenta={$accountId} AND activo=1 AND ultimo_acceso IS NOT NULL ORDER BY ultimo_acceso DESC LIMIT 10");
     $accesos = []; while ($f = $r->fetch_assoc()) $accesos[] = $f;
     $d['ultimos_accesos'] = $accesos;
-    $r = $conn->query("SELECT accion, entidad, created_at FROM core_auditoria ORDER BY created_at DESC LIMIT 20");
+    $r = $conn->query("SELECT accion,entidad,created_at FROM core_auditoria WHERE id_cuenta={$accountId} ORDER BY created_at DESC LIMIT 20");
     $logs = []; while ($f = $r->fetch_assoc()) $logs[] = $f;
     $d['ultimos_logs'] = $logs;
     json($d);
@@ -60,7 +61,7 @@ case 'dashboard':
 
 // ═══ EMPRESAS ═══
 case 'empresas':
-    $items = []; $r = $conn->query("SELECT * FROM empresa ORDER BY razon_social");
+    $items = []; $r = $conn->query("SELECT * FROM empresa WHERE id_cuenta={$accountId} ORDER BY razon_social");
     while ($f = $r->fetch_assoc()) $items[] = $f;
     json($items);
     break;
@@ -78,8 +79,8 @@ case 'empresa_crear':
     $telefono = $input['telefono'] ?? '';
     $correo = $input['correo'] ?? '';
     $moneda_base = $input['moneda_base'] ?? 'CLP';
-    $stmt = $conn->prepare("INSERT INTO empresa (razon_social,nombre_comercial,rut,giro,representante_legal,direccion,ciudad,pais,telefono,correo,moneda_base) VALUES (?,?,?,?,?,?,?,?,?,?,?)");
-    $stmt->bind_param("sssssssssss", $razon, $nombre_comercial, $rut, $giro, $representante_legal, $direccion, $ciudad, $pais, $telefono, $correo, $moneda_base);
+    $stmt = $conn->prepare("INSERT INTO empresa (id_cuenta,razon_social,nombre_comercial,rut,giro,representante_legal,direccion,ciudad,pais,telefono,correo,moneda_base) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)");
+    $stmt->bind_param("isssssssssss", $accountId, $razon, $nombre_comercial, $rut, $giro, $representante_legal, $direccion, $ciudad, $pais, $telefono, $correo, $moneda_base);
     $stmt->execute(); $id = (int)$conn->insert_id; $stmt->close();
     coreLog($conn, $uid, 'CREAR', 'empresa', $id, ['razon_social' => $razon]);
     json(['success' => true, 'id' => $id], 201);
@@ -87,6 +88,7 @@ case 'empresa_crear':
 
 case 'empresa_editar':
     $id = (int)($input['id'] ?? 0);
+    requireTenantEntity($conn,$context,'empresa',$id);
     $allowed = ['razon_social', 'nombre_comercial', 'rut', 'giro', 'representante_legal', 'direccion', 'ciudad', 'pais', 'telefono', 'correo', 'moneda_base', 'activo'];
     $fields = []; $params = []; $types = '';
     foreach ($input as $k => $v) {
@@ -94,7 +96,7 @@ case 'empresa_editar':
     }
     if (!count($fields)) json(['error' => 'Sin campos'], 400);
     $params[] = $id; $types .= 'i';
-    $stmt = $conn->prepare("UPDATE empresa SET " . implode(',', $fields) . " WHERE id_empresa=?");
+    $stmt = $conn->prepare("UPDATE empresa SET " . implode(',', $fields) . " WHERE id_empresa=? AND id_cuenta={$accountId}");
     $stmt->bind_param($types, ...$params);
     $stmt->execute();
     $stmt->close();
@@ -104,7 +106,7 @@ case 'empresa_editar':
 
 // ═══ SUCURSALES ═══
 case 'sucursales':
-    $items = []; $r = $conn->query("SELECT s.*, e.razon_social AS empresa FROM sucursal s JOIN empresa e ON s.id_empresa=e.id_empresa ORDER BY s.nombre");
+    $items = []; $r = $conn->query("SELECT s.*,e.razon_social empresa FROM sucursal s JOIN empresa e ON s.id_empresa=e.id_empresa AND e.id_cuenta=s.id_cuenta WHERE s.id_cuenta={$accountId} ORDER BY s.nombre");
     while ($f = $r->fetch_assoc()) $items[] = $f;
     json($items);
     break;
@@ -112,14 +114,15 @@ case 'sucursales':
 case 'sucursal_crear':
     $nombre = $input['nombre'] ?? '';
     if (!$nombre) json(['error' => 'Nombre requerido'], 400);
-    $id_empresa = $input['id_empresa'] ?? 1;
+    $id_empresa = (int)($input['id_empresa'] ?? 0);
+    requireTenantEntity($conn,$context,'empresa',$id_empresa);
     $codigo = $input['codigo'] ?? '';
     $direccion = $input['direccion'] ?? '';
     $responsable = $input['responsable'] ?? '';
     $telefono = $input['telefono'] ?? '';
     $correo = $input['correo'] ?? '';
-    $stmt = $conn->prepare("INSERT INTO sucursal (id_empresa, codigo, nombre, direccion, responsable, telefono, correo) VALUES (?,?,?,?,?,?,?)");
-    $stmt->bind_param("issssss", $id_empresa, $codigo, $nombre, $direccion, $responsable, $telefono, $correo);
+    $stmt = $conn->prepare("INSERT INTO sucursal (id_cuenta,id_empresa,codigo,nombre,direccion,responsable,telefono,correo) VALUES (?,?,?,?,?,?,?,?)");
+    $stmt->bind_param("iissssss", $accountId, $id_empresa, $codigo, $nombre, $direccion, $responsable, $telefono, $correo);
     $stmt->execute(); $id = (int)$conn->insert_id; $stmt->close();
     coreLog($conn, $uid, 'CREAR', 'sucursal', $id, ['nombre' => $nombre]);
     json(['success' => true, 'id' => $id], 201);
@@ -127,12 +130,13 @@ case 'sucursal_crear':
 
 case 'sucursal_editar':
     $id = (int)($input['id'] ?? 0);
+    requireTenantEntity($conn,$context,'sucursal',$id);
     $allowed = ['nombre', 'codigo', 'direccion', 'responsable', 'telefono', 'correo', 'activo'];
     $fields = []; $params = []; $types = '';
     foreach ($input as $k => $v) { if (in_array($k, $allowed)) { $fields[] = "$k=?"; $params[] = $v; $types .= 's'; } }
     if (!count($fields)) json(['error' => 'Sin campos'], 400);
     $params[] = $id; $types .= 'i';
-    $stmt = $conn->prepare("UPDATE sucursal SET " . implode(',', $fields) . " WHERE id_sucursal=?");
+    $stmt = $conn->prepare("UPDATE sucursal SET " . implode(',', $fields) . " WHERE id_sucursal=? AND id_cuenta={$accountId}");
     $stmt->bind_param($types, ...$params);
     $stmt->execute();
     $stmt->close();
@@ -142,7 +146,7 @@ case 'sucursal_editar':
 
 // ═══ ROLES ═══
 case 'roles':
-    $items = []; $r = $conn->query("SELECT r.*, (SELECT COUNT(*) FROM usuario_rol WHERE id_rol=r.id_rol) AS usuarios FROM rol r ORDER BY r.nombre");
+    $items = []; $r = $conn->query("SELECT r.*,(r.id_cuenta IS NULL OR r.es_plantilla=1) solo_lectura,(SELECT COUNT(*) FROM usuario_rol ur JOIN usuario u ON u.id_user=ur.id_user WHERE ur.id_rol=r.id_rol AND u.id_cuenta={$accountId}) usuarios FROM rol r WHERE r.id_cuenta={$accountId} OR r.id_cuenta IS NULL ORDER BY r.nombre");
     while ($f = $r->fetch_assoc()) $items[] = $f;
     json($items);
     break;
@@ -151,8 +155,8 @@ case 'rol_crear':
     $nombre = $input['nombre'] ?? '';
     if (!$nombre) json(['error' => 'Nombre requerido'], 400);
     $descripcion = $input['descripcion'] ?? '';
-    $stmt = $conn->prepare("INSERT INTO rol (nombre, descripcion) VALUES (?,?)");
-    $stmt->bind_param("ss", $nombre, $descripcion);
+    $stmt = $conn->prepare("INSERT INTO rol (id_cuenta,nombre,descripcion,es_sistema,es_plantilla) VALUES (?,?,?,0,0)");
+    $stmt->bind_param("iss", $accountId, $nombre, $descripcion);
     $stmt->execute(); $id = (int)$conn->insert_id; $stmt->close();
     coreLog($conn, $uid, 'CREAR', 'rol', $id, ['nombre' => $nombre]);
     json(['success' => true, 'id' => $id], 201);
@@ -168,6 +172,7 @@ case 'permisos':
 case 'rol_permisos':
     $id_rol = (int)($input['id_rol'] ?? $_GET['id_rol'] ?? 0);
     if (!$id_rol) json(['error' => 'ID rol requerido'], 400);
+    requireTenantRole($conn,$context,$id_rol,false);
     $items = []; $stmt = $conn->prepare("SELECT p.*, CASE WHEN rp.id_rol_permiso IS NOT NULL THEN 1 ELSE 0 END AS asignado FROM permiso p LEFT JOIN rol_permiso rp ON p.id_permiso=rp.id_permiso AND rp.id_rol=? ORDER BY p.modulo, p.accion"); $stmt->bind_param("i", $id_rol); $stmt->execute(); $r = $stmt->get_result();
     while ($f = $r->fetch_assoc()) $items[] = $f;
     json($items);
@@ -177,6 +182,7 @@ case 'rol_permiso_toggle':
     $id_rol = (int)($input['id_rol'] ?? 0);
     $id_permiso = (int)($input['id_permiso'] ?? 0);
     if (!$id_rol || !$id_permiso) json(['error' => 'Datos requeridos'], 400);
+    requireTenantRole($conn,$context,$id_rol,true);
     $stmt = $conn->prepare("SELECT id_rol_permiso FROM rol_permiso WHERE id_rol=? AND id_permiso=?"); $stmt->bind_param("ii", $id_rol, $id_permiso); $stmt->execute(); $r = $stmt->get_result(); $stmt->close();
     if ($r->num_rows) {
         $stmt = $conn->prepare("DELETE FROM rol_permiso WHERE id_rol=? AND id_permiso=?"); $stmt->bind_param("ii", $id_rol, $id_permiso); $stmt->execute(); $stmt->close();
@@ -192,7 +198,8 @@ case 'rol_permiso_toggle':
 case 'usuario_roles':
     $uid_target = (int)($input['id_user'] ?? $_GET['id_user'] ?? 0);
     if (!$uid_target) json(['error' => 'ID usuario requerido'], 400);
-    $items = []; $stmt = $conn->prepare("SELECT r.*, CASE WHEN ur.id_usuario_rol IS NOT NULL THEN 1 ELSE 0 END AS asignado FROM rol r LEFT JOIN usuario_rol ur ON r.id_rol=ur.id_rol AND ur.id_user=? ORDER BY r.nombre"); $stmt->bind_param("i", $uid_target); $stmt->execute(); $r = $stmt->get_result();
+    requireTenantUser($conn,$context,$uid_target);
+    $items = []; $stmt = $conn->prepare("SELECT r.*, CASE WHEN ur.id_usuario_rol IS NOT NULL THEN 1 ELSE 0 END AS asignado FROM rol r LEFT JOIN usuario_rol ur ON r.id_rol=ur.id_rol AND ur.id_user=? WHERE r.id_cuenta=? AND r.es_plantilla=0 ORDER BY r.nombre"); $stmt->bind_param("ii", $uid_target,$accountId); $stmt->execute(); $r = $stmt->get_result();
     while ($f = $r->fetch_assoc()) $items[] = $f;
     json($items);
     break;
@@ -201,6 +208,8 @@ case 'usuario_rol_toggle':
     $uid_target = (int)($input['id_user'] ?? 0);
     $id_rol = (int)($input['id_rol'] ?? 0);
     if (!$uid_target || !$id_rol) json(['error' => 'Datos requeridos'], 400);
+    requireTenantUser($conn,$context,$uid_target);
+    requireTenantRole($conn,$context,$id_rol,true);
     $stmt = $conn->prepare("SELECT id_usuario_rol FROM usuario_rol WHERE id_user=? AND id_rol=?"); $stmt->bind_param("ii", $uid_target, $id_rol); $stmt->execute(); $r = $stmt->get_result(); $stmt->close();
     if ($r->num_rows) {
         $stmt = $conn->prepare("DELETE FROM usuario_rol WHERE id_user=? AND id_rol=?"); $stmt->bind_param("ii", $uid_target, $id_rol); $stmt->execute(); $stmt->close();
@@ -215,9 +224,9 @@ case 'usuario_rol_toggle':
 
 // ═══ USUARIOS ═══
 case 'usuarios':
-    $items = []; $cuentaId = getCuentaId($conn, $uid);
-    $stmt = $conn->prepare("SELECT u.id_user,u.nombre,u.nombre_completo,u.correo,u.telefono,u.activo,u.fecha_creacion,u.ultimo_acceso,GROUP_CONCAT(r.nombre SEPARATOR ', ') AS roles FROM usuario u LEFT JOIN usuario_rol ur ON u.id_user=ur.id_user LEFT JOIN rol r ON ur.id_rol=r.id_rol WHERE (u.id_cuenta=? OR (?=0 AND u.id_user=?)) GROUP BY u.id_user,u.nombre,u.nombre_completo,u.correo,u.telefono,u.activo,u.fecha_creacion,u.ultimo_acceso ORDER BY u.nombre");
-    $stmt->bind_param("iii", $cuentaId, $cuentaId, $uid); $stmt->execute(); $r=$stmt->get_result();
+    $items = [];
+    $stmt = $conn->prepare("SELECT u.id_user,u.nombre,u.nombre_completo,u.correo,u.telefono,u.activo,u.fecha_creacion,u.ultimo_acceso,GROUP_CONCAT(r.nombre SEPARATOR ', ') roles FROM usuario u LEFT JOIN usuario_rol ur ON u.id_user=ur.id_user LEFT JOIN rol r ON ur.id_rol=r.id_rol WHERE u.id_cuenta=? GROUP BY u.id_user,u.nombre,u.nombre_completo,u.correo,u.telefono,u.activo,u.fecha_creacion,u.ultimo_acceso ORDER BY u.nombre");
+    $stmt->bind_param("i", $accountId); $stmt->execute(); $r=$stmt->get_result();
     while ($f=$r->fetch_assoc()) $items[]=$f; $stmt->close();
     json($items);
     break;
@@ -232,7 +241,7 @@ case 'usuario_crear':
     $cargo = $input['cargo'] ?? '';
     $telefono = $input['telefono'] ?? '';
     $id_sucursal = (int)($input['id_sucursal'] ?? 0);
-    $id_cuenta=getCuentaId($conn,$uid); if($id_cuenta<=0)$id_cuenta=$uid;
+    $id_cuenta=$accountId; if($id_sucursal>0) requireTenantEntity($conn,$context,'sucursal',$id_sucursal);
     $stmt = $conn->prepare("INSERT INTO usuario (nombre, correo, password, nombre_completo, cargo, telefono, id_sucursal, id_cuenta, validar_sesion) VALUES (?,?,?,?,?,?,?,?,1)");
     $stmt->bind_param("ssssssii", $nombre, $correo, $hash, $nombre_completo, $cargo, $telefono, $id_sucursal, $id_cuenta);
     $stmt->execute(); $id = (int)$conn->insert_id; $stmt->close();
@@ -242,12 +251,14 @@ case 'usuario_crear':
 
 case 'usuario_editar':
     $id = (int)($input['id'] ?? 0);
+    requireTenantUser($conn,$context,$id);
+    if (isset($input['id_sucursal']) && (int)$input['id_sucursal']>0) requireTenantEntity($conn,$context,'sucursal',(int)$input['id_sucursal']);
     $allowed = ['nombre_completo', 'cargo', 'telefono', 'id_sucursal', 'id_departamento', 'idioma', 'activo'];
     $fields = []; $params = []; $types = '';
     foreach ($input as $k => $v) { if (in_array($k, $allowed)) { $fields[] = "$k=?"; $params[] = $v; $types .= 's'; } }
     if (!count($fields)) json(['error' => 'Sin campos'], 400);
     $params[] = $id; $types .= 'i';
-    $stmt = $conn->prepare("UPDATE usuario SET " . implode(',', $fields) . " WHERE id_user=?");
+    $stmt = $conn->prepare("UPDATE usuario SET " . implode(',', $fields) . " WHERE id_user=? AND id_cuenta={$accountId}");
     $stmt->bind_param($types, ...$params);
     $stmt->execute();
     $stmt->close();
@@ -260,10 +271,11 @@ case 'usuario_cambiar_password':
     $id = (int)($input['id_user'] ?? 0);
     $password = $input['password'] ?? '';
     if (!$id || !$password) json(['error' => 'Datos incompletos'], 400);
+    requireTenantUser($conn,$context,$id);
     if (strlen($password) < 6) json(['error' => 'La contraseña debe tener al menos 6 caracteres'], 400);
     
     $hash = password_hash($password, PASSWORD_DEFAULT);
-    $stmt = $conn->prepare("UPDATE usuario SET password=? WHERE id_user=?");
+    $stmt = $conn->prepare("UPDATE usuario SET password=? WHERE id_user=? AND id_cuenta={$accountId}");
     $stmt->bind_param("si", $hash, $id);
     $stmt->execute();
     $stmt->close();
