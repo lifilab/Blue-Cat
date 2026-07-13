@@ -3,7 +3,7 @@ function openPopup() {
     console.log("Abriendo el pop-up...");
 
     // Realizar una solicitud AJAX para obtener el valor de validar_sesion del servidor
-    fetch("../assets/PHP/obtener_validar_sesion.php")
+    fetch("../assets/api/auth.php?accion=estado")
         .then(response => {
             if (!response.ok) {
                 throw new Error("La solicitud no fue exitosa: " + response.status);
@@ -50,46 +50,25 @@ function closePopup() {
 
 
 function apertura() {
-    var monto = document.getElementById('monto').value;
-    var empleado = document.getElementById('empleado').value;
-    var nota = document.getElementById('nota').value;
-
-    // Obtener la fecha y hora actual
-    var fechaHoraActual = new Date();
-    var fechaHoraActualFormateada = formatDate(fechaHoraActual); // Formatear la fecha y hora actual
-
-    // Crear un objeto con los datos de la apertura, incluyendo la fecha y hora
-    var aperturaData = {
-        'monto': monto,
-        'empleado': empleado,
-        'nota': nota,
-        'fecha_hora': fechaHoraActualFormateada // Agregar la fecha y hora actual al objeto
-    };
-
-    // Crear una cadena de consulta codificada para enviar los datos
-    var formData = new FormData();
-    for (var key in aperturaData) {
-        formData.append(key, aperturaData[key]);
-    }
-
-    // Enviar los datos a través de AJAX a formulario_apertura.php
+    var monto = parseInt(document.getElementById('monto').value, 10) || 0;
+    var empleado = document.getElementById('empleado').value || 'Caja Principal';
+    var nota = document.getElementById('nota').value || '';
     var xhr = new XMLHttpRequest();
-    xhr.open('POST', '../assets/PHP/formulario_apertura.php', true);
+    xhr.open('POST', '../assets/api/pos.php', true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
     xhr.onreadystatechange = function () {
-        if (xhr.readyState === 4) {
-            if (xhr.status === 200) {
-                if (xhr.responseText.includes('Apertura realizada exitosamente')) {
-                    closePopup();
-                } else {
-                    showToast(xhr.responseText);
-                }
-            } else {
-                console.error('Error al enviar la solicitud:', xhr.status);
-            }
+        if (xhr.readyState !== 4) return;
+        var data = {};
+        try { data = JSON.parse(xhr.responseText); } catch (e) {}
+        if (xhr.status >= 200 && xhr.status < 300 && data.success) {
+            closePopup();
+            showToast('Caja abierta correctamente');
+        } else {
+            showToast(data.message || data.error || 'No fue posible abrir la caja', 'error');
         }
     };
-    xhr.send(formData);
-    return false; // Esto previene el envío del formulario por defecto
+    xhr.send(JSON.stringify({ accion: 'caja_abrir', monto_apertura: monto, nombre: empleado, nota: nota }));
+    return false;
 }
 
 // Función para formatear la fecha y hora en formato legible
@@ -144,7 +123,7 @@ function cerrarSesion() {
             }
         }
     };
-    xhr.open('POST', '../assets/PHP/cerrar_sesion.php', true);
+    xhr.open('POST', '../assets/api/auth.php?accion=logout', true);
     xhr.send(formData);
     return false;
 }

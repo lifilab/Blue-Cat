@@ -226,10 +226,10 @@ function loadPedidosSelect() {
   var sel = document.getElementById('create-pedido');
   if (!sel) return;
   var xhr = new XMLHttpRequest();
-  xhr.open('GET', '../assets/PHP/listar_ventas.php', true);
+  xhr.open('GET', '../assets/api/ventas.php?accion=listar&limit=200', true);
   xhr.onload = function() {
     if (xhr.status !== 200) return;
-    var ps = JSON.parse(xhr.responseText);
+    var ps = JSON.parse(xhr.responseText).ventas || [];
     sel.innerHTML = '<option value="0">-- Seleccionar pedido --</option>';
     for (var i = 0; i < ps.length; i++) {
       sel.innerHTML += '<option value="' + ps[i].id_pedido + '">Pedido #' + ps[i].id_pedido + ' - $' + ps[i].precio_total + ' (' + ps[i].items.length + ' prod)</option>';
@@ -248,13 +248,13 @@ function createFactura() {
 
   // Get pedido details from the option text - better to fetch from API
   var xhr = new XMLHttpRequest();
-  xhr.open('GET', '../assets/PHP/listar_ventas.php', true);
+  xhr.open('GET', '../assets/api/ventas.php?accion=listar&limit=200', true);
   xhr.onload = function() {
     if (xhr.status !== 200) { showToast('Error al obtener pedido', 'error'); return; }
-    var pedidos = JSON.parse(xhr.responseText);
+    var pedidos = JSON.parse(xhr.responseText).ventas || [];
     var pedido = null;
     for (var i = 0; i < pedidos.length; i++) {
-      if (pedidos[i].id_pedido === id_pedido) { pedido = pedidos[i]; break; }
+      if (parseInt(pedidos[i].id_pedido, 10) === id_pedido) { pedido = pedidos[i]; break; }
     }
     if (!pedido) { showToast('Pedido no encontrado', 'error'); return; }
 
@@ -263,9 +263,9 @@ function createFactura() {
       var it = pedido.items[j];
       items.push({
         id_producto: it.id_producto,
-        producto: it.nombre,
-        cantidad: it.cantidad,
-        precio: Math.round(it.precio_total / it.cantidad)
+        producto: it.nombre_producto || it.nombre,
+        cantidad: parseFloat(it.cantidad_pedida || it.cantidad),
+        precio: Math.round(it.precio_total / parseFloat(it.cantidad_pedida || it.cantidad))
       });
     }
 

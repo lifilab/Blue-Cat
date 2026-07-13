@@ -443,7 +443,7 @@ function cerrarCajaFinal() {
           }
         }
       };
-      xhr.open('POST', '../assets/PHP/cerrar_sesion.php', true);
+      xhr.open('POST', '../assets/api/auth.php?accion=logout', true);
       xhr.send(new FormData());
     }, 1500);
   });
@@ -483,7 +483,7 @@ function cerrarSesion() {
       }
     }
   };
-  xhr.open('POST', '../assets/PHP/cerrar_sesion.php', true);
+  xhr.open('POST', '../assets/api/auth.php?accion=logout', true);
   xhr.send(new FormData());
   return false;
 }

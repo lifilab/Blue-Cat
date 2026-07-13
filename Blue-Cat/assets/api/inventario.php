@@ -36,8 +36,10 @@ function requierePermiso($modulo, $accion) {
 switch ($accion) {
 
 case 'exportar_productos':
+    requierePermiso('inventario','exportar');
+    $cuenta = getCuentaId($conn, $uid);
     $stmt = $conn->prepare("SELECT p.nombre_producto, p.precio_venta, p.codigo_de_barras, p.cantidad, COALESCE(c.nombre,p.categoria,'') AS categoria, p.sku, p.precio_costo, p.tipo_venta, COALESCE(u.abreviatura,'u') AS unidad, p.activo FROM producto p LEFT JOIN categoria c ON p.id_categoria=c.id_categoria LEFT JOIN unidad_medida u ON p.id_unidad=u.id_unidad WHERE p.id_user=? ORDER BY p.nombre_producto");
-    $stmt->bind_param("i", $uid); $stmt->execute(); $rows=$stmt->get_result()->fetch_all(MYSQLI_ASSOC); $stmt->close();
+    $stmt->bind_param("i", $cuenta); $stmt->execute(); $rows=$stmt->get_result()->fetch_all(MYSQLI_ASSOC); $stmt->close();
     header('Content-Type: application/vnd.ms-excel; charset=utf-8');
     header('Content-Disposition: attachment; filename="productos_' . date('Y-m-d') . '.xls"');
     echo "\xEF\xBB\xBF<html><head><meta charset=\"UTF-8\"><style>table{border-collapse:collapse;font-family:Arial}th{background:#065f46;color:#fff}th,td{border:1px solid #cbd5e1;padding:6px 10px}.num{text-align:right;mso-number-format:\"0.000\"}</style></head><body><table><thead><tr>";

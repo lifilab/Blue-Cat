@@ -15,7 +15,7 @@ async function validateLogin() {
   formData.append('password', password);
 
   try {
-    var response = await fetch('assets/PHP/login.php', {
+    var response = await fetch('assets/api/auth.php?accion=login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: formData.toString()
@@ -68,7 +68,7 @@ async function createAccount() {
   formData.append('confirm-password', confirmPassword);
 
   try {
-    var response = await fetch('assets/PHP/create_account.php', {
+    var response = await fetch('assets/api/auth.php?accion=registrar', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: formData.toString()
