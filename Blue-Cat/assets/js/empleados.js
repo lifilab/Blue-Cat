@@ -179,13 +179,19 @@ function saveCreate(){
         xhr2.open('POST','../assets/api/empleados.php',true);
         xhr2.setRequestHeader('Content-Type','application/json');
         xhr2.onload=function(){
-          if(xhr2.status===201) toast('Credenciales creadas');
-          else try{var e=JSON.parse(xhr2.responseText);toast(e.error||'Error credenciales','err');}catch(e2){}
+          if(xhr2.status===201){
+            toast('Credenciales creadas');
+            $('cm').classList.remove('show');
+          }else{
+            try{var e=JSON.parse(xhr2.responseText);toast(e.error||'Error credenciales','err');}catch(e2){toast('Error credenciales','err');}
+            // El empleado ya existe: abrir su modal específico permite reintentar
+            // sin crear un empleado duplicado ni perder el error real.
+            showCrearCredenciales(emp.id_empleado||emp.id);
+          }
           loadEmp();
         };
         xhr2.send(JSON.stringify({accion:'crear_credenciales',id_empleado:emp.id_empleado||emp.id,correo:credc,password:credp,id_rol:d.id_rol}));
-      }else{loadEmp();}
-      $('cm').classList.remove('show');
+      }else{loadEmp();$('cm').classList.remove('show');}
     }else{try{var e=JSON.parse(xhr.responseText);toast(e.error||'Error','err');}catch(e2){toast('Error','err');}}
   };
   xhr.send(JSON.stringify(d));
@@ -1196,6 +1202,8 @@ function showCrearCredenciales(id_empleado) {
         '<div class="fld"><label>Usuario *</label><input id="ce-usuario" value="'+esc(emp.credencial_usuario||'')+'"></div>'+
         '<div class="fld"><label>Correo (puede quedar vacío)</label><input id="ce-correo" type="email" value="'+esc(emp.credencial_correo||'')+'"></div>'+
         '<div class="fld"><label>Nueva contraseña (opcional)</label><input id="ce-pass" type="password" placeholder="Dejar vacío para conservar"></div>'+
+        (emp.es_supervisor?'<div style="margin:14px 0;padding:14px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:10px"><strong style="color:#3730a3"><i class="fas fa-user-shield"></i> Autorización de Supervisor</strong><p style="font-size:12px;color:#64748b;margin:5px 0 10px">Configure uno o ambos métodos. Los valores actuales nunca se muestran.</p><div class="fld"><label>Nuevo PIN (4–8 dígitos)</label><input id="ce-sup-pin" type="password" inputmode="numeric" placeholder="'+(emp.supervisor_pin_configurado?'PIN configurado · dejar vacío para conservar':'Crear PIN')+'"></div><div class="fld"><label>Tarjeta / código escaneable</label><input id="ce-sup-card" type="password" placeholder="'+(emp.supervisor_tarjeta_configurada?'Tarjeta configurada · dejar vacío para conservar':'Escanee o escriba el código')+'"></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn-p" onclick="guardarCredencialSupervisor('+emp.id_empleado+')"><i class="fas fa-shield-alt"></i> Guardar autorización</button>'+
+        ((emp.supervisor_pin_configurado||emp.supervisor_tarjeta_configurada)?'<button class="btn btn-danger btn-sm" onclick="eliminarCredencialSupervisor('+emp.id_empleado+')"><i class="fas fa-trash"></i> Revocar</button>':'')+'</div></div>':'')+
         '<div class="fld"><label><input id="ce-activo" type="checkbox" '+(emp.credencial_activo==1?'checked':'')+'> Cuenta activa</label></div>'+
         '<div class="mcb"><button class="btn btn-danger btn-sm" onclick="eliminarCredenciales('+emp.id_empleado+')"><i class="fas fa-trash"></i> Eliminar cuenta</button><button class="btn-g" onclick="$(\'cm\').classList.remove(\'show\')">Cerrar</button><button class="btn-p" onclick="guardarCredenciales('+emp.id_empleado+')"><i class="fas fa-save"></i> Guardar</button></div>';
       m.classList.add('show');
@@ -1282,3 +1290,17 @@ function eliminarCredenciales(idEmpleado) {
   });
 }
 
+function guardarCredencialSupervisor(idEmpleado){
+  var pin=($('ce-sup-pin').value||'').trim(),tarjeta=($('ce-sup-card').value||'').trim();
+  if(!pin&&!tarjeta){toast('Ingrese un PIN o una tarjeta','err');return;}
+  if(pin&&!/^\d{4,8}$/.test(pin)){toast('El PIN debe tener entre 4 y 8 dígitos','err');return;}
+  apiPost({accion:'guardar_supervisor_credencial',id_empleado:idEmpleado,pin:pin,tarjeta:tarjeta},function(){
+    toast('Credencial de supervisor actualizada');showCrearCredenciales(idEmpleado);
+  });
+}
+function eliminarCredencialSupervisor(idEmpleado){
+  if(!confirm('¿Revocar el PIN y la tarjeta de este supervisor?'))return;
+  apiPost({accion:'eliminar_supervisor_credencial',id_empleado:idEmpleado},function(){
+    toast('Credencial de supervisor revocada');showCrearCredenciales(idEmpleado);
+  });
+}

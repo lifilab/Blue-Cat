@@ -120,6 +120,8 @@ switch ($method) {
         elseif ($accion === 'crear_credenciales') { requierePermiso('empleados','crear'); crearCredenciales($conn, $uid, $input); }
         elseif ($accion === 'editar_credenciales') { requierePermiso('empleados','editar'); editarCredenciales($conn, $uid, $input); }
         elseif ($accion === 'eliminar_credenciales') { requierePermiso('empleados','eliminar'); eliminarCredenciales($conn, $uid, $input); }
+        elseif ($accion === 'guardar_supervisor_credencial') { requierePermiso('supervisor','configurar_credencial'); guardarSupervisorCredencial($conn,$uid,$input); }
+        elseif ($accion === 'eliminar_supervisor_credencial') { requierePermiso('supervisor','configurar_credencial'); eliminarSupervisorCredencial($conn,$uid,$input); }
         elseif ($accion === 'empleado_eliminar') { requierePermiso('empleados','eliminar'); eliminarEmpleado($conn, $uid, $input); }
         else json(['error' => 'Acción no válida'], 400);
         break;
@@ -207,6 +209,18 @@ function getEmpleado($conn, $uid, $id) {
     $e['credencial_usuario'] = $credencial['nombre'] ?? '';
     $e['credencial_correo'] = $credencial['correo'] ?? '';
     $e['credencial_activo'] = $credencial ? (int)$credencial['activo'] : 0;
+    $e['es_supervisor']=0; $e['supervisor_pin_configurado']=0; $e['supervisor_tarjeta_configurada']=0;
+    if ($credencial) {
+        $idCred=(int)$credencial['id_user'];
+        $stmt=$conn->prepare("SELECT COUNT(*) n FROM usuario_rol ur JOIN rol r ON r.id_rol=ur.id_rol WHERE ur.id_user=? AND r.nombre='Supervisor' AND r.activo=1 AND (r.id_cuenta IS NULL OR r.id_cuenta=?)");
+        $stmt->bind_param('ii',$idCred,$context->accountId);$stmt->execute();$e['es_supervisor']=(int)$stmt->get_result()->fetch_assoc()['n']>0?1:0;$stmt->close();
+        if ($e['es_supervisor']) {
+            $stmt=$conn->prepare('SELECT pin_hash,tarjeta_hash,activo FROM supervisor_credencial WHERE id_cuenta=? AND id_user=? LIMIT 1');
+            $stmt->bind_param('ii',$context->accountId,$idCred);$stmt->execute();$sc=$stmt->get_result()->fetch_assoc();$stmt->close();
+            $e['supervisor_pin_configurado']=!empty($sc['pin_hash'])&&((int)$sc['activo']===1)?1:0;
+            $e['supervisor_tarjeta_configurada']=!empty($sc['tarjeta_hash'])&&((int)$sc['activo']===1)?1:0;
+        }
+    }
 
     // Age calculation
     if ($e['fecha_nacimiento']) {
@@ -1112,11 +1126,16 @@ function crearHistorial($conn, $uid, $input) {
 function crearCredenciales($conn, $uid, $input) {
     $context = requireTenantContext($uid);
     $id_emp = (int)($input['id_empleado'] ?? 0);
-    $correo = $input['correo'] ?? '';
+    $correo = strtolower(trim((string)($input['correo'] ?? '')));
     $password = $input['password'] ?? '';
     $id_rol = (int)($input['id_rol'] ?? 0);
 
     if (!$id_emp || !$correo || !$password) json(['error'=>'Empleado, correo y contraseña requeridos'], 400);
+    if (!filter_var($correo, FILTER_VALIDATE_EMAIL)) json(['error'=>'Correo no válido'], 400);
+    if (strlen($password) < 6) json(['error'=>'La contraseña debe tener al menos 6 caracteres'], 400);
+    // Validar antes de iniciar la transacción: una plantilla global no se puede
+    // asignar y no debe provocar una creación parcial seguida de rollback.
+    if ($id_rol) requireTenantRole($conn, $context, $id_rol, true);
 
     $stmt = $conn->prepare("SELECT e.id_empleado, e.nombres, e.apellidos FROM empleado e WHERE e.id_empleado = ? AND e.id_cuenta = ?");
     $stmt->bind_param("ii", $id_emp, $context->accountId);
@@ -1156,9 +1175,14 @@ function crearCredenciales($conn, $uid, $input) {
         $stmt->execute();
         $id_user = (int)$conn->insert_id;
         $stmt->close();
+        // Mantener ambos lados del vínculo sincronizados. usuario.id_empleado
+        // es la relación canónica; empleado.id_user conserva compatibilidad.
+        $stmt = $conn->prepare("UPDATE empleado SET id_user=? WHERE id_empleado=? AND id_cuenta=?");
+        $stmt->bind_param("iii", $id_user, $id_emp, $idCuenta);
+        $stmt->execute();
+        $stmt->close();
 
         if ($id_rol) {
-            requireTenantRole($conn, $context, $id_rol, true);
             $stmt = $conn->prepare("INSERT INTO usuario_rol (id_user, id_rol) VALUES (?, ?)");
             $stmt->bind_param("ii", $id_user, $id_rol);
             $stmt->execute();
@@ -1174,9 +1198,10 @@ function crearCredenciales($conn, $uid, $input) {
 
         $conn->commit();
         json(['success'=>true, 'id_user'=>$id_user, 'usuario'=>$username, 'correo'=>$correo], 201);
-    } catch (Exception $e) {
+    } catch (Throwable $e) {
         $conn->rollback();
-        json(['error'=>'Error interno del servidor'], 500);
+        error_log('crearCredenciales: ' . $e->getMessage());
+        json(['error'=>'No se pudieron crear las credenciales. Intente nuevamente.'], 500);
     }
 }
 
@@ -1294,3 +1319,33 @@ function eliminarCredenciales($conn, $uid, $input) {
     }
 }
 
+
+function guardarSupervisorCredencial($conn,$uid,$input) {
+    $context=requireTenantContext($uid); $idEmp=(int)($input['id_empleado']??0);
+    $pin=trim((string)($input['pin']??'')); $card=trim((string)($input['tarjeta']??''));
+    if(!$idEmp) json(['error'=>'Empleado requerido'],400);
+    if($pin===''&&$card==='') json(['error'=>'Ingrese un PIN o una tarjeta'],400);
+    if($pin!==''&&!preg_match('/^[0-9]{4,8}$/',$pin)) json(['error'=>'El PIN debe tener entre 4 y 8 dígitos'],400);
+    if($card!==''&&strlen($card)<8) json(['error'=>'El código de tarjeta debe tener al menos 8 caracteres'],400);
+    $stmt=$conn->prepare("SELECT u.id_user FROM usuario u JOIN empleado e ON e.id_empleado=u.id_empleado AND e.id_cuenta=u.id_cuenta JOIN usuario_rol ur ON ur.id_user=u.id_user JOIN rol r ON r.id_rol=ur.id_rol AND r.nombre='Supervisor' AND r.activo=1 WHERE e.id_empleado=? AND e.id_cuenta=? AND u.activo=1 LIMIT 1");
+    $stmt->bind_param('ii',$idEmp,$context->accountId);$stmt->execute();$row=$stmt->get_result()->fetch_assoc();$stmt->close();
+    if(!$row) json(['error'=>'El empleado debe tener una cuenta activa con rol Supervisor'],400);
+    $target=(int)$row['id_user'];
+    $stmt=$conn->prepare('SELECT pin_hash,tarjeta_hash FROM supervisor_credencial WHERE id_cuenta=? AND id_user=? LIMIT 1');$stmt->bind_param('ii',$context->accountId,$target);$stmt->execute();$old=$stmt->get_result()->fetch_assoc();$stmt->close();
+    $pinHash=$pin!==''?password_hash($pin,PASSWORD_DEFAULT):($old['pin_hash']??null);
+    $cardHash=$card!==''?password_hash($card,PASSWORD_DEFAULT):($old['tarjeta_hash']??null);
+    $stmt=$conn->prepare("INSERT INTO supervisor_credencial(id_cuenta,id_user,pin_hash,tarjeta_hash,activo,updated_by) VALUES(?,?,?,?,1,?) ON DUPLICATE KEY UPDATE pin_hash=VALUES(pin_hash),tarjeta_hash=VALUES(tarjeta_hash),activo=1,updated_by=VALUES(updated_by)");
+    $stmt->bind_param('iissi',$context->accountId,$target,$pinHash,$cardHash,$uid);$stmt->execute();$stmt->close();
+    addAuditoria($conn,$idEmp,$uid,'CONFIGURAR_SUPERVISOR',"Credencial de autorización actualizada para usuario #$target");
+    json(['success'=>true,'pin_configurado'=>$pinHash?1:0,'tarjeta_configurada'=>$cardHash?1:0]);
+}
+
+function eliminarSupervisorCredencial($conn,$uid,$input) {
+    $context=requireTenantContext($uid);$idEmp=(int)($input['id_empleado']??0);
+    $stmt=$conn->prepare('SELECT u.id_user FROM usuario u JOIN empleado e ON e.id_empleado=u.id_empleado AND e.id_cuenta=u.id_cuenta WHERE e.id_empleado=? AND e.id_cuenta=? LIMIT 1');
+    $stmt->bind_param('ii',$idEmp,$context->accountId);$stmt->execute();$row=$stmt->get_result()->fetch_assoc();$stmt->close();
+    if(!$row) json(['error'=>'Empleado no encontrado'],404);$target=(int)$row['id_user'];
+    $stmt=$conn->prepare('UPDATE supervisor_credencial SET activo=0,pin_hash=NULL,tarjeta_hash=NULL,updated_by=? WHERE id_cuenta=? AND id_user=?');$stmt->bind_param('iii',$uid,$context->accountId,$target);$stmt->execute();$stmt->close();
+    addAuditoria($conn,$idEmp,$uid,'ELIMINAR_CREDENCIAL_SUPERVISOR',"Credencial de autorización eliminada para usuario #$target");
+    json(['success'=>true]);
+}

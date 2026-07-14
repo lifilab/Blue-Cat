@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__.'/_db.php';
+require_once __DIR__.'/_supervisor.php';
 
 $uid = requireUser();
 $conn = getDB();
@@ -55,12 +56,25 @@ case 'exportar_productos':
     $cuenta = getCuentaId($conn, $uid);
     $stmt = $conn->prepare("SELECT p.nombre_producto, p.precio_venta, p.codigo_de_barras, p.cantidad, COALESCE(c.nombre,p.categoria,'') AS categoria, p.sku, p.precio_costo, p.tipo_venta, COALESCE(u.abreviatura,'u') AS unidad, p.activo FROM producto p LEFT JOIN categoria c ON p.id_categoria=c.id_categoria LEFT JOIN unidad_medida u ON p.id_unidad=u.id_unidad WHERE p.id_cuenta=? ORDER BY p.nombre_producto");
     $stmt->bind_param("i", $cuenta); $stmt->execute(); $rows=$stmt->get_result()->fetch_all(MYSQLI_ASSOC); $stmt->close();
+    $xlsText = static function ($value): string {
+        $text = (string)($value ?? '');
+        // Evita que Excel interprete datos del catálogo como fórmulas.
+        if ($text !== '' && preg_match('/^[=+\-@]/u', $text)) $text = "'" . $text;
+        return htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    };
     header('Content-Type: application/vnd.ms-excel; charset=utf-8');
     header('Content-Disposition: attachment; filename="productos_' . date('Y-m-d') . '.xls"');
+    header('Cache-Control: no-store, no-cache, must-revalidate');
     echo "\xEF\xBB\xBF<html><head><meta charset=\"UTF-8\"><style>table{border-collapse:collapse;font-family:Arial}th{background:#065f46;color:#fff}th,td{border:1px solid #cbd5e1;padding:6px 10px}.num{text-align:right;mso-number-format:\"0.000\"}</style></head><body><table><thead><tr>";
     foreach(['Nombre','Precio Venta','Código de Barras','Cantidad','Categoría','SKU','Precio Costo','Tipo Venta','Unidad','Activo'] as $h) echo '<th>'.$h.'</th>';
     echo '</tr></thead><tbody>';
-    foreach($rows as $r) echo '<tr><td>'.htmlspecialchars($r['nombre_producto']).'</td><td class="num">'.(float)$r['precio_venta'].'</td><td style="mso-number-format:\'\\@\'">'.htmlspecialchars($r['codigo_de_barras']).'</td><td class="num">'.(float)$r['cantidad'].'</td><td>'.htmlspecialchars($r['categoria']).'</td><td>'.htmlspecialchars($r['sku']).'</td><td class="num">'.(float)$r['precio_costo'].'</td><td>'.htmlspecialchars($r['tipo_venta']).'</td><td>'.htmlspecialchars($r['unidad']).'</td><td>'.((int)$r['activo']?'Sí':'No').'</td></tr>';
+    foreach ($rows as $r) {
+        echo '<tr><td>'.$xlsText($r['nombre_producto'] ?? '').'</td><td class="num">'.(float)($r['precio_venta'] ?? 0).'</td>'
+            .'<td style="mso-number-format:\'\\@\'">'.$xlsText($r['codigo_de_barras'] ?? '').'</td><td class="num">'.(float)($r['cantidad'] ?? 0).'</td>'
+            .'<td>'.$xlsText($r['categoria'] ?? '').'</td><td style="mso-number-format:\'\\@\'">'.$xlsText($r['sku'] ?? '').'</td>'
+            .'<td class="num">'.(float)($r['precio_costo'] ?? 0).'</td><td>'.$xlsText($r['tipo_venta'] ?? '').'</td>'
+            .'<td>'.$xlsText($r['unidad'] ?? '').'</td><td>'.((int)($r['activo'] ?? 0)?'Sí':'No').'</td></tr>';
+    }
     echo '</tbody></table></body></html>'; exit;
 
 // ─── DASHBOARD ───
@@ -802,9 +816,9 @@ case 'transferencia_recibir':
     json(['success'=>true]);
 
 case 'transferencia_enviar':
-    requierePermiso('inventario','transferencias');
     $id = (int)($input['id'] ?? 0);
     if (!$id) json(['error'=>'ID requerido'],400);
+    supervisorRequire('inventario.transferencia_enviar',['entidad_tipo'=>'transferencia','entidad_id'=>(string)$id],$input['supervisor_token']??null);
     $stmt2 = $conn->prepare("SELECT t.* FROM transferencia t JOIN bodega b ON b.id_bodega=t.id_bodega_origen WHERE t.id_transferencia=? AND b.id_cuenta=?");
     $stmt2->bind_param("ii", $id, $accountId);
     $stmt2->execute();
@@ -884,7 +898,6 @@ case 'ajustes':
     json($items);
 
 case 'ajuste_crear':
-    requierePermiso('inventario','ajustes');
     $tipo = $input['tipo'] ?? '';
     $id_producto = (int)($input['id_producto'] ?? 0);
     $id_bodega = (int)($input['id_bodega'] ?? 0);
@@ -892,6 +905,7 @@ case 'ajuste_crear':
     $motivo = $input['motivo'] ?? '';
     if (!$tipo || !$id_producto || !$id_bodega || $motivo === '') json(['error'=>'Datos incompletos'],400);
     
+    supervisorRequire('inventario.ajuste',['entidad_tipo'=>'producto','entidad_id'=>(string)$id_producto,'id_bodega'=>$id_bodega,'cantidad_nueva'=>$cantidad_nueva],$input['supervisor_token']??null);
     // Obtener cantidad anterior
     $stmt2 = $conn->prepare("SELECT disponible FROM stock WHERE id_producto=? AND id_bodega=? LIMIT 1");
     $stmt2->bind_param("ii", $id_producto, $id_bodega);
@@ -991,13 +1005,13 @@ case 'inventario_fisico_conteo':
     json(['success'=>true]);
 
 case 'inventario_fisico_cerrar':
-    requierePermiso('inventario','conteo_fisico');
     $id = (int)($input['id'] ?? 0);
     if (!$id) json(['error'=>'ID requerido'],400);
     $stmt2 = $conn->prepare("SELECT f.id_bodega, f.id_user FROM inventario_fisico f JOIN usuario u ON u.id_user=f.id_user WHERE f.id_inventario=? AND u.id_cuenta=?");
     $stmt2->bind_param("ii", $id, $accountId);
-    $stmt2->execute();
+    supervisorRequire('inventario.conteo_cerrar',['entidad_tipo'=>'inventario_fisico','entidad_id'=>(string)$id],$input['supervisor_token']??null);
     $inv = $stmt2->get_result()->fetch_assoc();
+    $stmt2->execute();
     $stmt2->close();
     if (!$inv) json(['error'=>'No autorizado'], 403);
     $id_bodega_default = (int)($inv['id_bodega'] ?? 0);

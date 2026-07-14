@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/_db.php';
+require_once __DIR__ . '/_supervisor.php';
 $uid = requireUser();
 $conn = getDB();
 $tenant = tenantContext($uid);
@@ -88,7 +89,7 @@ if ($method === 'GET') {
         case 'caja_cerrar':         if (!verificarPermiso('pos','cerrar_caja')) json(['error'=>true,'message'=>'Permiso denegado'],403); POST_caja_cerrar($data); break;
         case 'caja_movimiento':     POST_caja_movimiento($data);  break;
         case 'venta_crear':         if (!verificarPermiso('pos','realizar_venta')) json(['error'=>true,'message'=>'Permiso denegado'],403); POST_venta_crear($data); break;
-        case 'venta_anular':        if (!verificarPermiso('pos','cancelar_venta')) json(['error'=>true,'message'=>'Permiso denegado'],403); POST_venta_anular($data); break;
+        case 'venta_anular':        POST_venta_anular($data); break;
         case 'cliente_crear':       POST_cliente_crear($data);    break;
         case 'promocion_crear':     POST_promocion_crear($data);  break;
         case 'promocion_validar':   POST_promocion_validar($data);break;
@@ -887,6 +888,10 @@ function POST_caja_cerrar($data) {
 
         $esperado = (int) $row['ingresos'] - (int) $row['egresos'];
         $diferencia = $montoReal - $esperado;
+        if ($diferencia !== 0) {
+            $ctx=['entidad_tipo'=>'pos_caja','entidad_id'=>(string)$idCaja,'esperado'=>$esperado,'real'=>$montoReal,'diferencia'=>$diferencia];
+            supervisorRequire('pos.cierre_diferencia',$ctx,$data->supervisor_token ?? null);
+        }
 
         // UPDATE pos_caja
         $sql = "UPDATE pos_caja SET estado = 'CERRADA', monto_cierre = ?, fecha_cierre = NOW() WHERE id_caja = ?";
@@ -948,6 +953,10 @@ function POST_caja_movimiento($data) {
     }
     $idCaja = (int) $caja['id_caja'];
 
+    if ($tipo === 'EGRESO') {
+        $ctx=['entidad_tipo'=>'pos_caja','entidad_id'=>(string)$idCaja,'tipo'=>$tipo,'monto'=>$monto,'concepto'=>$concepto];
+        supervisorRequire('pos.retiro_caja',$ctx,$data->supervisor_token ?? null);
+    }
     $conn->begin_transaction();
 
     try {
@@ -1030,8 +1039,20 @@ function POST_venta_crear($data) {
         }
     }
 
+    $priceOverrides=[];
+    foreach ($items as $item) {
+        $idp=(int)($item->id_producto??0); $sent=(int)($item->precio_unitario??0);
+        $stmt=$conn->prepare('SELECT precio_venta FROM producto WHERE id_producto=? AND id_cuenta=? AND activo=1');
+        $stmt->bind_param('ii',$idp,$tenant->accountId); $stmt->execute(); $row=$stmt->get_result()->fetch_assoc(); $stmt->close();
+        if (!$row) json(['error'=>true,'message'=>'Producto no encontrado o inactivo'],400);
+        $base=(int)$row['precio_venta'];
+        if ($sent!==$base) $priceOverrides[]=['id_producto'=>$idp,'precio_base'=>$base,'precio_nuevo'=>$sent];
+    }
+    if ($priceOverrides) {
+        $ctx=['entidad_tipo'=>'venta','entidad_id'=>'nueva','cambios'=>$priceOverrides];
+        supervisorRequire('pos.cambiar_precio',$ctx,$data->supervisor_token ?? null);
+    }
     $conn->begin_transaction();
-
     try {
         // Get session with FOR UPDATE
         $sql = "SELECT * FROM sesion WHERE id_user = ? AND fecha_cierre IS NULL ORDER BY id_sesion DESC LIMIT 1 FOR UPDATE";
@@ -1217,9 +1238,11 @@ function POST_venta_anular($data) {
         json(['error' => true, 'message' => 'ID de pedido requerido'], 400);
     }
 
-    $conn->begin_transaction();
+    $ctx=['entidad_tipo'=>'pedido','entidad_id'=>(string)$pedidoId];
+    supervisorRequire('pos.anular_venta',$ctx,$data->supervisor_token ?? null);
 
     try {
+    $conn->begin_transaction();
         // Validate venta exists and not already anulada
         $sql = "SELECT p.*, s.id_user AS sesion_user
                 FROM pedido p
@@ -1896,13 +1919,15 @@ function POST_devolucion_crear($data) {
         json(['error' => true, 'message' => 'ID de pedido requerido'], 400);
     }
 
-    $conn->begin_transaction();
+    $ctx=['entidad_tipo'=>'pedido','entidad_id'=>(string)$pedidoId,'tipo'=>$tipo];
+    supervisorRequire('pos.devolucion',$ctx,$data->supervisor_token ?? null);
     try {
         // Get pedido
+    $conn->begin_transaction();
         $sql = "SELECT p.*, s.id_user AS sesion_user
                 FROM pedido p
                 JOIN sesion s ON p.id_sesion = s.id_sesion
-                WHERE p.id_pedido = ? AND p.anulado = 0
+                WHERE p.id_pedido = ? AND p.anulado = 0 AND p.devuelto = 0
                 FOR UPDATE";
         $stmt = $conn->prepare($sql);
         $stmt->bind_param('i', $pedidoId);
@@ -1912,7 +1937,7 @@ function POST_devolucion_crear($data) {
         $stmt->close();
 
         if (!$pedido) {
-            throw new Exception('Pedido no encontrado o ya anulado.');
+            throw new Exception('Pedido no encontrado, anulado o ya devuelto.');
         }
 
         // Verify ownership via cuenta
@@ -1994,6 +2019,30 @@ function POST_devolucion_crear($data) {
             // Kardex
             $entradaKardex = ($tipoVenta === 'UNIDAD') ? (int) ceil($cantidad) : 0;
             actualizarKardex($conn, $uid, $idProducto, $idBodega, 'DEVOLUCION', $idDevolucion, 'DEVOLUCION', $entradaKardex, 0, $costoUnit, "Devolución #{$idDevolucion}, Pedido #{$pedidoId}");
+        }
+
+        // Revertir el pago en caja. Para devoluciones parciales se distribuye
+        // proporcionalmente entre los métodos originales; en TOTAL se revierte todo.
+        $idCaja=(int)($pedido['id_caja']??0);
+        if ($idCaja>0 && $montoTotal>0) {
+            $stmt=$conn->prepare('SELECT nombre_metodo_pago,monto FROM metodo_de_pago WHERE id_pedido=? ORDER BY id_metodo_de_pago');
+            $stmt->bind_param('i',$pedidoId);$stmt->execute();$pagosOriginales=$stmt->get_result()->fetch_all(MYSQLI_ASSOC);$stmt->close();
+            $totalOriginal=max(1,(int)($pedido['precio_total']??0));
+            $restante=min($montoTotal,$totalOriginal);$cantidadPagos=count($pagosOriginales);
+            foreach ($pagosOriginales as $idx=>$pago) {
+                if ($restante<=0) break;
+                $montoPago=(int)($pago['monto']??0);
+                $montoReversa=($idx===$cantidadPagos-1)?$restante:min($restante,(int)round($montoPago*$montoTotal/$totalOriginal));
+                if ($montoReversa<=0) continue;
+                $metodo=(string)($pago['nombre_metodo_pago']??'EFECTIVO');
+                $concepto="Devolución venta #{$pedidoId}";
+                $stmt=$conn->prepare('UPDATE pos_caja SET monto_actual=monto_actual-? WHERE id_caja=?');
+                $stmt->bind_param('ii',$montoReversa,$idCaja);$stmt->execute();$stmt->close();
+                $stmt=$conn->prepare("INSERT INTO pos_movimiento_caja(id_caja,id_user,tipo,concepto,monto,metodo,id_pedido) VALUES(?,?,'EGRESO',?,?,?,?)");
+                $stmt->bind_param('iisisi',$idCaja,$uid,$concepto,$montoReversa,$metodo,$pedidoId);$stmt->execute();$stmt->close();
+                $restante-=$montoReversa;
+            }
+            if ($restante>0) throw new Exception('No se pudo distribuir completamente el monto de la devolución.');
         }
 
         // Mark pedido as devuelto
