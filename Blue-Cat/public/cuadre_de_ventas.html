@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Blue-Cat · Cuadre de Ventas</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
-  <link rel="stylesheet" href="../assets/css/blue-cat.css">
+  <link rel="stylesheet" href="../assets/css/blue-cat.css?v=3">
   <style>
     .summary-grid {
       display: grid;
@@ -86,7 +86,7 @@
     .sales-table .items-cell { max-width: 280px; }
     .sales-table .items-cell small { display: block; color: #64748b; font-size: 11px; line-height: 1.4; }
     .sales-table .pagos-cell small { display: block; color: #64748b; font-size: 11px; line-height: 1.4; }
-    .sales-table .actions-cell { white-space: nowrap; }
+    .sales-table .actions-cell { white-space: nowrap; display:flex; gap:5px; flex-wrap:wrap; }
     .btn-sm {
       padding: 6px 12px;
       font-size: 12px;
@@ -98,8 +98,10 @@
       font-family: inherit;
     }
     .btn-sm-edit { background: #eef2ff; color: #4f46e5; }
+    .btn-sm-return { background:#ecfdf5;color:#047857; }
     .btn-sm-edit:hover { background: #e0e7ff; }
     .btn-sm-delete { background: #fef2f2; color: #dc2626; }
+    .btn-sm-return:hover { background:#d1fae5; }
     .btn-sm-delete:hover { background: #fee2e2; }
     .btn-sm:disabled { opacity: .4; cursor: not-allowed; }
     .no-sales { text-align: center; padding: 32px; color: #94a3b8; font-size: 14px; }
@@ -315,12 +317,7 @@
         <span>Blue-Cat</span>
       </a>
       <div class="menu">
-        <ul>
-          <li><a href="../public/Inicio.html"><i class="fas fa-home"></i> Inicio</a></li>
-          <li><a href="inventario.html"><i class="fas fa-box"></i> Inventario</a></li>
-          <li><a href="pos.html"><i class="fas fa-cash-register"></i> POS</a></li>
-          <li><a href="#" onclick="openCerrarSesionPopup()"><i class="fas fa-sign-out-alt"></i> Salir</a></li>
-        </ul>
+        <ul></ul>
       </div>
     </div>
   </nav>
@@ -483,7 +480,8 @@
     </div>
   </div>
 
-  <script src="../assets/js/cuadre_de_ventas.js?v=5"></script>
-  <script src="../assets/js/navbar.js"></script>
+  <script src="../assets/js/supervisor-approval.js?v=1"></script>
+  <script src="../assets/js/cuadre_de_ventas.js?v=6"></script>
+  <script src="../assets/js/navbar.js?v=3"></script>
 </body>
 </html>

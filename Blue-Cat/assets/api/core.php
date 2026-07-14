@@ -146,7 +146,9 @@ case 'sucursal_editar':
 
 // ═══ ROLES ═══
 case 'roles':
-    $items = []; $r = $conn->query("SELECT r.*,(r.id_cuenta IS NULL OR r.es_plantilla=1) solo_lectura,(SELECT COUNT(*) FROM usuario_rol ur JOIN usuario u ON u.id_user=ur.id_user WHERE ur.id_rol=r.id_rol AND u.id_cuenta={$accountId}) usuarios FROM rol r WHERE r.id_cuenta={$accountId} OR r.id_cuenta IS NULL ORDER BY r.nombre");
+    // Las plantillas globales provisionan cuentas, pero no son asignables.
+    // Exponerlas junto a los roles locales duplicaba nombres y conteos.
+    $items = []; $r = $conn->query("SELECT r.*,0 solo_lectura,(SELECT COUNT(*) FROM usuario_rol ur JOIN usuario u ON u.id_user=ur.id_user WHERE ur.id_rol=r.id_rol AND u.id_cuenta={$accountId}) usuarios FROM rol r WHERE r.id_cuenta={$accountId} AND r.activo=1 ORDER BY r.nombre");
     while ($f = $r->fetch_assoc()) $items[] = $f;
     json($items);
     break;
@@ -487,26 +489,49 @@ case 'sidebar':
         'icono' => 'fa-home',
         'ruta' => 'Inicio.html'
     ]];
-    $r = $conn->query("SELECT m.* FROM modulo m 
-        JOIN plan_modulo pm ON m.id_modulo=pm.id_modulo 
-        JOIN suscripcion s ON pm.id_plan=s.id_plan 
-        WHERE s.estado='activa' AND m.activo=1 AND m.codigo != 'dashboard'
-        ORDER BY m.orden");
+    // Una cuenta puede tener varias empresas con el mismo plan. La navegación
+    // representa capacidades de la cuenta, no una fila por suscripción.
+    $stmtModulos = $conn->prepare("SELECT DISTINCT
+            m.id_modulo, m.codigo, m.nombre, m.icono, m.ruta, m.orden
+        FROM modulo m
+        JOIN plan_modulo pm ON m.id_modulo=pm.id_modulo
+        JOIN suscripcion s ON pm.id_plan=s.id_plan
+        JOIN empresa e ON e.id_empresa=s.id_empresa
+        WHERE e.id_cuenta=?
+          AND e.activo=1
+          AND s.estado='activa'
+          AND (s.fecha_fin IS NULL OR s.fecha_fin >= CURDATE())
+          AND m.activo=1
+          AND m.codigo != 'dashboard'
+          AND EXISTS (
+              SELECT 1
+              FROM permiso p
+              JOIN rol_permiso rp ON rp.id_permiso=p.id_permiso
+              JOIN usuario_rol ur ON ur.id_rol=rp.id_rol
+              JOIN rol role_access ON role_access.id_rol=ur.id_rol
+              JOIN usuario actor ON actor.id_user=ur.id_user
+              WHERE ur.id_user=?
+                AND p.modulo=m.codigo
+                AND p.accion='ver'
+                AND role_access.activo=1
+                AND (role_access.id_cuenta IS NULL OR role_access.id_cuenta=actor.id_cuenta)
+          )
+        ORDER BY m.orden, m.nombre");
+    $stmtModulos->bind_param("ii", $accountId, $uid);
+    $stmtModulos->execute();
+    $r = $stmtModulos->get_result();
     while ($f = $r->fetch_assoc()) {
-        $stmt = $conn->prepare("SELECT COUNT(*) as t FROM permiso p JOIN rol_permiso rp ON p.id_permiso=rp.id_permiso JOIN usuario_rol ur ON rp.id_rol=ur.id_rol WHERE ur.id_user=? AND p.modulo=? AND p.accion='ver'");
-        $modulo_codigo = $f['codigo'];
-        $stmt->bind_param("is", $uid, $modulo_codigo);
-        $stmt->execute();
-        $has = (int)$stmt->get_result()->fetch_assoc()['t'] > 0;
-        $stmt->close();
-        if ($has) {
-            $modulos[] = ['codigo'=>$f['codigo'],'nombre'=>$f['nombre'],'icono'=>$f['icono'],'ruta'=>$f['ruta']];
-        }
+        $modulos[] = ['codigo'=>$f['codigo'],'nombre'=>$f['nombre'],'icono'=>$f['icono'],'ruta'=>$f['ruta']];
     }
+    $stmtModulos->close();
     $stmt2 = $conn->prepare("SELECT DISTINCT p.modulo, p.accion FROM permiso p 
-        JOIN rol_permiso rp ON p.id_permiso=rp.id_permiso 
-        JOIN usuario_rol ur ON rp.id_rol=ur.id_rol 
-        WHERE ur.id_user=?"); $stmt2->bind_param("i", $uid); $stmt2->execute(); $r = $stmt2->get_result();
+        JOIN rol_permiso rp ON p.id_permiso=rp.id_permiso
+        JOIN usuario_rol ur ON rp.id_rol=ur.id_rol
+        JOIN rol role_access ON role_access.id_rol=ur.id_rol
+        JOIN usuario actor ON actor.id_user=ur.id_user
+        WHERE ur.id_user=? AND role_access.activo=1
+          AND (role_access.id_cuenta IS NULL OR role_access.id_cuenta=actor.id_cuenta)");
+    $stmt2->bind_param("i", $uid); $stmt2->execute(); $r = $stmt2->get_result();
     $permisos = [];
     while ($f = $r->fetch_assoc()) {
         $permisos[$f['modulo']][] = $f['accion'];

@@ -10,7 +10,10 @@ function api(accion, data, cb) {
       if (xhr.status >= 200 && xhr.status < 300) {
         try { cb(JSON.parse(xhr.responseText)); } catch(e) { cb(xhr.responseText); }
       } else {
-        try { var e = JSON.parse(xhr.responseText); toast(e.error || 'Error', 'error'); } catch(ex) { toast('Error de conexión', 'error'); }
+        try { var e = JSON.parse(xhr.responseText);
+          if (window.SupervisorApproval && window.SupervisorApproval.handle(e, function(token) { data.supervisor_token=token; api(accion,data,cb); })) return;
+          toast(e.message || (typeof e.error==='string' ? e.error : 'Error'), 'error');
+        } catch(ex) { toast('Error de conexión', 'error'); }
       }
     }
   };

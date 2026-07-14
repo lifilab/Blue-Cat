@@ -81,6 +81,10 @@ function api(method, data, cb) {
     } else {
       try {
         var e = JSON.parse(xhr.responseText);
+        if (window.SupervisorApproval && window.SupervisorApproval.handle(e, function(token) {
+          data.supervisor_token = token; api(method, data, cb);
+        })) return;
+
         toast(e.message || (typeof e.error === 'string' ? e.error : 'Error ' + xhr.status), 'err');
         console.error('POS API ERROR [' + xhr.status + ' ' + url + ']', e);
       }
@@ -380,11 +384,6 @@ function saveQty(idx) {
 }
 
 function editPrice(idx) {
-  // Verificar permiso para cambiar precios
-  if (!hasPermission('pos', 'cambiar_precios')) {
-    toast('No tiene permiso para cambiar precios', 'err');
-    return;
-  }
   
   var old = cart[idx].price;
   var modal = showModal(`
@@ -406,7 +405,6 @@ function renderCart() {
   var countEl = $('cart-count');
   var total = 0, itemsCount = 0;
   var h = '';
-  var canChangePrice = hasPermission('pos', 'cambiar_precios');
   
   for (var i = 0; i < cart.length; i++) {
     var c = cart[i];
@@ -418,8 +416,7 @@ function renderCart() {
     var cantDisplay = esPeso ? c.cant + ' ' + unidad : c.cant;
     var precioLabel = esPeso ? fm(c.price) + '/' + unidad : fm(c.price);
     
-    // Solo hacer clickeable el precio si tiene permiso
-    var precioClick = canChangePrice ? 'onclick="editPrice(' + i + ')" title="Click para modificar precio" style="cursor:pointer;"' : 'title="No tiene permiso para cambiar precios" style="cursor:not-allowed;opacity:0.7;"';
+    var precioClick = 'onclick="editPrice(' + i + ')" title="Modificar precio (puede requerir supervisor)" style="cursor:pointer;"';
     
     h += '<div class="cart-item">' +
       '<div class="ci-info">' +
