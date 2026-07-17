@@ -6,19 +6,16 @@ $conn = getDB();
 $method = $_SERVER['REQUEST_METHOD'];
 
 function requierePermiso($modulo, $accion) {
-    if (!verificarPermiso($modulo, $accion)) {
-        json(['error'=>'Permiso denegado: '.$modulo.'.'.$accion], 403);
-    }
+    requirePermission($modulo, $accion);
 }
 
 function auditar($conn, $uid, $accion, $entidad, $id_entidad=null, $detalle=null, $nivel='INFO') {
-    $ip = $_SERVER['REMOTE_ADDR'] ?? '';
-    $ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
-    $vn = $detalle !== null ? json_encode($detalle, JSON_UNESCAPED_UNICODE) : null;
-    $stmt = $conn->prepare("INSERT INTO core_auditoria (id_user, accion, entidad, id_entidad, valor_nuevo, ip, user_agent, nivel) VALUES (?,?,?,?,?,?,?,?)");
-    $stmt->bind_param("ississss", $uid, $accion, $entidad, $id_entidad, $vn, $ip, $ua, $nivel);
-    $stmt->execute();
-    $stmt->close();
+    try {
+        $accountId=tenantContext($uid)->accountId;$ip = $_SERVER['REMOTE_ADDR'] ?? '';$ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
+        $vn = $detalle !== null ? json_encode($detalle, JSON_UNESCAPED_UNICODE) : null;
+        $stmt = $conn->prepare("INSERT INTO core_auditoria (id_cuenta,id_user, accion, entidad, id_entidad, valor_nuevo, ip, user_agent, nivel) VALUES (?,?,?,?,?,?,?,?,?)");
+        if(!$stmt)return;$stmt->bind_param("iississss",$accountId,$uid,$accion,$entidad,$id_entidad,$vn,$ip,$ua,$nivel);$stmt->execute();$stmt->close();
+    } catch(Throwable $error) { error_log('ventas_auditoria: '.$error->getMessage()); }
 }
 
 function buildWhere($conn, $uid) {

@@ -11,7 +11,7 @@ function bd(s){return s?esc(s):'-';}
 function toast(msg,t){
   var el=document.createElement('div');
   el.className='toast toast-'+(t==='err'?'err':'ok');
-  el.innerHTML=msg;
+  BlueCatSecurity.renderToast(el,msg,t);
   document.body.appendChild(el);
   requestAnimationFrame(function(){el.classList.add('show');});
   setTimeout(function(){el.classList.remove('show');setTimeout(function(){el.remove();},300);},2500);
@@ -119,7 +119,7 @@ function showCreate(){
     '<h4 style="font-size:14px;font-weight:600;color:#1e293b;margin:12px 0 8px;border-top:1px solid #e2e8f0;padding-top:12px;"><i class="fas fa-key"></i> Credenciales de Acceso</h4>'+
     '<div class="gr2">'+
     '<div class="fld"><label>Correo acceso</label><input id="c-credc" type="email" placeholder="usuario@empresa.cl"></div>'+
-    '<div class="fld"><label>Contraseña</label><input id="c-credp" type="password" placeholder="Mínimo 6 caracteres"></div>'+
+    '<div class="fld"><label>Contraseña</label><input id="c-credp" type="password" placeholder="10+ caracteres, mayúscula, minúscula y número"></div>'+
     '</div>'+
     '<div class="mcb"><button class="btn-g" onclick="$(\'cm\').classList.remove(\'show\')">Cancelar</button><button class="btn-p" onclick="saveCreate()"><i class="fas fa-save"></i> Guardar</button></div>';
   m.classList.add('show');
@@ -1226,7 +1226,7 @@ function showCrearCredenciales(id_empleado) {
         '<h3 style="font-size:18px;font-weight:700;color:#1e293b;margin-bottom:16px;"><i class="fas fa-key" style="color:#4f46e5;"></i> Crear Credenciales</h3>' +
         '<p style="font-size:13px;color:#64748b;margin-bottom:16px;">Se generará una cuenta de acceso para este empleado.</p>' +
         '<div class="fld"><label>Correo electrónico *</label><input id="cc-correo" type="email" style="width:100%;padding:8px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;" placeholder="empleado@empresa.cl"></div>' +
-        '<div class="fld"><label>Contraseña *</label><input id="cc-pass" type="password" style="width:100%;padding:8px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;" placeholder="Mínimo 6 caracteres"></div>' +
+        '<div class="fld"><label>Contraseña *</label><input id="cc-pass" type="password" style="width:100%;padding:8px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;" placeholder="10+ caracteres, mayúscula, minúscula y número"></div>' +
         '<div class="fld"><label>Confirmar contraseña</label><input id="cc-pass2" type="password" style="width:100%;padding:8px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;"></div>' +
         '<div class="fld"><label>Rol (opcional)</label><select id="cc-rol" style="width:100%;padding:8px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;"><option value="">Sin rol</option>' + rolesHtml + '</select></div>' +
         '<div id="cc-feedback" style="margin:12px 0;min-height:20px;"></div>' +
@@ -1247,7 +1247,7 @@ function crearCredenciales(id_empleado) {
 
   if (!correo) { toast('Correo requerido', 'err'); return; }
   if (!pass) { toast('Contraseña requerida', 'err'); return; }
-  if (pass.length < 6) { toast('Contraseña debe tener al menos 6 caracteres', 'err'); return; }
+  if (pass.length < 10 || !/[a-z]/.test(pass) || !/[A-Z]/.test(pass) || !/\d/.test(pass)) { toast('Use 10+ caracteres, una mayúscula, una minúscula y un número', 'err'); return; }
   if (pass !== pass2) { toast('Las contraseñas no coinciden', 'err'); return; }
 
   var btn = document.querySelector('#cm .btn-p');
@@ -1278,7 +1278,7 @@ function cancelForm(id){var f=$(id);if(f)f.remove();}
 function guardarCredenciales(idEmpleado) {
   var usuario=($('ce-usuario').value||'').trim(), correo=($('ce-correo').value||'').trim(), pass=$('ce-pass').value||'';
   if(!usuario){toast('Usuario requerido','err');return;}
-  if(pass&&pass.length<6){toast('La contraseña debe tener al menos 6 caracteres','err');return;}
+  if(pass&&(pass.length<10||!/[a-z]/.test(pass)||!/[A-Z]/.test(pass)||!/\d/.test(pass))){toast('Use 10+ caracteres, una mayúscula, una minúscula y un número','err');return;}
   apiPost({accion:'editar_credenciales',id_empleado:idEmpleado,nombre:usuario,correo:correo,password:pass,activo:$('ce-activo').checked?1:0},function(){
     toast('Credenciales actualizadas');$('cm').classList.remove('show');loadEmp();
   });

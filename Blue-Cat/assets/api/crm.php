@@ -7,18 +7,15 @@ $input = getJsonInput();
 $accion = $input['accion'] ?? '';
 
 function crmLog($conn, $uid, $accion, $entidad, $id_entidad = null, $detalle = null, $nivel = 'INFO') {
-    $det = $detalle ? json_encode($detalle, JSON_UNESCAPED_UNICODE) : null;
-    $ip = $_SERVER['REMOTE_ADDR'] ?? '';
-    $stmt = $conn->prepare("INSERT INTO cliente_auditoria (id_user, accion, entidad, id_entidad, valor_nuevo, ip, nivel) VALUES (?,?,?,?,?,?,?)");
-    $stmt->bind_param("ississs", $uid, $accion, $entidad, $id_entidad, $det, $ip, $nivel);
-    $stmt->execute();
-    $stmt->close();
+    try {
+        $det = $detalle ? json_encode($detalle, JSON_UNESCAPED_UNICODE) : null;$ip = $_SERVER['REMOTE_ADDR'] ?? '';
+        $stmt = $conn->prepare("INSERT INTO cliente_auditoria (id_user, accion, entidad, id_entidad, valor_nuevo, ip, nivel) VALUES (?,?,?,?,?,?,?)");
+        if(!$stmt)return;$stmt->bind_param("ississs", $uid, $accion, $entidad, $id_entidad, $det, $ip, $nivel);$stmt->execute();$stmt->close();
+    } catch(Throwable $error) { error_log('cliente_auditoria: '.$error->getMessage()); }
 }
 
 function requierePermiso($modulo, $accion) {
-    if (!verificarPermiso($modulo, $accion)) {
-        json(['error'=>'Permiso denegado: '.$modulo.'.'.$accion], 403);
-    }
+    requirePermission($modulo, $accion);
 }
 
 $crmReadActions = ['dashboard','clientes','cliente_obtener','cliente','actividades','creditos','etiquetas','cliente_etiquetas','reporte_abc','reporte_morosidad','auditoria'];

@@ -41,13 +41,18 @@ function getOpenCaja($conn, $uid) {
 }
 
 function insertAuditoria($conn, $uid, $accion, $detalle, $idRef = null, $tablaRef = null) {
-    $ip = $_SERVER['REMOTE_ADDR'] ?? '';
-    $sql = "INSERT INTO pos_auditoria (id_user, accion, detalle, id_referencia, tabla_referencia, ip)
-            VALUES (?, ?, ?, ?, ?, ?)";
-    $stmt = $conn->prepare($sql);
-    $stmt->bind_param('ississ', $uid, $accion, $detalle, $idRef, $tablaRef, $ip);
-    $stmt->execute();
-    $stmt->close();
+    try {
+        $ip = $_SERVER['REMOTE_ADDR'] ?? '';
+        $sql = "INSERT INTO pos_auditoria (id_user, accion, detalle, id_referencia, tabla_referencia, ip)
+                VALUES (?, ?, ?, ?, ?, ?)";
+        $stmt = $conn->prepare($sql);
+        if (!$stmt) return;
+        $stmt->bind_param('ississ', $uid, $accion, $detalle, $idRef, $tablaRef, $ip);
+        $stmt->execute();
+        $stmt->close();
+    } catch (Throwable $error) {
+        // Audit telemetry never interrupts checkout or cash operations.
+    }
 }
 
 // ============================================================
@@ -59,6 +64,7 @@ if ($method === 'GET') {
     if ($action !== 'permisos_usuario' && !verificarPermiso('pos','ver')) {
         json(['error'=>true,'message'=>'Permiso denegado: pos.ver'],403);
     }
+    if ($action === 'clientes') requirePermission('pos','asociar_cliente');
 
     switch ($action) {
         case 'dashboard':           GET_dashboard();          break;
@@ -81,12 +87,25 @@ if ($method === 'GET') {
             json(['error' => true, 'message' => 'Acción no válida'], 400);
     }
 } elseif ($method === 'POST') {
+    requirePermission('pos', 'ver');
     $data = getJsonInput();
     if (!$data) {
         json(['error' => true, 'message' => 'Datos JSON requeridos'], 400);
     }
     // `action` is canonical; `accion` keeps cached/legacy clients working.
     $action = $data->action ?? $data->accion ?? '';
+    $postPermissions = [
+        'caja_movimiento'=>['pos','abrir_caja'],
+        'cliente_crear'=>['crm','crear'],
+        'promociones_evaluar'=>['pos','realizar_venta'],
+        'promocion_validar'=>['pos','realizar_venta'],
+        'cotizacion_crear'=>['pos','realizar_venta'],
+        'cotizacion_eliminar'=>['pos','realizar_venta'],
+        'reserva_crear'=>['pos','realizar_venta'],
+        'reserva_cumplir'=>['pos','realizar_venta'],
+        'reserva_cancelar'=>['pos','realizar_venta'],
+    ];
+    if (isset($postPermissions[$action])) requirePermission($postPermissions[$action][0],$postPermissions[$action][1]);
 
     switch ($action) {
         case 'caja_abrir':          if (!verificarPermiso('pos','abrir_caja')) json(['error'=>true,'message'=>'Permiso denegado'],403); POST_caja_abrir($data); break;

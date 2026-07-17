@@ -5,7 +5,7 @@ $conn = getDB();
 $method = $_SERVER['REQUEST_METHOD'];
 
 function requierePermisoCliente(string $accion): void {
-    if (!verificarPermiso('crm', $accion)) json(['error'=>'Permiso denegado: crm.'.$accion], 403);
+    requirePermission('crm', $accion);
 }
 
 switch ($method) {

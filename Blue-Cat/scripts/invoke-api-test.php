@@ -15,6 +15,8 @@ $userId = (int)(cliOption('--user') ?? 0);
 if (!$env || !preg_match('/^[a-z0-9_-]+\.php$/i',$endpoint) || $userId <= 0) exit(2);
 $envPath = preg_match('/^(?:[A-Za-z]:[\\\\\/]|\/)/',$env) ? $env : $root.'/'.$env;
 putenv('BLUECAT_ENV_FILE='.$envPath);
+putenv('BLUECAT_TEST_SESSION=1');
+$_SERVER['HTTP_X_REQUESTED_WITH'] = 'XMLHttpRequest';
 require_once $root.'/assets/api/_db.php';
 if (getenv('APP_ENV') !== 'test' || DB_NAME === 'erp') exit(3);
 

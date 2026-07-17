@@ -3,9 +3,7 @@ require_once __DIR__ . '/_db.php';
 $uid = requireUser();
 
 function requierePermiso($modulo, $accion) {
-    if (!verificarPermiso($modulo, $accion)) {
-        json(['error'=>'Permiso denegado: '.$modulo.'.'.$accion], 403);
-    }
+    requirePermission($modulo, $accion);
 }
 
 $conn = getDB();

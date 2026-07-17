@@ -14,7 +14,7 @@ function apiCfg(accion, data, cb) {
 }
 function toast(msg, type) {
   var t = document.createElement('div'); t.className = 'toast toast-' + (type === 'error' ? 'err' : 'ok');
-  t.innerHTML = '<i class="fas fa-' + (type === 'error' ? 'exclamation-circle' : 'check-circle') + '"></i> ' + msg;
+  BlueCatSecurity.renderToast(t, msg, type);
   document.body.appendChild(t); requestAnimationFrame(function() { t.classList.add('show'); });
   setTimeout(function() { t.classList.remove('show'); setTimeout(function() { t.remove(); }, 300); }, 2500);
 }
@@ -68,8 +68,8 @@ function loadDashboard() {
       '<div class="stat"><span class="stat-icon amber"><i class="fas fa-percent"></i></span><div><div class="stat-num">' + d.impuestos + '</div><div class="stat-label">Impuestos</div></div></div>' +
       '<div class="stat"><span class="stat-icon green"><i class="fas fa-history"></i></span><div><div class="stat-num">' + d.auditoria_hoy + '</div><div class="stat-label">Logs hoy</div></div></div>' +
       (d.errores_hoy > 0 ? '<div class="stat"><span class="stat-icon red"><i class="fas fa-exclamation-triangle"></i></span><div><div class="stat-num">' + d.errores_hoy + '</div><div class="stat-label">Errores hoy</div></div></div>' : '');
-    document.getElementById('t-ultimos-accesos').innerHTML = (d.ultimos_accesos || []).map(function(u) { return '<tr><td>' + esc(u.nombre_completo || u.nombre) + '</td><td>' + (u.ultimo_acceso || '-') + '</td></tr>'; }).join('');
-    document.getElementById('t-ultimos-logs').innerHTML = (d.ultimos_logs || []).map(function(l) { return '<tr><td>' + l.accion + '</td><td>' + l.entidad + (l.id_entidad ? '#' + l.id_entidad : '') + '</td><td>' + l.created_at + '</td></tr>'; }).join('');
+    document.getElementById('t-ultimos-accesos').innerHTML = (d.ultimos_accesos || []).map(function(u) { return '<tr><td>' + esc(u.nombre_completo || u.nombre) + '</td><td>' + esc(u.ultimo_acceso || '-') + '</td></tr>'; }).join('');
+    document.getElementById('t-ultimos-logs').innerHTML = (d.ultimos_logs || []).map(function(l) { return '<tr><td>' + esc(l.accion) + '</td><td>' + esc(l.entidad) + (l.id_entidad ? '#' + num(l.id_entidad) : '') + '</td><td>' + esc(l.created_at) + '</td></tr>'; }).join('');
   });
 }
 
@@ -261,7 +261,7 @@ function verDetalleUsuario(uid) {
 
 function cambiarPassword(uid, uname) {
   // Verificar permiso
-  if (!hasPermissionConfig('usuarios', 'editar_cuentas')) {
+  if (!hasPermissionConfig('usuarios', 'restablecer_password')) {
     toast('No tiene permiso para editar cuentas', 'error');
     return;
   }
@@ -271,11 +271,11 @@ function cambiarPassword(uid, uname) {
     '<form onsubmit="guardarNuevaPassword(event,' + uid + ')">' +
       '<div style="margin-bottom:12px;">' +
         '<label style="display:block;font-size:13px;font-weight:600;margin-bottom:4px;">Nueva Contraseña *</label>' +
-        '<input type="password" id="np-password" required minlength="6" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;">' +
+        '<input type="password" id="np-password" required minlength="10" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;">' +
       '</div>' +
       '<div style="margin-bottom:12px;">' +
         '<label style="display:block;font-size:13px;font-weight:600;margin-bottom:4px;">Confirmar Contraseña *</label>' +
-        '<input type="password" id="np-confirm" required minlength="6" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;">' +
+        '<input type="password" id="np-confirm" required minlength="10" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;">' +
       '</div>' +
       '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">' +
         '<button type="button" class="btn btn-outline btn-sm" onclick="closeCfgModal()">Cancelar</button>' +
@@ -298,8 +298,8 @@ function guardarNuevaPassword(event, uid) {
     return;
   }
   
-  if (password.length < 6) {
-    toast('La contraseña debe tener al menos 6 caracteres', 'error');
+  if (password.length < 10 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password)) {
+    toast('Use al menos 10 caracteres, una mayúscula, una minúscula y un número', 'error');
     return;
   }
   
@@ -314,9 +314,21 @@ function guardarNuevaPassword(event, uid) {
 }
 
 function hasPermissionConfig(modulo, accion) {
-  // Por ahora retornamos true, pero aquí se podría verificar contra los permisos del usuario
-  return true;
+  return typeof window.blueCatHasPermission === 'function' && window.blueCatHasPermission(modulo, accion);
 }
+
+document.addEventListener('bluecat:permissions-ready', function() {
+  var policies = {
+    roles: ['configuracion', 'gestionar_roles'],
+    usuarios: ['configuracion', 'gestionar_usuarios'],
+    sesiones: ['seguridad', 'ver_sesiones'],
+    auditoria: ['seguridad', 'ver_auditoria']
+  };
+  Object.keys(policies).forEach(function(section) {
+    var item = document.querySelector('.cfg-sidebar li[data-section="' + section + '"]');
+    if (item && !hasPermissionConfig(policies[section][0], policies[section][1])) item.style.display = 'none';
+  });
+});
 
 function editUsuarioRoles(uid, uname) {
   apiCfg('usuario_roles', { id_user: uid }, function(items) {
@@ -524,7 +536,7 @@ function loadAuditoria() {
   apiCfg('auditoria', { nivel: nivel, limit: 200 }, function(r) {
     document.getElementById('t-auditoria').innerHTML = (r.items || []).map(function(a) {
       var nc = a.nivel === 'ERROR' ? 'badge-danger' : (a.nivel === 'WARNING' ? 'badge-danger' : 'badge-info');
-      return '<tr><td>' + a.created_at + '</td><td>' + esc(a.user_nombre || '') + '</td><td>' + a.accion + '</td><td>' + a.entidad + '</td><td>' + (a.id_entidad || '') + '</td><td><span class="badge ' + nc + '">' + a.nivel + '</span></td></tr>';
+      return '<tr><td>' + esc(a.created_at) + '</td><td>' + esc(a.user_nombre || '') + '</td><td>' + esc(a.accion) + '</td><td>' + esc(a.entidad) + '</td><td>' + num(a.id_entidad) + '</td><td><span class="badge ' + nc + '">' + esc(a.nivel) + '</span></td></tr>';
     }).join('') || '<tr><td colspan="6"><div class="empty-state"><i class="fas fa-history"></i><p>Sin registros</p></div></td></tr>';
   });
 }
@@ -591,7 +603,10 @@ function togglePlanModulo(id_plan, id_modulo, el) {
 function loadSesiones() {
   apiCfg('sesiones_activas', {}, function(items) {
     document.getElementById('t-sesiones').innerHTML = items.map(function(s) {
-      return '<tr><td>' + esc(s.nombre_completo || s.nombre || '') + '</td><td>' + s.accion + '</td><td>' + esc(s.ip||'') + '</td><td>' + s.created_at + '</td><td><button class="btn btn-outline btn-xs" onclick="cerrarSesionRemota('+s.id_sesion_log+')"><i class="fas fa-times"></i></button></td></tr>';
+      var active = s.accion === 'ACTIVA';
+      var action = active && hasPermissionConfig('seguridad','revocar_sesiones')
+        ? '<button class="btn btn-outline btn-xs" onclick="cerrarSesionRemota('+s.id_sesion+')" title="Revocar sesión"><i class="fas fa-times"></i></button>' : '-';
+      return '<tr><td>' + esc(s.nombre_completo || s.nombre || '') + '</td><td><span class="badge '+(active?'badge-success':'badge-gray')+'">' + esc(s.accion) + '</span></td><td>Identidad protegida</td><td>' + esc(s.last_activity_at || s.created_at) + '</td><td>'+action+'</td></tr>';
     }).join('') || '<tr><td colspan="5"><div class="empty-state"><i class="fas fa-plug"></i><p>Sin sesiones recientes</p></div></td></tr>';
   });
 }

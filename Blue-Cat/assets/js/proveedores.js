@@ -9,7 +9,7 @@ function esc(s) { if(!s)return''; var d=document.createElement('div'); d.appendC
 function toast(msg, t) {
   var el = document.createElement('div');
   el.className = 'toast toast-' + (t==='err'?'err':'ok');
-  el.innerHTML = msg;
+  BlueCatSecurity.renderToast(el, msg, t);
   document.body.appendChild(el);
   requestAnimationFrame(function() { el.classList.add('show'); });
   setTimeout(function() { el.classList.remove('show'); setTimeout(function() { el.remove(); },300); }, 2500);

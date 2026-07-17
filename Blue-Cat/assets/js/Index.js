@@ -54,8 +54,8 @@ async function createAccount() {
     return;
   }
 
-  if (password.length < 6) {
-    showError(errorEl, 'La contraseña debe tener al menos 6 caracteres');
+  if (password.length < 10 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password)) {
+    showError(errorEl, 'Use al menos 10 caracteres, una mayúscula, una minúscula y un número');
     return;
   }
 
