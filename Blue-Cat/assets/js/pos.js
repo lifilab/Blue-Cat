@@ -13,12 +13,20 @@ document.addEventListener('DOMContentLoaded', init);
 function $(id) { return document.getElementById(id); }
 function esc(s) { if (!s) return ''; var d = document.createElement('div'); d.appendChild(document.createTextNode(s)); return d.innerHTML; }
 function fm(n) { if (n === null || n === undefined) return '$0'; return '$' + Math.round(Number(n)).toLocaleString('es-CL'); }
-function toast(msg, t) {
+function toast(msg, t, iconClass) {
   var el = document.createElement('div');
   el.className = 'toast toast-' + (t === 'err' ? 'err' : 'ok');
   el.setAttribute('role', 'alert');
   el.setAttribute('aria-live', 'assertive');
-  el.innerHTML = msg; document.body.appendChild(el);
+  if (iconClass) {
+    var icon = document.createElement('i');
+    icon.className = iconClass;
+    icon.setAttribute('aria-hidden', 'true');
+    el.appendChild(icon);
+    el.appendChild(document.createTextNode(' '));
+  }
+  el.appendChild(document.createTextNode(String(msg)));
+  document.body.appendChild(el);
   requestAnimationFrame(function () { el.classList.add('show'); });
   setTimeout(function () { el.classList.remove('show'); setTimeout(function () { el.remove(); }, 300); }, 2500);
 }
@@ -179,7 +187,7 @@ function abrirCaja() {
     sucursal: $('ac-suc').value, nota: $('ac-nota').value
   }, function (d) {
     localStorage.setItem('bluecat_pos_caja_codigo', codigo);
-    toast('<i class="fas fa-check-circle"></i> Caja abierta: ' + (d.caja ? d.caja.codigo : codigo));
+    toast('Caja abierta: ' + (d.caja ? d.caja.codigo : codigo), 'ok', 'fas fa-check-circle');
     closeModal();
     loadCajaState();
   });
@@ -194,7 +202,7 @@ function cerrarCaja() {
   apiPost({ accion: 'caja_cerrar', monto_real: monto, observaciones: $('cc-obs').value }, function (d) {
     var msg = 'Caja cerrada. Esperado: ' + fm(d.esperado) + ', Real: ' + fm(d.monto_real);
     if (d.diferencia !== 0) msg += ', Diferencia: <strong>' + fm(d.diferencia) + '</strong>';
-    toast('<i class="fas fa-check-circle"></i> ' + msg);
+    toast(msg, 'ok', 'fas fa-check-circle');
     closeModal();
     loadDashboard();
     loadCajaState();
@@ -323,7 +331,7 @@ function addToCart(id, name, price, sku, stock, tipoVenta, unidad) {
   }
   cart.push({ id:id, name:name, price:parseFloat(price)||0, sku:sku||'', cant:1, stock:stk, tipoVenta:'UNIDAD', unidad:unidad });
   renderCart();
-  toast('<i class="fas fa-check"></i> ' + esc(name));
+  toast(name, 'ok', 'fas fa-check');
 }
 
 
@@ -346,7 +354,7 @@ function confirmMeasure() {
   var totalQty=(found?found.cant:0)+qty;
   if(totalQty>p.stock){toast('Stock máximo: '+p.stock+' '+p.unidad,'err');return;}
   if(found)found.cant=Math.round(totalQty*1000)/1000;else cart.push({id:p.id,name:p.name,price:p.price,sku:p.sku,cant:qty,stock:p.stock,tipoVenta:p.tipoVenta,unidad:p.unidad});
-  pendingMeasureProduct=null;closeModal();renderCart();toast('<i class="fas fa-check"></i> '+esc(p.name));
+  pendingMeasureProduct=null;closeModal();renderCart();toast(p.name, 'ok', 'fas fa-check');
 }
 
 function removeFromCart(idx) {
