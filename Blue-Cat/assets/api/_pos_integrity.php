@@ -135,6 +135,10 @@ function posSaleRequestHash($data): string {
         'id_promocion' => $data->id_promocion ?? null,
         'id_cotizacion' => $data->id_cotizacion ?? null,
         'descuento' => $data->descuento ?? 0,
+        'cupones' => $data->cupones ?? [],
+        'firma_promociones' => $data->firma_promociones ?? '',
+        'canal' => $data->canal ?? 'POS',
+        'id_sucursal' => $data->id_sucursal ?? null,
     ];
     return hash('sha256', json_encode(posIntegrityNormalize($payload), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 }

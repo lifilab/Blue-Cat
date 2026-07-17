@@ -74,6 +74,7 @@ La emisión electrónica tributaria y la integración con SII no forman parte de
 - `php scripts/test-pos-integrity.php`: reglas puras de pagos, vuelto y hash estable.
 - `php scripts/test-api-tenant-isolation.php`: venta real, reintento idempotente, conflicto, pago mixto y caja física.
 - `php scripts/test-pos-concurrency.php`: dos procesos venden simultáneamente una unidad; solo uno confirma.
+- `php scripts/test-promotion-engine.php`: reglas por cantidad, descuentos, precio especial, compra X/Y, combos, límites, vigencia y segmentación. Véase [PROMOTIONS.md](PROMOTIONS.md).
 - La migración 016 se valida desde cero y sobre una copia de la base local antes de aplicarse a datos reales.
 
 ## Decisiones operativas

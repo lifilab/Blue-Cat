@@ -43,7 +43,7 @@ require_once $root.'/assets/api/_db.php';
 if (getenv('APP_ENV') !== 'test' || DB_NAME === 'erp') throw new RuntimeException('Solo se permite ejecutar en APP_ENV=test.');
 
 $db=getDB();
-$accountIds=[];$userIds=[];$productIds=[];$clientIds=[];$warehouseIds=[];$sessionIds=[];$cashIds=[];$orderIds=[];$quoteIds=[];
+$accountIds=[];$userIds=[];$productIds=[];$clientIds=[];$warehouseIds=[];$sessionIds=[];$cashIds=[];$orderIds=[];$quoteIds=[];$promotionIds=[];
 try {
     $db->query("INSERT INTO cuenta(nombre) VALUES ('API Tenant A'),('API Tenant B')");
     $accountA=(int)$db->insert_id;$accountB=$accountA+1;$accountIds=[$accountA,$accountB];
@@ -64,6 +64,7 @@ try {
     $stmt=$db->prepare('INSERT INTO producto(id_user,id_cuenta,nombre_producto,precio_venta) VALUES (?,?,?,1000)');
     $name='Producto API A';$stmt->bind_param('iis',$userA,$accountA,$name);$stmt->execute();$productA=(int)$db->insert_id;
     $name='Producto API B';$stmt->bind_param('iis',$userB,$accountB,$name);$stmt->execute();$productB=(int)$db->insert_id;$stmt->close();$productIds=[$productA,$productB];
+    $db->query("UPDATE producto SET codigo_de_barras='API-PROD-A',sku='API-SKU-A' WHERE id_producto={$productA}");
     $stmt=$db->prepare("INSERT INTO bodega(id_user,id_cuenta,codigo,nombre,estado) VALUES (?,?,?,?,'ACTIVA')");
     $code='API-BOD-'.bin2hex(random_bytes(3));$name='Bodega API A';$stmt->bind_param('iiss',$userA,$accountA,$code,$name);$stmt->execute();$warehouseA=(int)$db->insert_id;$stmt->close();$warehouseIds=[$warehouseA];
     $db->query("INSERT INTO stock(id_producto,id_bodega,disponible) VALUES ({$productA},{$warehouseA},10)");
@@ -78,12 +79,35 @@ try {
     $cashAccount=(int)$db->query("SELECT id_cuenta FROM pos_caja WHERE id_caja={$cashA}")->fetch_row()[0];
     assertApi($cashAccount===$accountA,'la caja abierta queda asociada a la cuenta correcta');
 
+    $posClients=invokeApi($root,$envPath,'pos.php',$userA,'GET',['accion'=>'clientes']);
+    $posClientIds=array_map(fn($row)=>(int)$row['id_cliente'],$posClients['clientes']??[]);
+    assertApi(in_array($clientA,$posClientIds,true)&&!in_array($clientB,$posClientIds,true),'el selector POS recibe la lista canónica de clientes de su cuenta');
+
+    $promoCode='API2X1'.strtoupper(bin2hex(random_bytes(3)));
+    $promo=invokeApi($root,$envPath,'pos.php',$userA,'POST',[],[
+        'action'=>'promocion_crear','codigo'=>$promoCode,'nombre'=>'API 2x1','tipo'=>'2X1','valor'=>0,
+        'cantidad_minima'=>2,'cantidad_pagada'=>1,'requiere_codigo'=>true,'productos_codigos'=>['API-SKU-A']
+    ]);
+    assertApi(!empty($promo['success'])&&!empty($promo['id_promocion']),'crea una promoción 2x1 vinculada por SKU');
+    $promotionA=(int)$promo['id_promocion'];$promotionIds=[$promotionA];
+    $oneUnit=invokeApi($root,$envPath,'pos.php',$userA,'POST',[],['action'=>'promociones_evaluar','items'=>[['id_producto'=>$productA,'cantidad'=>1]],'cupones'=>[$promoCode],'canal'=>'POS']);
+    assertApi((int)($oneUnit['descuento']??-1)===0,'el 2x1 no beneficia una sola unidad');
+    $twoLines=invokeApi($root,$envPath,'pos.php',$userA,'POST',[],['action'=>'promociones_evaluar','items'=>[['id_producto'=>$productA,'cantidad'=>1],['id_producto'=>$productA,'cantidad'=>1]],'cupones'=>[$promoCode],'canal'=>'POS']);
+    assertApi((int)($twoLines['descuento']??0)===1000&&(int)($twoLines['total']??0)===1000,'el 2x1 acumula líneas del mismo SKU y descuenta una unidad');
+
+    $anonymousQuote=invokeApi($root,$envPath,'pos.php',$userA,'POST',[],[
+        'action'=>'cotizacion_crear','codigo'=>'COT-ANON-'.bin2hex(random_bytes(3)),'id_cliente'=>0,'cliente_nombre'=>'Venta mostrador',
+        'items'=>[['id_producto'=>$productA,'producto'=>'Manipulado','cantidad'=>1,'precio_unitario'=>1]]
+    ]);
+    assertApi(!empty($anonymousQuote['success']),'una cotización sin cliente guarda NULL y no viola la clave foránea');
+    $quoteIds[]=(int)$anonymousQuote['id_cotizacion'];
+
     $quote=invokeApi($root,$envPath,'pos.php',$userA,'POST',[],[
         'action'=>'cotizacion_crear','codigo'=>'COT-API-'.bin2hex(random_bytes(3)),'id_cliente'=>$clientA,
         'cliente_nombre'=>'Cliente API A','items'=>[['id_producto'=>$productA,'producto'=>'Producto API A','cantidad'=>2,'precio_unitario'=>1000]]
     ]);
     assertApi(!empty($quote['success'])&&!empty($quote['id_cotizacion']),'crea una cotización sin generar una venta');
-    $quoteA=(int)$quote['id_cotizacion'];$quoteIds=[$quoteA];
+    $quoteA=(int)$quote['id_cotizacion'];$quoteIds[]=$quoteA;
 
     $saleKey='tenant-test-sale-a-'.bin2hex(random_bytes(8));
     $salePayload=[
@@ -138,6 +162,24 @@ try {
     assertApi(isset($duplicateReturn['error']),'no se puede devolver nuevamente una venta totalmente devuelta');
     $cashAfterReturns=(int)$db->query("SELECT monto_actual FROM pos_caja WHERE id_caja={$cashA}")->fetch_row()[0];
     assertApi($cashAfterReturns===10000,'las devoluciones revierten solo el efectivo original');
+
+    $promoSale=invokeApi($root,$envPath,'pos.php',$userA,'POST',[],[
+        'action'=>'venta_crear','items'=>[['id_producto'=>$productA,'cantidad'=>1,'precio_unitario'=>1000],['id_producto'=>$productA,'cantidad'=>1,'precio_unitario'=>1000]],
+        'cupones'=>[$promoCode],'pagos'=>[['metodo'=>'EFECTIVO','monto'=>1000]],'tipo_documento'=>'BOLETA','id_caja'=>$cashA,
+        'idempotency_key'=>'tenant-test-promo-sale-'.bin2hex(random_bytes(8))
+    ]);
+    assertApi(!empty($promoSale['success'])&&(int)($promoSale['descuento']??0)===1000&&(int)$promoSale['total']===1000,'el cobro recalcula y aplica el 2x1 en el servidor');
+    $promoOrder=(int)$promoSale['id_pedido'];$orderIds[]=$promoOrder;
+    $storedApplications=(int)$db->query("SELECT COUNT(*) FROM pos_promocion_aplicacion WHERE id_pedido={$promoOrder} AND id_promocion={$promotionA} AND descuento=1000")->fetch_row()[0];
+    $storedLine=$db->query("SELECT precio_unitario_original,descuento,precio_total FROM detalle_pedido WHERE id_pedido={$promoOrder} ORDER BY id_detalle_pedido LIMIT 1")->fetch_assoc();
+    assertApi($storedApplications===1&&(int)$storedLine['precio_unitario_original']===1000&&(int)$storedLine['descuento']===500,'la venta persiste aplicación y descuento distribuido por línea');
+    $promoDocument=invokeApi($root,$envPath,'pos.php',$userA,'GET',['accion'=>'documento','id'=>$promoOrder]);
+    assertApi((int)($promoDocument['documento']['descuento']??0)===1000&&count($promoDocument['documento']['promociones']??[])===1,'la boleta reimprimible conserva la promoción y su descuento');
+    $promoDetailIds=[];$rPromoDetails=$db->query("SELECT id_detalle_pedido,id_producto,cantidad_pedida FROM detalle_pedido WHERE id_pedido={$promoOrder}");while($row=$rPromoDetails->fetch_assoc())$promoDetailIds[]=['id_detalle_pedido'=>(int)$row['id_detalle_pedido'],'id_producto'=>(int)$row['id_producto'],'cantidad'=>(float)$row['cantidad_pedida']];
+    $promoReturn=invokeApi($root,$envPath,'pos.php',$userA,'POST',[],['action'=>'devolucion_crear','id_pedido'=>$promoOrder,'motivo'=>'Revertir venta promocional de prueba','items'=>$promoDetailIds]);
+    assertApi(!empty($promoReturn['success'])&&(int)$promoReturn['monto_devuelto']===1000,'la devolución usa el total final realmente cobrado en la promoción');
+    $cashAfterPromoReturn=(int)$db->query("SELECT monto_actual FROM pos_caja WHERE id_caja={$cashA}")->fetch_row()[0];
+    assertApi($cashAfterPromoReturn===10000,'la venta promocional y su devolución mantienen el cuadre de caja');
     $orderAccount=(int)$db->query("SELECT id_cuenta FROM pedido WHERE id_pedido={$orderA}")->fetch_row()[0];
     assertApi($orderAccount===$accountA,'la venta queda asociada a la cuenta correcta');
     $foreignSale=invokeApi($root,$envPath,'pos.php',$userA,'POST',[],[
@@ -234,6 +276,9 @@ try {
     foreach ($cashIds as $id) $db->query("DELETE FROM pos_movimiento_caja WHERE id_caja=".(int)$id);
     foreach ($quoteIds as $id) {$db->query("DELETE FROM pos_cotizacion_detalle WHERE id_cotizacion=".(int)$id);$db->query("DELETE FROM pos_cotizacion WHERE id_cotizacion=".(int)$id);}
     foreach ($orderIds as $id) {
+        $db->query("DELETE FROM pos_promocion_auditoria WHERE id_pedido=".(int)$id);
+        $db->query("DELETE FROM pos_promocion_aplicacion WHERE id_pedido=".(int)$id);
+        $db->query("DELETE FROM pos_descuento WHERE id_pedido=".(int)$id);
         $db->query("DELETE FROM pos_devolucion_detalle WHERE id_devolucion IN (SELECT id_devolucion FROM pos_devolucion WHERE id_pedido=".(int)$id.")");
         $db->query("DELETE FROM pos_devolucion WHERE id_pedido=".(int)$id);
         $db->query("DELETE FROM pos_venta_idempotencia WHERE id_pedido=".(int)$id);
@@ -248,6 +293,7 @@ try {
     foreach ($sessionIds as $id) $db->query("DELETE FROM sesion WHERE id_sesion=".(int)$id);
     foreach ($productIds as $id) $db->query("DELETE FROM kardex WHERE id_producto=".(int)$id);
     foreach ($warehouseIds as $id) {$db->query("DELETE FROM stock WHERE id_bodega=".(int)$id);$db->query("DELETE FROM bodega WHERE id_bodega=".(int)$id);}
+    foreach ($promotionIds as $id) {$db->query("DELETE FROM pos_promocion_auditoria WHERE id_promocion=".(int)$id);$db->query("DELETE FROM pos_promocion_producto WHERE id_promocion=".(int)$id);$db->query("DELETE FROM pos_promocion WHERE id_promocion=".(int)$id);}
     foreach ($productIds as $id) $db->query("DELETE FROM producto WHERE id_producto=".(int)$id);
     foreach ($clientIds as $id) $db->query("DELETE FROM cliente WHERE id_cliente=".(int)$id);
     foreach ($accountIds as $id) {

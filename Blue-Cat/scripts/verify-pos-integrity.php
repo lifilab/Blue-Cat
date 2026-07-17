@@ -19,6 +19,10 @@ $checks=[
     'cajas abiertas distintas de su libro efectivo' => "SELECT COUNT(*) FROM pos_caja c WHERE c.estado='ABIERTA' AND c.monto_actual<>(SELECT COALESCE(SUM(CASE WHEN m.tipo IN ('APERTURA','INGRESO') THEN m.monto WHEN m.tipo='EGRESO' THEN -m.monto ELSE 0 END),0) FROM pos_movimiento_caja m WHERE m.id_caja=c.id_caja AND m.tipo<>'CIERRE' AND m.metodo='EFECTIVO')",
     'cotizaciones convertidas sin pedido' => "SELECT COUNT(*) FROM pos_cotizacion WHERE convertida=1 AND id_pedido IS NULL",
     'cantidades devueltas en exceso' => "SELECT COUNT(*) FROM (SELECT dp.id_detalle_pedido,dp.cantidad_pedida,COALESCE(SUM(dd.cantidad),0) returned FROM detalle_pedido dp LEFT JOIN pos_devolucion_detalle dd ON dd.id_detalle_pedido=dp.id_detalle_pedido GROUP BY dp.id_detalle_pedido HAVING returned>dp.cantidad_pedida+0.000001) x",
+    'descuentos promocionales de línea inválidos' => "SELECT COUNT(*) FROM detalle_pedido WHERE precio_unitario_original IS NOT NULL AND (descuento<0 OR descuento>ROUND(precio_unitario_original*cantidad_pedida) OR precio_total<>ROUND(precio_unitario_original*cantidad_pedida)-descuento)",
+    'totales de pedidos distintos de sus líneas' => "SELECT COUNT(*) FROM pedido p JOIN (SELECT id_pedido,SUM(precio_total) total_lineas FROM detalle_pedido GROUP BY id_pedido) d ON d.id_pedido=p.id_pedido WHERE p.precio_total<>d.total_lineas",
+    'aplicaciones de promoción fuera de su cuenta' => "SELECT COUNT(*) FROM pos_promocion_aplicacion a JOIN pedido p ON p.id_pedido=a.id_pedido JOIN pos_promocion r ON r.id_promocion=a.id_promocion WHERE a.id_cuenta<>p.id_cuenta OR a.id_cuenta<>r.id_cuenta",
+    'aplicaciones sin descuento trazable' => "SELECT COUNT(*) FROM pos_promocion_aplicacion a LEFT JOIN pos_descuento d ON d.id_pedido=a.id_pedido AND d.id_promocion=a.id_promocion WHERE d.id_descuento IS NULL OR d.monto<>a.descuento",
 ];
 $failed=false;
 foreach($checks as $label=>$sql){$result=$db->query($sql);$count=(int)$result->fetch_row()[0];echo ($count===0?'PASS':'FAIL')." {$label}: {$count}\n";if($count!==0)$failed=true;}

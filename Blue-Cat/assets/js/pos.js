@@ -7,6 +7,9 @@ var userPermissions = {}; // Permisos del usuario
 var _saleRequestKey = null;
 var _paymentSubmitting = false;
 var _pendingCotizacionId = 0;
+var _promoCoupons = [];
+var _promotionTimer = null;
+var _promotionRevision = 0;
 
 document.addEventListener('DOMContentLoaded', init);
 
@@ -417,7 +420,7 @@ function savePrice(idx) {
   closeModal();
 }
 
-function renderCart() {
+function renderCart(skipPromotionRefresh) {
   var cont = $('cart-items');
   var countEl = $('cart-count');
   var total = 0, itemsCount = 0;
@@ -426,6 +429,7 @@ function renderCart() {
   for (var i = 0; i < cart.length; i++) {
     var c = cart[i];
     var sub = c.price * c.cant;
+    var lineDiscount = c.promoDiscount || 0;
     total += sub;
     itemsCount += c.cant;
     var esPeso = c.tipoVenta === 'PESO' || c.tipoVenta === 'VOLUMEN';
@@ -438,7 +442,7 @@ function renderCart() {
     h += '<div class="cart-item">' +
       '<div class="ci-info">' +
       '<div class="ci-name">' + esc(c.name) + '</div>' +
-      '<div class="ci-sku">' + esc(c.sku) + '</div>' +
+      '<div class="ci-sku">' + esc(c.sku) + (lineDiscount > 0 ? ' · <span style="color:#059669;">' + esc((c.promoNames || []).join(', ')) + '</span>' : '') + '</div>' +
       '</div>' +
       '<div class="ci-qty">' +
       '<button onclick="changeQty(' + i + ',-1)" aria-label="Disminuir cantidad de ' + esc(c.name) + '">−</button>' +
@@ -447,7 +451,7 @@ function renderCart() {
       '</div>' +
       '<div class="ci-price">' +
       '<div class="cp-val" ' + precioClick + '>' + precioLabel + '</div>' +
-      '<div class="cp-sub">' + fm(sub) + '</div>' +
+      '<div class="cp-sub">' + (lineDiscount > 0 ? '<span style="text-decoration:line-through;color:#94a3b8;">' + fm(sub) + '</span> <strong style="color:#059669;">' + fm(sub-lineDiscount) + '</strong><br><small>Descuento: -' + fm(lineDiscount) + '</small>' : fm(sub)) + '</div>' +
       '</div>' +
       '<button class="ci-del" onclick="removeFromCart(' + i + ')" aria-label="Eliminar ' + esc(c.name) + ' del carrito"><i class="fas fa-times"></i></button>' +
       '</div>';
@@ -464,11 +468,13 @@ function renderCart() {
   $('cart-total').textContent = fm(neto);
   $('cart-total-val').textContent = neto;
   $('cart-items-count').textContent = Math.round(itemsCount * 100) / 100;
+  if (!skipPromotionRefresh) schedulePromotionEvaluation();
 }
 
 function clearCart() {
   cart = [];
   promoApplied = null;
+  _promoCoupons = [];
   selectedClient = null;
   _pendingCotizacionId = 0;
   $('cart-client').innerHTML = '<i class="fas fa-user"></i> Consumidor Final';
@@ -481,43 +487,94 @@ function clearCart() {
 function applyPromo() {
   var code = $('promo-input').value.trim().toUpperCase();
   if (!code) { toast('Ingrese un código', 'err'); return; }
-  var items = cart.map(function (c) { return { id_producto: c.id, cantidad: c.cant, precio_unitario: c.price }; });
-  var total = items.reduce(function (s, it) { return s + it.precio_unitario * it.cantidad; }, 0);
+  if (_promoCoupons.indexOf(code) === -1) _promoCoupons.push(code);
+  $('promo-input').value = '';
+  evaluatePromotions(true);
+}
 
-  apiPost({ accion: 'promocion_validar', codigo: code, items: items, subtotal: total }, function (d) {
-    var promo=d.promocion||{};
-    promoApplied = { descuento: d.descuento, descripcion: promo.nombre||promo.descripcion||promo.codigo||code, id_promocion: promo.id_promocion };
-    $('promo-tag').innerHTML = '<span class="promo-tag"><i class="fas fa-tag"></i> ' + esc(d.descripcion) + ' (-' + fm(d.descuento) + ')</span>';
-    $('promo-input').value = '';
-    renderCart();
-    toast('Promoción aplicada: ' + d.descripcion);
-  });
+function clearPromotionCoupons() {
+  if (!_promoCoupons.length) return;
+  _promoCoupons = [];
+  evaluatePromotions(false);
+  toast('Cupones eliminados; se recalcularon las promociones');
 }
 
 /* ═══════════════════════════════════════════
    CLIENTE
    ═══════════════════════════════════════════ */
+function schedulePromotionEvaluation() {
+  clearTimeout(_promotionTimer);
+  _promotionTimer = setTimeout(function () { evaluatePromotions(false); }, 120);
+}
+
+function evaluatePromotions(showFeedback, done) {
+  var revision = ++_promotionRevision;
+  if (!cart.length) {
+    promoApplied = null;
+    $('promo-tag').textContent = '';
+    return;
+  }
+  var items = cart.map(function (c) { return { id_producto:c.id, cantidad:c.cant }; });
+  apiPost({ accion:'promociones_evaluar', items:items, id_cliente:selectedClient ? selectedClient.id_cliente : null,
+    cupones:_promoCoupons, canal:'POS', id_sucursal:cajaState&&cajaState.id_sucursal ? cajaState.id_sucursal : 0 }, function (d) {
+    if (revision !== _promotionRevision) return;
+    promoApplied = { descuento:Number(d.descuento)||0, promociones:d.aplicadas||[], firma:d.firma||'',
+      descripcion:(d.aplicadas||[]).map(function(p){return p.nombre;}).join(', ') };
+    var byProduct = {};
+    (d.lineas||[]).forEach(function(line){ byProduct[Number(line.id_producto)] = line; });
+    cart.forEach(function(c){
+      var line=byProduct[Number(c.id)];
+      c.promoDiscount=line ? Number(line.descuento)||0 : 0;
+      c.promoNames=line ? (line.promociones||[]).map(function(p){return p.nombre;}) : [];
+    });
+    var tag = $('promo-tag');
+    var couponRejections=(d.rechazadas||[]).filter(function(r){return _promoCoupons.indexOf(String(r.codigo||'').toUpperCase())!==-1;});
+    window._promotionRejections=d.rechazadas||[];
+    if (tag) {
+      tag.textContent = promoApplied.descuento > 0 ? promoApplied.descripcion + ' (-' + fm(promoApplied.descuento) + ')' : (couponRejections.length ? 'No aplicada: '+couponRejections[0].motivo : '');
+      tag.title=(d.rechazadas||[]).map(function(r){return (r.codigo||r.nombre)+': '+r.motivo;}).join('\n') || 'Quitar cupones aplicados';
+    }
+    renderCart(true);
+    if (showFeedback) {
+      if (couponRejections.length) toast(couponRejections[0].motivo, 'err');
+      else if (d.aplicadas&&d.aplicadas.length) toast('Promoción aplicada: '+d.aplicadas.map(function(p){return p.nombre;}).join(', '));
+    }
+    if (done) done();
+  });
+}
+
 function loadClientes() {
   apiGet({ accion: 'clientes' }, function (d) {
-    window._clientes = d || [];
+    window._clientes = d.clientes || d || [];
   });
 }
 
 function showClientSelector() {
-  var lista = (window._clientes || []).map(function (c) {
-    return '<div class="cart-item" style="cursor:pointer;" onclick="selectClient(' + c.id_cliente + ',\'' + esc(c.nombre) + '\',\'' + esc(c.rut) + '\',\'' + esc(c.correo) + '\',\'' + esc(c.telefono) + '\')">' +
-      '<div><strong>' + esc(c.nombre) + '</strong><br><span style="font-size:11px;color:#64748b;">' + esc(c.rut) + ' · ' + esc(c.correo) + '</span></div></div>';
-  }).join('') || '<p style="color:#94a3b8;">Sin clientes registrados</p>';
-
   var searchId = 'cl-s-' + Date.now();
-  var m = showModal(`
+  showModal(`
     <h3 style="font-size:18px;font-weight:700;margin-bottom:12px;"><i class="fas fa-user" style="color:#4f46e5;"></i> Seleccionar Cliente</h3>
     <input id="${searchId}" placeholder="Buscar cliente..." style="width:100%;padding:10px;border:2px solid #e2e8f0;border-radius:10px;font-size:14px;margin-bottom:12px;outline:none;" onkeyup="buscarClientes(this.value)">
-    <div id="cl-list" style="max-height:300px;overflow-y:auto;">${lista}</div>
+    <div id="cl-list" style="max-height:300px;overflow-y:auto;"></div>
+    ${selectedClient ? '<div style="margin-top:8px;"><button class="btn-d" style="width:100%;padding:10px;" onclick="removeSelectedClient()"><i class="fas fa-user-times"></i> Quitar cliente de la venta</button></div>' : ''}
     <div style="margin-top:8px;"><button class="btn-g" style="width:100%;padding:10px;" onclick="closeModal()">Cancelar</button></div>
     <div style="margin-top:4px;"><button class="btn-p" style="width:100%;padding:10px;" onclick="closeModal();showQuickClient()"><i class="fas fa-plus"></i> Cliente Nuevo</button></div>
   `);
+  renderClientChoices(window._clientes || []);
   setTimeout(function () { $(searchId).focus(); }, 100);
+}
+
+function renderClientChoices(clients) {
+  var list=$('cl-list');
+  if(!list)return;
+  list.replaceChildren();
+  if(!clients.length){var empty=document.createElement('p');empty.style.color='#94a3b8';empty.textContent='Sin clientes registrados';list.appendChild(empty);return;}
+  clients.forEach(function(c){
+    var row=document.createElement('button');row.type='button';row.className='cart-item';row.style.cssText='cursor:pointer;width:100%;text-align:left;border:0;background:transparent;';
+    var info=document.createElement('div');var name=document.createElement('strong');name.textContent=c.nombre||'Cliente';
+    var detail=document.createElement('span');detail.style.cssText='font-size:11px;color:#64748b;';detail.textContent=(c.rut||'Sin RUT')+' · '+(c.correo||'Sin correo');
+    info.appendChild(name);info.appendChild(document.createElement('br'));info.appendChild(detail);row.appendChild(info);
+    row.addEventListener('click',function(){selectClient(c.id_cliente,c.nombre||'',c.rut||'',c.correo||'',c.telefono||'');});list.appendChild(row);
+  });
 }
 
 var _clDebounce = null;
@@ -526,13 +583,10 @@ function buscarClientes(q) {
   _clDebounce = setTimeout(function() {
     var list = $('cl-list');
     if (!list) return;
-    if (!q) { list.innerHTML = (window._clientes || []).map(function (c) {
-      return '<div class="cart-item" style="cursor:pointer;" onclick="selectClient(' + c.id_cliente + ',\'' + esc(c.nombre) + '\',\'' + esc(c.rut) + '\',\'' + esc(c.correo) + '\',\'' + esc(c.telefono) + '\')"><div><strong>' + esc(c.nombre) + '</strong><br><span style="font-size:11px;color:#64748b;">' + esc(c.rut) + ' · ' + esc(c.correo) + '</span></div></div>';
-    }).join('') || '<p style="color:#94a3b8;">Sin clientes</p>'; return; }
+    if (!q) { renderClientChoices(window._clientes || []); return; }
     apiGet({ accion: 'clientes', q: q }, function (d) {
-      list.innerHTML = d.map(function (c) {
-        return '<div class="cart-item" style="cursor:pointer;" onclick="selectClient(' + c.id_cliente + ',\'' + esc(c.nombre) + '\',\'' + esc(c.rut) + '\',\'' + esc(c.correo) + '\',\'' + esc(c.telefono) + '\')"><div><strong>' + esc(c.nombre) + '</strong><br><span style="font-size:11px;color:#64748b;">' + esc(c.rut) + ' · ' + esc(c.correo) + '</span></div></div>';
-      }).join('') || '<p style="color:#94a3b8;">Sin resultados</p>';
+      var clients = d.clientes || d || [];
+      renderClientChoices(clients);
     });
   }, 300);
 }
@@ -542,6 +596,15 @@ function selectClient(id, nombre, rut, correo, tel) {
   $('cart-client').innerHTML = '<i class="fas fa-user-check"></i> ' + esc(nombre) + ' <span style="font-size:11px;color:#94a3b8;">' + esc(rut) + '</span>';
   closeModal();
   toast('Cliente: ' + nombre);
+  schedulePromotionEvaluation();
+}
+
+function removeSelectedClient() {
+  selectedClient = null;
+  $('cart-client').innerHTML = '<i class="fas fa-user"></i> Consumidor Final';
+  closeModal();
+  schedulePromotionEvaluation();
+  toast('Cliente eliminado de la venta');
 }
 
 function showQuickClient() {
@@ -573,6 +636,7 @@ function saveQuickClient() {
     closeModal();
     toast('Cliente creado y seleccionado');
     loadClientes();
+    schedulePromotionEvaluation();
   });
 }
 
@@ -592,9 +656,10 @@ function paymentMethodLabel(method) {
   return labels[method] || method;
 }
 
-function showPayment() {
+function showPayment(promotionsReady) {
   if (cart.length === 0) { toast('Carrito vacío', 'err'); return; }
   if (!cajaState || cajaState.estado !== 'ABIERTA') { toast('Debe abrir caja primero', 'err'); return; }
+  if (!promotionsReady) { evaluatePromotions(false, function(){ showPayment(true); }); return; }
   var total = parseInt($('cart-total-val').textContent) || 0;
   if (total <= 0) { toast('Total inválido', 'err'); return; }
 
@@ -701,6 +766,10 @@ function confirmPayment() {
     id_cotizacion: _pendingCotizacionId || 0,
     descuento: promoApplied ? promoApplied.descuento : 0,
     id_promocion: promoApplied ? promoApplied.id_promocion : 0,
+    cupones: _promoCoupons,
+    firma_promociones: promoApplied ? promoApplied.firma : '',
+    canal: 'POS',
+    id_sucursal: cajaState&&cajaState.id_sucursal ? cajaState.id_sucursal : 0,
     id_caja: cajaState.id_caja,
     cliente: selectedClient,
     tipo_documento: ($('doc-tipo') ? $('doc-tipo').value : 'BOLETA')
@@ -724,6 +793,13 @@ function confirmPayment() {
 function showReceipt(data, items, pagos) {
   var now = new Date();
   var lines = '';
+  if (data.items_documento && data.items_documento.length) {
+    for (var di=0;di<data.items_documento.length;di++) {
+      var docItem=data.items_documento[di];
+      lines += '<div class="rec-line"><span>' + esc(docItem.nombre) + ' x' + docItem.cantidad + '</span><span>' + fm(docItem.subtotal) + '</span></div>';
+      if (Number(docItem.descuento)>0) lines += '<div class="rec-line" style="color:#059669;font-size:10px;"><span>Original ' + fm(docItem.subtotal_original) + ' · ' + esc((docItem.promociones||[]).map(function(p){return p.nombre;}).join(', ')) + '</span><span>-' + fm(docItem.descuento) + '</span></div>';
+    }
+  } else {
   for (var i = 0; i < items.length; i++) {
     var it = items[i];
     for (var j = 0; j < cart.length; j++) {
@@ -732,6 +808,7 @@ function showReceipt(data, items, pagos) {
         break;
       }
     }
+  }
   }
   
   // Calcular IVA según configuración
@@ -797,8 +874,9 @@ function showReceipt(data, items, pagos) {
 
   // Descuento
   var descuentoHTML = '';
-  if (mostrarDescuento && promoApplied) {
-    descuentoHTML = '<div class="rec-line" style="color:#059669;"><span>Dto: ' + esc(promoApplied.descripcion) + '</span><span>-' + fm(promoApplied.descuento) + '</span></div>';
+  if (mostrarDescuento && Number(data.descuento)>0) {
+    var promoNames=(data.promociones||[]).map(function(p){return p.nombre;}).join(', ');
+    descuentoHTML = '<div class="rec-line" style="color:#059669;"><span>Dto: ' + esc(promoNames||'Promoción') + '</span><span>-' + fm(data.descuento) + '</span></div>';
   }
 
   // Mensaje pie de página
@@ -1088,33 +1166,53 @@ function showNewPromo() {
     <div class="gr2">
       <div class="fld"><label>Nombre *</label><input id="np-nombre"></div>
       <div class="fld"><label>Código</label><input id="np-codigo" placeholder="Auto-gen si se deja vacío"></div>
-      <div class="fld"><label>Tipo *</label><select id="np-tipo"><option value="DESCUENTO_PCT">% Descuento</option><option value="DESCUENTO_MONTO">$ Descuento</option><option value="2X1">2x1</option></select></div>
-      <div class="fld"><label>Valor *</label><input id="np-valor" type="number" min="0"></div>
+      <div class="fld"><label>Tipo *</label><select id="np-tipo"><option value="2X1">2x1</option><option value="3X2">3x2</option><option value="CANTIDAD">NxM configurable</option><option value="DESCUENTO_PCT">% por producto</option><option value="DESCUENTO_MONTO">Monto fijo por producto</option><option value="PRECIO_ESPECIAL">Precio especial</option><option value="COMPRA_X_DESCUENTO_Y">Compra X y descuenta Y</option><option value="COMBO">Combo</option></select></div>
+      <div class="fld"><label>Valor del beneficio</label><input id="np-valor" type="number" min="0" step="0.01"></div>
       <div class="fld"><label>Monto Mínimo</label><input id="np-mm" type="number" min="0"></div>
       <div class="fld"><label>Cant. Mínima</label><input id="np-mc" type="number" min="0"></div>
+      <div class="fld"><label>Cantidad pagada (NxM)</label><input id="np-cp" type="number" min="0" step="0.001"></div>
+      <div class="fld"><label>Cantidad beneficiada</label><input id="np-cb" type="number" min="0" step="0.001"></div>
       <div class="fld"><label>Fecha Inicio</label><input id="np-fi" type="date"></div>
       <div class="fld"><label>Fecha Fin</label><input id="np-ff" type="date"></div>
       <div class="fld"><label>Hora Inicio</label><input id="np-hi" type="time"></div>
       <div class="fld"><label>Hora Fin</label><input id="np-hf" type="time"></div>
       <div class="fld"><label>Categoría</label><input id="np-cat" placeholder="Aplica a categoría"></div>
+      <div class="fld"><label>Marca / familia</label><input id="np-marca"></div>
+      <div class="fld" style="grid-column:1/-1;"><label>Códigos o SKU elegibles</label><textarea id="np-codigos" rows="2" placeholder="ABC123, SKU-002"></textarea></div>
+      <div class="fld" style="grid-column:1/-1;"><label>Códigos o SKU beneficiados (Compra X → Y)</label><textarea id="np-beneficio-codigos" rows="2"></textarea></div>
+      <div class="fld"><label>Prioridad</label><input id="np-prioridad" type="number" value="100" min="0"></div>
+      <div class="fld"><label>Límite por venta</label><input id="np-limite" type="number" min="0"></div>
+      <div class="fld"><label>Límite por cliente</label><input id="np-limite-cliente" type="number" min="0"></div>
+      <div class="fld"><label>Segmento cliente</label><input id="np-segmento"></div>
+      <div class="fld"><label>Lista de precios</label><input id="np-lista"></div>
+      <div class="fld"><label>Canal</label><input id="np-canal" placeholder="POS"></div>
+      <div class="fld"><label>Motivo / campaña</label><input id="np-motivo"></div>
+      <div class="fld" style="display:flex;align-items:center;gap:8px;padding-top:18px;"><input type="checkbox" id="np-requiere"> <label style="margin:0;">Requiere ingresar código</label></div>
       <div class="fld" style="display:flex;align-items:center;gap:8px;padding-top:18px;"><input type="checkbox" id="np-comb"> <label style="margin:0;">Combinable con otras</label></div>
     </div>
     <div class="mcb"><button class="btn-g" onclick="closeModal()">Cancelar</button><button class="btn-p" onclick="savePromo()"><i class="fas fa-save"></i> Guardar</button></div>
-  `);
+  `, true);
 }
 
 function savePromo() {
   var nombre = $('np-nombre').value;
   var tipo = $('np-tipo').value;
   var valor = parseInt($('np-valor').value) || 0;
-  if (!nombre || !tipo || !valor) { toast('Nombre, tipo y valor requeridos', 'err'); return; }
+  if (!nombre || !tipo) { toast('Nombre y tipo requeridos', 'err'); return; }
+  var splitCodes=function(value){return value.split(/[\s,;]+/).map(function(v){return v.trim().toUpperCase();}).filter(Boolean);};
   apiPost({
     accion: 'promocion_crear',
     nombre: nombre, codigo: $('np-codigo').value, tipo: tipo, valor: valor,
     monto_minimo: parseInt($('np-mm').value) || 0, cantidad_minima: parseInt($('np-mc').value) || 0,
+    cantidad_pagada: parseFloat($('np-cp').value) || null, cantidad_beneficiada: parseFloat($('np-cb').value) || null,
     fecha_inicio: $('np-fi').value, fecha_fin: $('np-ff').value,
     hora_inicio: $('np-hi').value, hora_fin: $('np-hf').value,
-    aplica_categoria: $('np-cat').value, combinable: $('np-comb').checked
+    aplica_categoria: $('np-cat').value, aplica_marca:$('np-marca').value,
+    productos_codigos:splitCodes($('np-codigos').value), beneficio_codigos:splitCodes($('np-beneficio-codigos').value),
+    prioridad:parseInt($('np-prioridad').value)||100, max_aplicaciones_transaccion:parseInt($('np-limite').value)||null,
+    max_usos_cliente:parseInt($('np-limite-cliente').value)||null, segmento_cliente:$('np-segmento').value,
+    lista_precios:$('np-lista').value, canal:$('np-canal').value, motivo:$('np-motivo').value,
+    requiere_codigo:$('np-requiere').checked, combinable: $('np-comb').checked
   }, function (d) {
     toast('Promoción creada: ' + d.codigo);
     closeModal();
@@ -1123,7 +1221,10 @@ function savePromo() {
 }
 
 function elimPromo(id) {
-  apiPost({ accion: 'promocion_eliminar', id_promocion: id }, function () {
+  var motivo=window.prompt('Motivo para desactivar la promoción:','Fin de campaña');
+  if (motivo===null) return;
+  if (!motivo.trim()) { toast('Debe indicar un motivo', 'err'); return; }
+  apiPost({ accion: 'promocion_eliminar', id_promocion: id, motivo:motivo.trim() }, function () {
     toast('Promoción eliminada');
     closeModal();
     showPromoManager();
@@ -1160,7 +1261,9 @@ function saveCotizacion() {
     cliente_correo: $('cot-mail').value, cliente_telefono: $('cot-tel').value,
     id_cliente: selectedClient ? selectedClient.id_cliente : 0,
     validez: $('cot-validez').value, notas: $('cot-notas').value,
-    descuento: promoApplied ? promoApplied.descuento : 0
+    descuento: promoApplied ? promoApplied.descuento : 0,
+    cupones: _promoCoupons,
+    id_sucursal:cajaState&&cajaState.id_sucursal ? cajaState.id_sucursal : 0
   }, function (d) {
     toast('Cotización ' + d.codigo + ' creada');
     closeModal();
@@ -1196,6 +1299,7 @@ function convertirCot(id) {
   }
   if (!nextCart.length) { toast('Cotización sin productos', 'err'); return; }
   cart=nextCart;_pendingCotizacionId=parseInt(id);
+  try { _promoCoupons = quote.cupones_json ? JSON.parse(quote.cupones_json) : []; } catch (e) { _promoCoupons = []; }
   selectedClient=quote.id_cliente?{id_cliente:parseInt(quote.id_cliente),nombre:quote.cliente_nombre||'',rut:quote.cliente_rut||'',correo:quote.cliente_correo||'',telefono:quote.cliente_telefono||''}:null;
   $('cart-client').innerHTML=selectedClient?'<i class="fas fa-user-check"></i> '+esc(selectedClient.nombre||'Cliente'):'<i class="fas fa-user"></i> Consumidor Final';
   closeAllModals();renderCart();toast('Cotización cargada. Revise y presione Cobrar.');
