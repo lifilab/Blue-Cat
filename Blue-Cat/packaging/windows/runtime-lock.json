@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "platform": "windows-x64",
+  "generated_at": "2026-07-17",
+  "components": [
+    {
+      "id": "caddy",
+      "version": "2.11.4",
+      "url": "https://github.com/caddyserver/caddy/releases/download/v2.11.4/caddy_2.11.4_windows_amd64.zip",
+      "file": "caddy_2.11.4_windows_amd64.zip",
+      "hash_algorithm": "SHA512",
+      "hash": "cd5ccfd86a4b40732cf715890d0dca5bf3f63adefec5a7914de85adf240c60ce7e5d2791631b88ef9758e46b23bb1730e020b9c5d696889740b284ffd4788e35",
+      "license": "Apache-2.0",
+      "license_url": "https://github.com/caddyserver/caddy/blob/v2.11.4/LICENSE"
+    },
+    {
+      "id": "php",
+      "version": "8.3.32",
+      "url": "https://windows.php.net/downloads/releases/php-8.3.32-nts-Win32-vs16-x64.zip",
+      "file": "php-8.3.32-nts-Win32-vs16-x64.zip",
+      "hash_algorithm": "SHA256",
+      "hash": "67c724e7b675b50d8f0476d816c3e2a3064ce3a53d572575d63c321cc0a3a6cf",
+      "license": "PHP-3.01",
+      "license_url": "https://www.php.net/license/3_01.txt"
+    },
+    {
+      "id": "mariadb",
+      "version": "11.4.12",
+      "url": "https://archive.mariadb.org/mariadb-11.4.12/winx64-packages/mariadb-11.4.12-winx64.zip",
+      "file": "mariadb-11.4.12-winx64.zip",
+      "hash_algorithm": "SHA256",
+      "hash": "4db7f8003d4a64ac8042b771c6d34ed04c7ffae8cf52775275b72f2bd4dd17a9",
+      "license": "GPL-2.0-only",
+      "license_url": "https://github.com/MariaDB/server/blob/mariadb-11.4.12/COPYING"
+    },
+    {
+      "id": "winsw",
+      "version": "2.12.0",
+      "url": "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe",
+      "file": "WinSW-x64-2.12.0.exe",
+      "hash_algorithm": "SHA256",
+      "hash": "05b82d46ad331cc16bdc00de5c6332c1ef818df8ceefcd49c726553209b3a0da",
+      "license": "MIT",
+      "license_url": "https://github.com/winsw/winsw/blob/v2.12.0/LICENSE.txt"
+    },
+    {
+      "id": "vc-redist-x64",
+      "version": "14.44.35211.0",
+      "url": "https://download.visualstudio.microsoft.com/download/pr/65f6a2c9-1b34-43ef-8a5d-4bbdd407197a/CC0FF0EB1DC3F5188AE6300FAEF32BF5BEEBA4BDD6E8E445A9184072096B713B/VC_redist.x64.exe",
+      "file": "vc_redist.x64.exe",
+      "target_file": "vc_redist.x64.exe",
+      "hash_algorithm": "SHA256",
+      "hash": "cc0ff0eb1dc3f5188ae6300faef32bf5beeba4bdd6e8e445a9184072096b713b",
+      "license": "LicenseRef-Microsoft-Visual-Cpp-2022-Runtime",
+      "license_url": "https://visualstudio.microsoft.com/license-terms/vs2022-cruntime/"
+    }
+  ],
+  "build_tools": [
+    {
+      "id": "inno-setup",
+      "version": "6.7.3",
+      "license": "Inno Setup License",
+      "url": "https://jrsoftware.org/isdl.php"
+    }
+  ]
+}

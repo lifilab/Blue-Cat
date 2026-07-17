@@ -1,0 +1,37 @@
+{
+    admin 127.0.0.1:2019
+    storage file_system {
+        root "@@CADDY_DATA@@"
+    }
+}
+
+@@SITE_ADDRESSES@@ {
+    tls internal
+    encode zstd gzip
+
+    @private path /.env /.env.* /.git/* /database/* /storage/* /scripts/* /docs/* /config/* /packaging/*
+    respond @private 404
+
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy same-origin
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' data: https://cdnjs.cloudflare.com; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+        Strict-Transport-Security "max-age=31536000"
+        -Server
+    }
+
+    root * "@@APP_ROOT@@"
+    php_fastcgi 127.0.0.1:9074
+    file_server
+
+    log {
+        output file "@@ACCESS_LOG@@" {
+            roll_size 20MiB
+            roll_keep 10
+            roll_keep_for 720h
+        }
+        format json
+    }
+}

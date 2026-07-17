@@ -12,10 +12,13 @@ jobs:
     runs-on: windows-latest
     env:
       WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
+      WINDOWS_SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - name: Validate
-        run: php Blue-Cat/scripts/verify-baseline.php
+        run: |
+          php Blue-Cat/scripts/verify-baseline.php
+          php Blue-Cat/scripts/verify-windows-package.php
       - name: Verify tag matches VERSION
         shell: pwsh
         run: |
@@ -33,14 +36,48 @@ jobs:
           path: .
           format: spdx-json
           output-file: dist/Blue-Cat-${{ github.ref_name }}.spdx.json
-      - name: Sign artifact when certificate is configured
-        if: env.WINDOWS_SIGNING_CERT_BASE64 != ''
+      - name: Require signing certificate
         shell: pwsh
-        env:
-          SIGN_CERT: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
-          SIGN_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
         run: |
-          Write-Host "La firma Authenticode se habilitará al incorporar el instalador ejecutable en la fase de empaquetado."
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERT_BASE64)) {
+            throw 'Release bloqueado: falta WINDOWS_SIGNING_CERT_BASE64.'
+          }
+      - name: Install pinned installer compiler
+        shell: pwsh
+        run: choco install innosetup --version=6.7.3 -y --no-progress
+      - name: Fetch verified Windows runtimes
+        shell: pwsh
+        run: .\Blue-Cat\packaging\windows\scripts\Fetch-Runtimes.ps1
+      - name: Import temporary signing certificate
+        shell: pwsh
+        run: |
+          $bytes = [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERT_BASE64)
+          $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
+            $bytes,
+            $env:WINDOWS_SIGNING_CERT_PASSWORD,
+            [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::PersistKeySet
+          )
+          $store = [Security.Cryptography.X509Certificates.X509Store]::new('My','CurrentUser')
+          $store.Open('ReadWrite'); $store.Add($cert); $store.Close()
+          "BLUECAT_SIGNING_THUMBPRINT=$($cert.Thumbprint)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Build and sign Windows server installer
+        shell: pwsh
+        run: |
+          .\Blue-Cat\packaging\windows\scripts\Build-Installer.ps1 `
+            -InnoCompiler 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' `
+            -CertificateThumbprint $env:BLUECAT_SIGNING_THUMBPRINT `
+            -RequireSignature
+          Copy-Item Blue-Cat\packaging\windows\output\* dist\ -Force
+          Get-ChildItem dist -File | Where-Object Name -ne 'SHA256SUMS.txt' | Sort-Object Name | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          } | Set-Content dist\SHA256SUMS.txt -Encoding ascii
+      - name: Remove temporary signing certificate
+        if: always() && env.BLUECAT_SIGNING_THUMBPRINT != ''
+        shell: pwsh
+        run: |
+          Get-ChildItem Cert:\CurrentUser\My\$env:BLUECAT_SIGNING_THUMBPRINT -ErrorAction SilentlyContinue |
+            Remove-Item -Force
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:

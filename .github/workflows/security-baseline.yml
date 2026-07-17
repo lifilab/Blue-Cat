@@ -21,3 +21,5 @@ jobs:
         run: find Blue-Cat/assets/api Blue-Cat/scripts -name '*.php' -print0 | xargs -0 -n1 php -l
       - name: Verify security baseline
         run: php Blue-Cat/scripts/verify-security-baseline.php
+      - name: Verify Windows package contract
+        run: php Blue-Cat/scripts/verify-windows-package.php
