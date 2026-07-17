@@ -4,18 +4,32 @@ var cajaState = null, selectedClient = null, promoApplied = null;
 var _debounceTimer = null;
 var configBoleta = null; // Configuración de boletas
 var userPermissions = {}; // Permisos del usuario
+var _saleRequestKey = null;
+var _paymentSubmitting = false;
+var _pendingCotizacionId = 0;
+var _promoCoupons = [];
+var _promotionTimer = null;
+var _promotionRevision = 0;
 
 document.addEventListener('DOMContentLoaded', init);
 
 function $(id) { return document.getElementById(id); }
 function esc(s) { if (!s) return ''; var d = document.createElement('div'); d.appendChild(document.createTextNode(s)); return d.innerHTML; }
 function fm(n) { if (n === null || n === undefined) return '$0'; return '$' + Math.round(Number(n)).toLocaleString('es-CL'); }
-function toast(msg, t) {
+function toast(msg, t, iconClass) {
   var el = document.createElement('div');
   el.className = 'toast toast-' + (t === 'err' ? 'err' : 'ok');
   el.setAttribute('role', 'alert');
   el.setAttribute('aria-live', 'assertive');
-  el.innerHTML = msg; document.body.appendChild(el);
+  if (iconClass) {
+    var icon = document.createElement('i');
+    icon.className = iconClass;
+    icon.setAttribute('aria-hidden', 'true');
+    el.appendChild(icon);
+    el.appendChild(document.createTextNode(' '));
+  }
+  el.appendChild(document.createTextNode(String(msg)));
+  document.body.appendChild(el);
   requestAnimationFrame(function () { el.classList.add('show'); });
   setTimeout(function () { el.classList.remove('show'); setTimeout(function () { el.remove(); }, 300); }, 2500);
 }
@@ -60,7 +74,7 @@ function loadConfigBoleta() {
 }
 
 /* ── API call helper ── */
-function api(method, data, cb) {
+function api(method, data, cb, errCb) {
   var xhr = new XMLHttpRequest();
   var url = '../assets/api/pos.php';
   data = data || {};
@@ -82,22 +96,23 @@ function api(method, data, cb) {
       try {
         var e = JSON.parse(xhr.responseText);
         if (window.SupervisorApproval && window.SupervisorApproval.handle(e, function(token) {
-          data.supervisor_token = token; api(method, data, cb);
+          data.supervisor_token = token; api(method, data, cb, errCb);
         })) return;
 
         toast(e.message || (typeof e.error === 'string' ? e.error : 'Error ' + xhr.status), 'err');
         console.error('POS API ERROR [' + xhr.status + ' ' + url + ']', e);
+        if (errCb) errCb(e, xhr.status);
       }
-      catch (e2) { toast('Error del servidor', 'err'); }
+      catch (e2) { toast('Error del servidor', 'err'); if (errCb) errCb(e2, xhr.status); }
     }
   };
-  xhr.onerror = function () { toast('Error de conexión', 'err'); };
+  xhr.onerror = function () { toast('Error de conexión', 'err'); if (errCb) errCb(new Error('network'), 0); };
   if (method === 'POST') xhr.send(JSON.stringify(data));
   else xhr.send();
 }
 
 function apiGet(params, cb) { api('GET', params, cb); }
-function apiPost(data, cb) { api('POST', data, cb); }
+function apiPost(data, cb, errCb) { api('POST', data, cb, errCb); }
 
 /* ═══════════════════════════════════════════
    DASHBOARD
@@ -149,10 +164,12 @@ function loadCajaState() {
 
 function showAbrirCaja() {
   var nombreUsuario = sessionStorage.getItem('user_name') || 'Usuario';
+  var codigoCaja = localStorage.getItem('bluecat_pos_caja_codigo') || 'CAJA-01';
   var m = showModal(`
     <h3 style="font-size:18px;font-weight:700;margin-bottom:16px;"><i class="fas fa-cash-register" style="color:#4f46e5;"></i> Abrir Caja</h3>
     <div class="gr2">
       <div class="fld"><label>Monto Apertura *</label><input id="ac-monto" type="number" min="0" value="0"></div>
+      <div class="fld"><label>Código caja física *</label><input id="ac-codigo" value="${esc(codigoCaja)}" maxlength="40"></div>
       <div class="fld"><label>Nombre Caja</label><input id="ac-nombre" value="Caja Principal"></div>
       <div class="fld"><label>Empleado</label><input id="ac-emp" value="${nombreUsuario}" readonly style="background:#f1f5f9;cursor:not-allowed;"></div>
       <div class="fld"><label>Sucursal</label><input id="ac-suc" value="Principal"></div>
@@ -165,12 +182,15 @@ function showAbrirCaja() {
 
 function abrirCaja() {
   var monto = parseInt($('ac-monto').value) || 0;
+  var codigo = ($('ac-codigo').value || '').trim().toUpperCase();
+  if (!codigo) { toast('Indique el código de la caja física', 'err'); return; }
   apiPost({
-    accion: 'caja_abrir', monto_apertura: monto,
+    accion: 'caja_abrir', monto_apertura: monto, codigo: codigo,
     nombre_caja: $('ac-nombre').value, empleado: $('ac-emp').value,
     sucursal: $('ac-suc').value, nota: $('ac-nota').value
   }, function (d) {
-    toast('<i class="fas fa-check-circle"></i> Caja abierta: ' + d.codigo);
+    localStorage.setItem('bluecat_pos_caja_codigo', codigo);
+    toast('Caja abierta: ' + (d.caja ? d.caja.codigo : codigo), 'ok', 'fas fa-check-circle');
     closeModal();
     loadCajaState();
   });
@@ -185,7 +205,7 @@ function cerrarCaja() {
   apiPost({ accion: 'caja_cerrar', monto_real: monto, observaciones: $('cc-obs').value }, function (d) {
     var msg = 'Caja cerrada. Esperado: ' + fm(d.esperado) + ', Real: ' + fm(d.monto_real);
     if (d.diferencia !== 0) msg += ', Diferencia: <strong>' + fm(d.diferencia) + '</strong>';
-    toast('<i class="fas fa-check-circle"></i> ' + msg);
+    toast(msg, 'ok', 'fas fa-check-circle');
     closeModal();
     loadDashboard();
     loadCajaState();
@@ -197,7 +217,7 @@ function showMovimiento(tipo) {
     <h3 style="font-size:18px;font-weight:700;margin-bottom:16px;"><i class="fas fa-${tipo === 'INGRESO' ? 'arrow-down' : 'arrow-up'}" style="color:#4f46e5;"></i> ${tipo === 'INGRESO' ? 'Ingreso' : 'Egreso'} de Caja</h3>
     <div class="gr2">
       <div class="fld"><label>Monto *</label><input id="mv-monto" type="number" min="0"></div>
-      <div class="fld"><label>Método</label><select id="mv-metodo"><option value="EFECTIVO">Efectivo</option><option value="TARJETA">Tarjeta</option><option value="TRANSFERENCIA">Transferencia</option></select></div>
+      <div class="fld"><label>Método</label><select id="mv-metodo" disabled><option value="EFECTIVO">Efectivo</option></select></div>
     </div>
     <div class="fld"><label>Concepto *</label><input id="mv-concepto"></div>
     <div class="fld"><label>Referencia</label><input id="mv-ref"></div>
@@ -314,7 +334,7 @@ function addToCart(id, name, price, sku, stock, tipoVenta, unidad) {
   }
   cart.push({ id:id, name:name, price:parseFloat(price)||0, sku:sku||'', cant:1, stock:stk, tipoVenta:'UNIDAD', unidad:unidad });
   renderCart();
-  toast('<i class="fas fa-check"></i> ' + esc(name));
+  toast(name, 'ok', 'fas fa-check');
 }
 
 
@@ -337,7 +357,7 @@ function confirmMeasure() {
   var totalQty=(found?found.cant:0)+qty;
   if(totalQty>p.stock){toast('Stock máximo: '+p.stock+' '+p.unidad,'err');return;}
   if(found)found.cant=Math.round(totalQty*1000)/1000;else cart.push({id:p.id,name:p.name,price:p.price,sku:p.sku,cant:qty,stock:p.stock,tipoVenta:p.tipoVenta,unidad:p.unidad});
-  pendingMeasureProduct=null;closeModal();renderCart();toast('<i class="fas fa-check"></i> '+esc(p.name));
+  pendingMeasureProduct=null;closeModal();renderCart();toast(p.name, 'ok', 'fas fa-check');
 }
 
 function removeFromCart(idx) {
@@ -400,7 +420,7 @@ function savePrice(idx) {
   closeModal();
 }
 
-function renderCart() {
+function renderCart(skipPromotionRefresh) {
   var cont = $('cart-items');
   var countEl = $('cart-count');
   var total = 0, itemsCount = 0;
@@ -409,6 +429,7 @@ function renderCart() {
   for (var i = 0; i < cart.length; i++) {
     var c = cart[i];
     var sub = c.price * c.cant;
+    var lineDiscount = c.promoDiscount || 0;
     total += sub;
     itemsCount += c.cant;
     var esPeso = c.tipoVenta === 'PESO' || c.tipoVenta === 'VOLUMEN';
@@ -421,7 +442,7 @@ function renderCart() {
     h += '<div class="cart-item">' +
       '<div class="ci-info">' +
       '<div class="ci-name">' + esc(c.name) + '</div>' +
-      '<div class="ci-sku">' + esc(c.sku) + '</div>' +
+      '<div class="ci-sku">' + esc(c.sku) + (lineDiscount > 0 ? ' · <span style="color:#059669;">' + esc((c.promoNames || []).join(', ')) + '</span>' : '') + '</div>' +
       '</div>' +
       '<div class="ci-qty">' +
       '<button onclick="changeQty(' + i + ',-1)" aria-label="Disminuir cantidad de ' + esc(c.name) + '">−</button>' +
@@ -430,7 +451,7 @@ function renderCart() {
       '</div>' +
       '<div class="ci-price">' +
       '<div class="cp-val" ' + precioClick + '>' + precioLabel + '</div>' +
-      '<div class="cp-sub">' + fm(sub) + '</div>' +
+      '<div class="cp-sub">' + (lineDiscount > 0 ? '<span style="text-decoration:line-through;color:#94a3b8;">' + fm(sub) + '</span> <strong style="color:#059669;">' + fm(sub-lineDiscount) + '</strong><br><small>Descuento: -' + fm(lineDiscount) + '</small>' : fm(sub)) + '</div>' +
       '</div>' +
       '<button class="ci-del" onclick="removeFromCart(' + i + ')" aria-label="Eliminar ' + esc(c.name) + ' del carrito"><i class="fas fa-times"></i></button>' +
       '</div>';
@@ -447,12 +468,15 @@ function renderCart() {
   $('cart-total').textContent = fm(neto);
   $('cart-total-val').textContent = neto;
   $('cart-items-count').textContent = Math.round(itemsCount * 100) / 100;
+  if (!skipPromotionRefresh) schedulePromotionEvaluation();
 }
 
 function clearCart() {
   cart = [];
   promoApplied = null;
+  _promoCoupons = [];
   selectedClient = null;
+  _pendingCotizacionId = 0;
   $('cart-client').innerHTML = '<i class="fas fa-user"></i> Consumidor Final';
   renderCart();
 }
@@ -463,42 +487,94 @@ function clearCart() {
 function applyPromo() {
   var code = $('promo-input').value.trim().toUpperCase();
   if (!code) { toast('Ingrese un código', 'err'); return; }
-  var items = cart.map(function (c) { return { id_producto: c.id, cantidad: c.cant, precio_unitario: c.price }; });
-  var total = items.reduce(function (s, it) { return s + it.precio_unitario * it.cantidad; }, 0);
+  if (_promoCoupons.indexOf(code) === -1) _promoCoupons.push(code);
+  $('promo-input').value = '';
+  evaluatePromotions(true);
+}
 
-  apiPost({ accion: 'promocion_validar', codigo: code, items: items, subtotal: total }, function (d) {
-    promoApplied = { descuento: d.descuento, descripcion: d.descripcion, id_promocion: d.id_promocion };
-    $('promo-tag').innerHTML = '<span class="promo-tag"><i class="fas fa-tag"></i> ' + esc(d.descripcion) + ' (-' + fm(d.descuento) + ')</span>';
-    $('promo-input').value = '';
-    renderCart();
-    toast('Promoción aplicada: ' + d.descripcion);
-  });
+function clearPromotionCoupons() {
+  if (!_promoCoupons.length) return;
+  _promoCoupons = [];
+  evaluatePromotions(false);
+  toast('Cupones eliminados; se recalcularon las promociones');
 }
 
 /* ═══════════════════════════════════════════
    CLIENTE
    ═══════════════════════════════════════════ */
+function schedulePromotionEvaluation() {
+  clearTimeout(_promotionTimer);
+  _promotionTimer = setTimeout(function () { evaluatePromotions(false); }, 120);
+}
+
+function evaluatePromotions(showFeedback, done) {
+  var revision = ++_promotionRevision;
+  if (!cart.length) {
+    promoApplied = null;
+    $('promo-tag').textContent = '';
+    return;
+  }
+  var items = cart.map(function (c) { return { id_producto:c.id, cantidad:c.cant }; });
+  apiPost({ accion:'promociones_evaluar', items:items, id_cliente:selectedClient ? selectedClient.id_cliente : null,
+    cupones:_promoCoupons, canal:'POS', id_sucursal:cajaState&&cajaState.id_sucursal ? cajaState.id_sucursal : 0 }, function (d) {
+    if (revision !== _promotionRevision) return;
+    promoApplied = { descuento:Number(d.descuento)||0, promociones:d.aplicadas||[], firma:d.firma||'',
+      descripcion:(d.aplicadas||[]).map(function(p){return p.nombre;}).join(', ') };
+    var byProduct = {};
+    (d.lineas||[]).forEach(function(line){ byProduct[Number(line.id_producto)] = line; });
+    cart.forEach(function(c){
+      var line=byProduct[Number(c.id)];
+      c.promoDiscount=line ? Number(line.descuento)||0 : 0;
+      c.promoNames=line ? (line.promociones||[]).map(function(p){return p.nombre;}) : [];
+    });
+    var tag = $('promo-tag');
+    var couponRejections=(d.rechazadas||[]).filter(function(r){return _promoCoupons.indexOf(String(r.codigo||'').toUpperCase())!==-1;});
+    window._promotionRejections=d.rechazadas||[];
+    if (tag) {
+      tag.textContent = promoApplied.descuento > 0 ? promoApplied.descripcion + ' (-' + fm(promoApplied.descuento) + ')' : (couponRejections.length ? 'No aplicada: '+couponRejections[0].motivo : '');
+      tag.title=(d.rechazadas||[]).map(function(r){return (r.codigo||r.nombre)+': '+r.motivo;}).join('\n') || 'Quitar cupones aplicados';
+    }
+    renderCart(true);
+    if (showFeedback) {
+      if (couponRejections.length) toast(couponRejections[0].motivo, 'err');
+      else if (d.aplicadas&&d.aplicadas.length) toast('Promoción aplicada: '+d.aplicadas.map(function(p){return p.nombre;}).join(', '));
+    }
+    if (done) done();
+  });
+}
+
 function loadClientes() {
   apiGet({ accion: 'clientes' }, function (d) {
-    window._clientes = d || [];
+    window._clientes = d.clientes || d || [];
   });
 }
 
 function showClientSelector() {
-  var lista = (window._clientes || []).map(function (c) {
-    return '<div class="cart-item" style="cursor:pointer;" onclick="selectClient(' + c.id_cliente + ',\'' + esc(c.nombre) + '\',\'' + esc(c.rut) + '\',\'' + esc(c.correo) + '\',\'' + esc(c.telefono) + '\')">' +
-      '<div><strong>' + esc(c.nombre) + '</strong><br><span style="font-size:11px;color:#64748b;">' + esc(c.rut) + ' · ' + esc(c.correo) + '</span></div></div>';
-  }).join('') || '<p style="color:#94a3b8;">Sin clientes registrados</p>';
-
   var searchId = 'cl-s-' + Date.now();
-  var m = showModal(`
+  showModal(`
     <h3 style="font-size:18px;font-weight:700;margin-bottom:12px;"><i class="fas fa-user" style="color:#4f46e5;"></i> Seleccionar Cliente</h3>
     <input id="${searchId}" placeholder="Buscar cliente..." style="width:100%;padding:10px;border:2px solid #e2e8f0;border-radius:10px;font-size:14px;margin-bottom:12px;outline:none;" onkeyup="buscarClientes(this.value)">
-    <div id="cl-list" style="max-height:300px;overflow-y:auto;">${lista}</div>
+    <div id="cl-list" style="max-height:300px;overflow-y:auto;"></div>
+    ${selectedClient ? '<div style="margin-top:8px;"><button class="btn-d" style="width:100%;padding:10px;" onclick="removeSelectedClient()"><i class="fas fa-user-times"></i> Quitar cliente de la venta</button></div>' : ''}
     <div style="margin-top:8px;"><button class="btn-g" style="width:100%;padding:10px;" onclick="closeModal()">Cancelar</button></div>
     <div style="margin-top:4px;"><button class="btn-p" style="width:100%;padding:10px;" onclick="closeModal();showQuickClient()"><i class="fas fa-plus"></i> Cliente Nuevo</button></div>
   `);
+  renderClientChoices(window._clientes || []);
   setTimeout(function () { $(searchId).focus(); }, 100);
+}
+
+function renderClientChoices(clients) {
+  var list=$('cl-list');
+  if(!list)return;
+  list.replaceChildren();
+  if(!clients.length){var empty=document.createElement('p');empty.style.color='#94a3b8';empty.textContent='Sin clientes registrados';list.appendChild(empty);return;}
+  clients.forEach(function(c){
+    var row=document.createElement('button');row.type='button';row.className='cart-item';row.style.cssText='cursor:pointer;width:100%;text-align:left;border:0;background:transparent;';
+    var info=document.createElement('div');var name=document.createElement('strong');name.textContent=c.nombre||'Cliente';
+    var detail=document.createElement('span');detail.style.cssText='font-size:11px;color:#64748b;';detail.textContent=(c.rut||'Sin RUT')+' · '+(c.correo||'Sin correo');
+    info.appendChild(name);info.appendChild(document.createElement('br'));info.appendChild(detail);row.appendChild(info);
+    row.addEventListener('click',function(){selectClient(c.id_cliente,c.nombre||'',c.rut||'',c.correo||'',c.telefono||'');});list.appendChild(row);
+  });
 }
 
 var _clDebounce = null;
@@ -507,13 +583,10 @@ function buscarClientes(q) {
   _clDebounce = setTimeout(function() {
     var list = $('cl-list');
     if (!list) return;
-    if (!q) { list.innerHTML = (window._clientes || []).map(function (c) {
-      return '<div class="cart-item" style="cursor:pointer;" onclick="selectClient(' + c.id_cliente + ',\'' + esc(c.nombre) + '\',\'' + esc(c.rut) + '\',\'' + esc(c.correo) + '\',\'' + esc(c.telefono) + '\')"><div><strong>' + esc(c.nombre) + '</strong><br><span style="font-size:11px;color:#64748b;">' + esc(c.rut) + ' · ' + esc(c.correo) + '</span></div></div>';
-    }).join('') || '<p style="color:#94a3b8;">Sin clientes</p>'; return; }
+    if (!q) { renderClientChoices(window._clientes || []); return; }
     apiGet({ accion: 'clientes', q: q }, function (d) {
-      list.innerHTML = d.map(function (c) {
-        return '<div class="cart-item" style="cursor:pointer;" onclick="selectClient(' + c.id_cliente + ',\'' + esc(c.nombre) + '\',\'' + esc(c.rut) + '\',\'' + esc(c.correo) + '\',\'' + esc(c.telefono) + '\')"><div><strong>' + esc(c.nombre) + '</strong><br><span style="font-size:11px;color:#64748b;">' + esc(c.rut) + ' · ' + esc(c.correo) + '</span></div></div>';
-      }).join('') || '<p style="color:#94a3b8;">Sin resultados</p>';
+      var clients = d.clientes || d || [];
+      renderClientChoices(clients);
     });
   }, 300);
 }
@@ -523,6 +596,15 @@ function selectClient(id, nombre, rut, correo, tel) {
   $('cart-client').innerHTML = '<i class="fas fa-user-check"></i> ' + esc(nombre) + ' <span style="font-size:11px;color:#94a3b8;">' + esc(rut) + '</span>';
   closeModal();
   toast('Cliente: ' + nombre);
+  schedulePromotionEvaluation();
+}
+
+function removeSelectedClient() {
+  selectedClient = null;
+  $('cart-client').innerHTML = '<i class="fas fa-user"></i> Consumidor Final';
+  closeModal();
+  schedulePromotionEvaluation();
+  toast('Cliente eliminado de la venta');
 }
 
 function showQuickClient() {
@@ -554,15 +636,30 @@ function saveQuickClient() {
     closeModal();
     toast('Cliente creado y seleccionado');
     loadClientes();
+    schedulePromotionEvaluation();
   });
 }
 
 /* ═══════════════════════════════════════════
    PAYMENT
    ═══════════════════════════════════════════ */
-function showPayment() {
+function newSaleRequestKey() {
+  if (window.crypto && typeof window.crypto.randomUUID === 'function') return window.crypto.randomUUID();
+  var bytes = new Uint8Array(16);
+  if (window.crypto && window.crypto.getRandomValues) window.crypto.getRandomValues(bytes);
+  else for (var i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  return Array.prototype.map.call(bytes, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+}
+
+function paymentMethodLabel(method) {
+  var labels = { EFECTIVO: 'Efectivo', TARJETA_CREDITO: 'Tarjeta crédito', TARJETA_DEBITO: 'Tarjeta débito', TRANSFERENCIA: 'Transferencia', OTRO: 'Otro' };
+  return labels[method] || method;
+}
+
+function showPayment(promotionsReady) {
   if (cart.length === 0) { toast('Carrito vacío', 'err'); return; }
   if (!cajaState || cajaState.estado !== 'ABIERTA') { toast('Debe abrir caja primero', 'err'); return; }
+  if (!promotionsReady) { evaluatePromotions(false, function(){ showPayment(true); }); return; }
   var total = parseInt($('cart-total-val').textContent) || 0;
   if (total <= 0) { toast('Total inválido', 'err'); return; }
 
@@ -577,10 +674,10 @@ function showPayment() {
       <div style="font-size:32px;font-weight:800;color:#1e293b;">${fm(total)}</div>
     </div>
     <div class="pay-grid">
-      <button class="pay-method" onclick="addPayment('Efectivo')"><i class="fas fa-money-bill-wave"></i> Efectivo</button>
-      <button class="pay-method" onclick="addPayment('Tarjeta')"><i class="fas fa-credit-card"></i> Tarjeta</button>
-      <button class="pay-method" onclick="addPayment('Transferencia')"><i class="fas fa-university"></i> Transferencia</button>
-      <button class="pay-method" onclick="addPayment('Débito')"><i class="fas fa-credit-card"></i> Débito</button>
+      <button class="pay-method" onclick="addPayment('EFECTIVO')"><i class="fas fa-money-bill-wave"></i> Efectivo</button>
+      <button class="pay-method" onclick="addPayment('TARJETA_CREDITO')"><i class="fas fa-credit-card"></i> Crédito</button>
+      <button class="pay-method" onclick="addPayment('TARJETA_DEBITO')"><i class="fas fa-credit-card"></i> Débito</button>
+      <button class="pay-method" onclick="addPayment('TRANSFERENCIA')"><i class="fas fa-university"></i> Transferencia</button>
     </div>
     <div id="payment-list" style="margin:8px 0;"></div>
     <div id="payment-summary" style="display:flex;justify-content:space-between;font-size:14px;font-weight:600;padding:8px 0;border-top:1px solid #e2e8f0;">
@@ -595,6 +692,8 @@ function showPayment() {
   window._payments = [];
   window._payTotal = 0;
   window._payTarget = total;
+  _saleRequestKey = newSaleRequestKey();
+  _paymentSubmitting = false;
   updatePaymentUI();
 }
 
@@ -603,7 +702,7 @@ function addPayment(metodo) {
   if (resto <= 0) { toast('Ya está cubierto', 'ok'); return; }
   // Prompt for amount
   var m2 = showModal(`
-    <h3 style="font-size:18px;font-weight:700;margin-bottom:12px;"><i class="fas fa-${metodo === 'EFECTIVO' ? 'money-bill-wave' : 'credit-card'}"></i> ${metodo}</h3>
+    <h3 style="font-size:18px;font-weight:700;margin-bottom:12px;"><i class="fas fa-${metodo === 'EFECTIVO' ? 'money-bill-wave' : 'credit-card'}"></i> ${paymentMethodLabel(metodo)}</h3>
     <div class="fld"><label>Monto</label><input id="pm-monto" type="number" min="1" value="${resto}"></div>
     <div class="fld"><label>Referencia / Aut. (opcional)</label><input id="pm-ref"></div>
     <div class="mcb">
@@ -616,6 +715,10 @@ function addPayment(metodo) {
 
 function confirmPaymentMethod(metodo) {
   var monto = parseInt($('pm-monto').value) || 0;
+  var restante = window._payTarget - window._payTotal;
+  if (metodo !== 'EFECTIVO' && monto > restante) {
+    toast('Solo el efectivo puede superar el saldo y generar vuelto', 'err'); return;
+  }
   if (monto <= 0) { toast('Monto inválido', 'err'); return; }
   var ref = $('pm-ref').value || '';
   window._payments.push({ metodo: metodo, monto: monto, referencia: ref });
@@ -629,7 +732,7 @@ function updatePaymentUI() {
   var ph = '';
   for (var i = 0; i < (window._payments || []).length; i++) {
     var p = window._payments[i];
-    ph += '<div style="display:flex;justify-content:space-between;padding:4px 8px;background:#f8fafc;border-radius:6px;margin:2px 0;"><span><strong>' + p.metodo + '</strong></span><span>' + fm(p.monto) + '</span></div>';
+    ph += '<div style="display:flex;justify-content:space-between;padding:4px 8px;background:#f8fafc;border-radius:6px;margin:2px 0;"><span><strong>' + paymentMethodLabel(p.metodo) + '</strong></span><span>' + fm(p.monto) + '</span></div>';
   }
   if (list) list.innerHTML = ph;
   var totalEl = $('pay-total');
@@ -649,23 +752,38 @@ function updatePaymentUI() {
 }
 
 function confirmPayment() {
+  if (_paymentSubmitting) return;
   var items = cart.map(function (c) { return { id_producto: c.id, cantidad: c.cant, precio_unitario: c.price }; });
   var pagos = window._payments;
   var total = window._payTarget;
+  _paymentSubmitting = true;
+  var confirmBtn = $('pay-confirm-btn');
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Procesando...'; }
 
   apiPost({
     accion: 'venta_crear', items: items, pagos: pagos,
+    idempotency_key: _saleRequestKey,
+    id_cotizacion: _pendingCotizacionId || 0,
     descuento: promoApplied ? promoApplied.descuento : 0,
     id_promocion: promoApplied ? promoApplied.id_promocion : 0,
+    cupones: _promoCoupons,
+    firma_promociones: promoApplied ? promoApplied.firma : '',
+    canal: 'POS',
+    id_sucursal: cajaState&&cajaState.id_sucursal ? cajaState.id_sucursal : 0,
     id_caja: cajaState.id_caja,
     cliente: selectedClient,
     tipo_documento: ($('doc-tipo') ? $('doc-tipo').value : 'BOLETA')
   }, function (d) {
+    _paymentSubmitting = false;
+    _saleRequestKey = null;
     closeModal();
     showReceipt(d, items, pagos);
     clearCart();
     loadDashboard();
     loadCajaState();
+  }, function () {
+    _paymentSubmitting = false;
+    updatePaymentUI();
   });
 }
 
@@ -675,6 +793,13 @@ function confirmPayment() {
 function showReceipt(data, items, pagos) {
   var now = new Date();
   var lines = '';
+  if (data.items_documento && data.items_documento.length) {
+    for (var di=0;di<data.items_documento.length;di++) {
+      var docItem=data.items_documento[di];
+      lines += '<div class="rec-line"><span>' + esc(docItem.nombre) + ' x' + docItem.cantidad + '</span><span>' + fm(docItem.subtotal) + '</span></div>';
+      if (Number(docItem.descuento)>0) lines += '<div class="rec-line" style="color:#059669;font-size:10px;"><span>Original ' + fm(docItem.subtotal_original) + ' · ' + esc((docItem.promociones||[]).map(function(p){return p.nombre;}).join(', ')) + '</span><span>-' + fm(docItem.descuento) + '</span></div>';
+    }
+  } else {
   for (var i = 0; i < items.length; i++) {
     var it = items[i];
     for (var j = 0; j < cart.length; j++) {
@@ -683,6 +808,7 @@ function showReceipt(data, items, pagos) {
         break;
       }
     }
+  }
   }
   
   // Calcular IVA según configuración
@@ -693,7 +819,7 @@ function showReceipt(data, items, pagos) {
 
   var payLines = '';
   for (var k = 0; k < pagos.length; k++) {
-    payLines += '<div class="rec-line"><span>' + pagos[k].metodo + '</span><span>' + fm(pagos[k].monto) + '</span></div>';
+    payLines += '<div class="rec-line"><span>' + paymentMethodLabel(pagos[k].metodo) + '</span><span>' + fm(pagos[k].monto) + '</span></div>';
   }
 
   // Datos de la empresa desde configuración
@@ -728,6 +854,7 @@ function showReceipt(data, items, pagos) {
   }
   
   headerHTML += '<div style="text-align:center;font-size:10px;margin-bottom:6px;">' + now.toLocaleString('es-CL') + '</div>';
+  if (data.numero_documento) headerHTML += '<div style="text-align:center;font-size:11px;font-weight:700;margin-bottom:6px;">' + esc(data.numero_documento) + '</div>';
   
   // Información del cliente (si está configurado para mostrar)
   var clienteHTML = '';
@@ -747,8 +874,9 @@ function showReceipt(data, items, pagos) {
 
   // Descuento
   var descuentoHTML = '';
-  if (mostrarDescuento && promoApplied) {
-    descuentoHTML = '<div class="rec-line" style="color:#059669;"><span>Dto: ' + esc(promoApplied.descripcion) + '</span><span>-' + fm(promoApplied.descuento) + '</span></div>';
+  if (mostrarDescuento && Number(data.descuento)>0) {
+    var promoNames=(data.promociones||[]).map(function(p){return p.nombre;}).join(', ');
+    descuentoHTML = '<div class="rec-line" style="color:#059669;"><span>Dto: ' + esc(promoNames||'Promoción') + '</span><span>-' + fm(data.descuento) + '</span></div>';
   }
 
   // Mensaje pie de página
@@ -919,11 +1047,38 @@ function showVentaDetalle(id) {
         ${v.devuelto ? '<div style="color:#d97706;font-weight:600;margin-top:4px;">⚠ Con devolución</div>' : ''}
       </div>
       <div class="mcb">
+        <button class="btn-g" onclick="reimprimirVenta(${v.id_pedido})"><i class="fas fa-print"></i> Reimprimir</button>
         ${!v.anulado ? '<button class="btn-d" onclick="anularVenta(' + v.id_pedido + ')"><i class="fas fa-ban"></i> Anular</button>' : ''}
         ${!v.anulado ? '<button class="btn-p" onclick="showDevolucion(' + v.id_pedido + ')"><i class="fas fa-undo"></i> Devolución</button>' : ''}
         <button class="btn-g" onclick="closeModal()">Cerrar</button>
       </div>
     `);
+  });
+}
+
+function reimprimirVenta(idPedido) {
+  apiGet({ accion: 'documento', id: idPedido }, function (payload) {
+    var d = payload.documento || {};
+    var cfg = d.config || {};
+    var logo = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(payload.logo || '') ? payload.logo : '';
+    var lines = (d.items || []).map(function (it) {
+      return '<div class="rec-line"><span>' + esc(it.nombre || 'Producto') + ' x' + it.cantidad + '</span><span>' + fm(it.subtotal) + '</span></div>';
+    }).join('');
+    var payments = (d.pagos || []).map(function (p) {
+      return '<div class="rec-line"><span>' + paymentMethodLabel(p.metodo) + '</span><span>' + fm(p.monto) + '</span></div>';
+    }).join('');
+    var html = '<div class="rec">' +
+      (logo ? '<div style="text-align:center;margin-bottom:8px;"><img src="' + logo + '" style="max-width:120px;max-height:80px;"></div>' : '') +
+      '<div class="rec-header">' + esc(cfg.nombre_empresa || 'Mi Empresa') + '</div>' +
+      '<div style="text-align:center;font-size:10px;">' + esc(d.numero_documento || ('Venta #' + idPedido)) + '<br>' + esc(d.fecha || '') + '</div>' +
+      '<div class="rec-divider"></div>' + lines + '<div class="rec-divider"></div>' +
+      '<div class="rec-line" style="font-weight:700;font-size:15px;"><span>TOTAL</span><span>' + fm(d.total) + '</span></div>' +
+      '<div class="rec-divider"></div>' + payments +
+      (d.vuelto > 0 ? '<div class="rec-line"><span>Vuelto</span><span>' + fm(d.vuelto) + '</span></div>' : '') +
+      '<div style="text-align:center;font-size:9px;color:#64748b;margin-top:8px;">COPIA / REIMPRESIÓN</div>' +
+      '<div class="mcb"><button class="btn-p" onclick="printReceipt()"><i class="fas fa-print"></i> Imprimir</button><button class="btn-g" onclick="closeModal()">Cerrar</button></div></div>';
+    var modal = showModal(html);
+    window._lastReceiptHTML = modal.querySelector('.rec').outerHTML;
   });
 }
 
@@ -942,12 +1097,15 @@ function anularVenta(id) {
 function showDevolucion(idPedido) {
   apiGet({ accion: 'venta_detalle', id: idPedido }, function (v) {
     var items = (v.items || []).map(function (it, i) {
-      return '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;"><input type="checkbox" class="dev-check" data-id="' + it.id_producto + '" data-precio="' + Math.round(it.precio_total / it.cantidad_pedida) + '" data-cant="' + it.cantidad_pedida + '"> ' + esc(it.nombre_producto) + ' x' + it.cantidad_pedida + ' (' + fm(it.precio_total) + ')</label>';
+      var available = parseFloat(it.cantidad_disponible_devolucion || 0);
+      if (available <= 0) return '';
+      var step = String(it.cantidad_pedida).indexOf('.') >= 0 ? '0.001' : '1';
+      return '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;"><input type="checkbox" class="dev-check" data-detail="' + it.id_detalle_pedido + '" data-id="' + it.id_producto + '"> ' + esc(it.nombre_producto) + ' <input type="number" class="dev-qty" min="' + step + '" max="' + available + '" step="' + step + '" value="' + available + '" style="width:80px;"> disponibles ' + available + ' (' + fm(it.precio_total) + ')</label>';
     }).join('');
 
     showModal(`
       <h3 style="font-size:18px;font-weight:700;margin-bottom:12px;"><i class="fas fa-undo" style="color:#4f46e5;"></i> Devolución - Venta #${idPedido}</h3>
-      <div class="fld"><label>Tipo</label><select id="dev-tipo"><option value="PARCIAL">Parcial</option><option value="TOTAL">Total</option><option value="CAMBIO">Cambio</option></select></div>
+      <p style="font-size:12px;color:#64748b;margin-bottom:8px;">El sistema calculará si la devolución es parcial o total y el monto exacto.</p>
       <div class="fld" style="margin:8px 0;">${items}</div>
       <div class="fld"><label>Motivo</label><textarea id="dev-motivo" rows="2"></textarea></div>
       <div class="mcb">
@@ -964,15 +1122,15 @@ function confirmDevolucion(idPedido) {
   var items = [];
   for (var i = 0; i < checks.length; i++) {
     items.push({
+      id_detalle_pedido: parseInt(checks[i].dataset.detail),
       id_producto: parseInt(checks[i].dataset.id),
-      cantidad: parseInt(checks[i].dataset.cant),
-      precio_unitario: parseInt(checks[i].dataset.precio)
+      cantidad: parseFloat(checks[i].closest('label').querySelector('.dev-qty').value)
     });
   }
-  var tipo = $('dev-tipo').value;
   var motivo = $('dev-motivo').value;
+  if (!motivo || motivo.trim().length < 3) { toast('Indique el motivo de la devolución', 'err'); return; }
 
-  apiPost({ accion: 'devolucion_crear', id_pedido: idPedido, items: items, tipo: tipo, motivo: motivo }, function (d) {
+  apiPost({ accion: 'devolucion_crear', id_pedido: idPedido, items: items, motivo: motivo }, function (d) {
     toast('Devolución procesada: ' + fm(d.monto_devuelto));
     closeModal();
     loadDashboard();
@@ -984,7 +1142,7 @@ function confirmDevolucion(idPedido) {
    PROMOCIONES MANAGEMENT
    ═══════════════════════════════════════════ */
 function loadPromociones() {
-  apiGet({ accion: 'promociones' }, function (d) { window._promos = d || []; });
+  apiGet({ accion: 'promociones' }, function (d) { window._promos = d.promociones || d || []; });
 }
 
 function showPromoManager() {
@@ -1008,33 +1166,53 @@ function showNewPromo() {
     <div class="gr2">
       <div class="fld"><label>Nombre *</label><input id="np-nombre"></div>
       <div class="fld"><label>Código</label><input id="np-codigo" placeholder="Auto-gen si se deja vacío"></div>
-      <div class="fld"><label>Tipo *</label><select id="np-tipo"><option value="DESCUENTO_PCT">% Descuento</option><option value="DESCUENTO_MONTO">$ Descuento</option><option value="2X1">2x1</option></select></div>
-      <div class="fld"><label>Valor *</label><input id="np-valor" type="number" min="0"></div>
+      <div class="fld"><label>Tipo *</label><select id="np-tipo"><option value="2X1">2x1</option><option value="3X2">3x2</option><option value="CANTIDAD">NxM configurable</option><option value="DESCUENTO_PCT">% por producto</option><option value="DESCUENTO_MONTO">Monto fijo por producto</option><option value="PRECIO_ESPECIAL">Precio especial</option><option value="COMPRA_X_DESCUENTO_Y">Compra X y descuenta Y</option><option value="COMBO">Combo</option></select></div>
+      <div class="fld"><label>Valor del beneficio</label><input id="np-valor" type="number" min="0" step="0.01"></div>
       <div class="fld"><label>Monto Mínimo</label><input id="np-mm" type="number" min="0"></div>
       <div class="fld"><label>Cant. Mínima</label><input id="np-mc" type="number" min="0"></div>
+      <div class="fld"><label>Cantidad pagada (NxM)</label><input id="np-cp" type="number" min="0" step="0.001"></div>
+      <div class="fld"><label>Cantidad beneficiada</label><input id="np-cb" type="number" min="0" step="0.001"></div>
       <div class="fld"><label>Fecha Inicio</label><input id="np-fi" type="date"></div>
       <div class="fld"><label>Fecha Fin</label><input id="np-ff" type="date"></div>
       <div class="fld"><label>Hora Inicio</label><input id="np-hi" type="time"></div>
       <div class="fld"><label>Hora Fin</label><input id="np-hf" type="time"></div>
       <div class="fld"><label>Categoría</label><input id="np-cat" placeholder="Aplica a categoría"></div>
+      <div class="fld"><label>Marca / familia</label><input id="np-marca"></div>
+      <div class="fld" style="grid-column:1/-1;"><label>Códigos o SKU elegibles</label><textarea id="np-codigos" rows="2" placeholder="ABC123, SKU-002"></textarea></div>
+      <div class="fld" style="grid-column:1/-1;"><label>Códigos o SKU beneficiados (Compra X → Y)</label><textarea id="np-beneficio-codigos" rows="2"></textarea></div>
+      <div class="fld"><label>Prioridad</label><input id="np-prioridad" type="number" value="100" min="0"></div>
+      <div class="fld"><label>Límite por venta</label><input id="np-limite" type="number" min="0"></div>
+      <div class="fld"><label>Límite por cliente</label><input id="np-limite-cliente" type="number" min="0"></div>
+      <div class="fld"><label>Segmento cliente</label><input id="np-segmento"></div>
+      <div class="fld"><label>Lista de precios</label><input id="np-lista"></div>
+      <div class="fld"><label>Canal</label><input id="np-canal" placeholder="POS"></div>
+      <div class="fld"><label>Motivo / campaña</label><input id="np-motivo"></div>
+      <div class="fld" style="display:flex;align-items:center;gap:8px;padding-top:18px;"><input type="checkbox" id="np-requiere"> <label style="margin:0;">Requiere ingresar código</label></div>
       <div class="fld" style="display:flex;align-items:center;gap:8px;padding-top:18px;"><input type="checkbox" id="np-comb"> <label style="margin:0;">Combinable con otras</label></div>
     </div>
     <div class="mcb"><button class="btn-g" onclick="closeModal()">Cancelar</button><button class="btn-p" onclick="savePromo()"><i class="fas fa-save"></i> Guardar</button></div>
-  `);
+  `, true);
 }
 
 function savePromo() {
   var nombre = $('np-nombre').value;
   var tipo = $('np-tipo').value;
   var valor = parseInt($('np-valor').value) || 0;
-  if (!nombre || !tipo || !valor) { toast('Nombre, tipo y valor requeridos', 'err'); return; }
+  if (!nombre || !tipo) { toast('Nombre y tipo requeridos', 'err'); return; }
+  var splitCodes=function(value){return value.split(/[\s,;]+/).map(function(v){return v.trim().toUpperCase();}).filter(Boolean);};
   apiPost({
     accion: 'promocion_crear',
     nombre: nombre, codigo: $('np-codigo').value, tipo: tipo, valor: valor,
     monto_minimo: parseInt($('np-mm').value) || 0, cantidad_minima: parseInt($('np-mc').value) || 0,
+    cantidad_pagada: parseFloat($('np-cp').value) || null, cantidad_beneficiada: parseFloat($('np-cb').value) || null,
     fecha_inicio: $('np-fi').value, fecha_fin: $('np-ff').value,
     hora_inicio: $('np-hi').value, hora_fin: $('np-hf').value,
-    aplica_categoria: $('np-cat').value, combinable: $('np-comb').checked
+    aplica_categoria: $('np-cat').value, aplica_marca:$('np-marca').value,
+    productos_codigos:splitCodes($('np-codigos').value), beneficio_codigos:splitCodes($('np-beneficio-codigos').value),
+    prioridad:parseInt($('np-prioridad').value)||100, max_aplicaciones_transaccion:parseInt($('np-limite').value)||null,
+    max_usos_cliente:parseInt($('np-limite-cliente').value)||null, segmento_cliente:$('np-segmento').value,
+    lista_precios:$('np-lista').value, canal:$('np-canal').value, motivo:$('np-motivo').value,
+    requiere_codigo:$('np-requiere').checked, combinable: $('np-comb').checked
   }, function (d) {
     toast('Promoción creada: ' + d.codigo);
     closeModal();
@@ -1043,7 +1221,10 @@ function savePromo() {
 }
 
 function elimPromo(id) {
-  apiPost({ accion: 'promocion_eliminar', id_promocion: id }, function () {
+  var motivo=window.prompt('Motivo para desactivar la promoción:','Fin de campaña');
+  if (motivo===null) return;
+  if (!motivo.trim()) { toast('Debe indicar un motivo', 'err'); return; }
+  apiPost({ accion: 'promocion_eliminar', id_promocion: id, motivo:motivo.trim() }, function () {
     toast('Promoción eliminada');
     closeModal();
     showPromoManager();
@@ -1073,14 +1254,16 @@ function showCotizacion() {
 }
 
 function saveCotizacion() {
-  var items = cart.map(function (c) { return { id_producto: c.id, producto: c.name, sku: c.sku, cantidad: c.cant, precio: c.price }; });
+  var items = cart.map(function (c) { return { id_producto: c.id, producto: c.name, sku: c.sku, cantidad: c.cant, precio_unitario: c.price }; });
   apiPost({
     accion: 'cotizacion_crear', items: items,
     cliente_nombre: $('cot-cliente').value, cliente_rut: $('cot-rut').value,
     cliente_correo: $('cot-mail').value, cliente_telefono: $('cot-tel').value,
     id_cliente: selectedClient ? selectedClient.id_cliente : 0,
     validez: $('cot-validez').value, notas: $('cot-notas').value,
-    descuento: promoApplied ? promoApplied.descuento : 0
+    descuento: promoApplied ? promoApplied.descuento : 0,
+    cupones: _promoCoupons,
+    id_sucursal:cajaState&&cajaState.id_sucursal ? cajaState.id_sucursal : 0
   }, function (d) {
     toast('Cotización ' + d.codigo + ' creada');
     closeModal();
@@ -1089,8 +1272,10 @@ function saveCotizacion() {
 
 function showCotizacionesList() {
   apiGet({ accion: 'cotizaciones' }, function (d) {
-    var lista = (d || []).map(function (c) {
-      return '<div style="display:flex;justify-content:space-between;padding:8px;border-bottom:1px solid #e2e8f0;"><div><strong>' + esc(c.codigo) + '</strong> · ' + esc(c.cliente_nombre || 'Sin cliente') + '<br><span style="font-size:11px;color:#64748b;">' + c.fecha_creacion + ' · ' + fm(c.total) + ' · ' + c.items + ' ítems</span></div><div>' + (c.convertida ? '<span class="badge badge-ACTIVO">Convertida</span>' : '<button class="btn-p" style="padding:4px 10px;font-size:12px;" onclick="convertirCot(' + c.id_cotizacion + ')"><i class="fas fa-check"></i></button>') + '</div></div>';
+    var quotes = d.cotizaciones || d || [];
+    window._cotizaciones = quotes;
+    var lista = quotes.map(function (c) {
+      return '<div style="display:flex;justify-content:space-between;padding:8px;border-bottom:1px solid #e2e8f0;"><div><strong>' + esc(c.codigo) + '</strong> · ' + esc(c.cliente_nombre || 'Sin cliente') + '<br><span style="font-size:11px;color:#64748b;">' + c.fecha_creacion + ' · ' + fm(c.total) + ' · ' + (c.items || []).length + ' ítems</span></div><div>' + (c.convertida ? '<span class="badge badge-ACTIVO">Convertida</span>' : '<button class="btn-p" style="padding:4px 10px;font-size:12px;" onclick="convertirCot(' + c.id_cotizacion + ')" title="Cargar al carrito"><i class="fas fa-cart-plus"></i></button>') + '</div></div>';
     }).join('') || '<p style="color:#94a3b8;">Sin cotizaciones</p>';
     showModal(`
       <h3 style="font-size:18px;font-weight:700;margin-bottom:12px;"><i class="fas fa-file-invoice" style="color:#4f46e5;"></i> Cotizaciones</h3>
@@ -1101,9 +1286,21 @@ function showCotizacionesList() {
 }
 
 function convertirCot(id) {
-  apiPost({ accion: 'cotizacion_convertir', id_cotizacion: id }, function (d) {
-    toast(d.message || 'Convertida');
-    closeModal();
-    showCotizacionesList();
-  });
+  var quote = null;
+  for (var i=0;i<(window._cotizaciones||[]).length;i++) if (Number(window._cotizaciones[i].id_cotizacion)===Number(id)) quote=window._cotizaciones[i];
+  if (!quote || Number(quote.convertida)) { toast('Cotización no disponible', 'err'); return; }
+  var nextCart=[];
+  for (var j=0;j<(quote.items||[]).length;j++) {
+    var it=quote.items[j],qty=parseFloat(it.cantidad)||0,stock=parseFloat(it.stock_actual)||0;
+    if (!it.id_producto || !Number(it.producto_activo)) { toast('La cotización contiene un producto inactivo', 'err'); return; }
+    if (qty<=0 || stock<qty) { toast('Stock insuficiente para ' + esc(it.producto||'producto'), 'err'); return; }
+    nextCart.push({id:parseInt(it.id_producto),name:it.producto||'Producto',price:parseInt(it.precio_unitario)||0,
+      sku:it.sku||'',cant:qty,stock:stock,tipoVenta:it.tipo_venta||'UNIDAD',unidad:it.unidad_abrev||'u'});
+  }
+  if (!nextCart.length) { toast('Cotización sin productos', 'err'); return; }
+  cart=nextCart;_pendingCotizacionId=parseInt(id);
+  try { _promoCoupons = quote.cupones_json ? JSON.parse(quote.cupones_json) : []; } catch (e) { _promoCoupons = []; }
+  selectedClient=quote.id_cliente?{id_cliente:parseInt(quote.id_cliente),nombre:quote.cliente_nombre||'',rut:quote.cliente_rut||'',correo:quote.cliente_correo||'',telefono:quote.cliente_telefono||''}:null;
+  $('cart-client').innerHTML=selectedClient?'<i class="fas fa-user-check"></i> '+esc(selectedClient.nombre||'Cliente'):'<i class="fas fa-user"></i> Consumidor Final';
+  closeAllModals();renderCart();toast('Cotización cargada. Revise y presione Cobrar.');
 }

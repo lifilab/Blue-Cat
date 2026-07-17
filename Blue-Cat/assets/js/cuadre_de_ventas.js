@@ -73,7 +73,12 @@ function loadCuadre() {
     setMoney("monto_apertura", data.monto_apertura);
     setMoney("efectivo", data.efectivo);
     setMoney("tarjeta", data.tarjeta);
+    setMoney("credito", data.credito);
+    setMoney("debito", data.debito);
     setMoney("transferencia", data.transferencia);
+    setMoney("ingresos_efectivo", data.ingresos_efectivo);
+    setMoney("retiros_efectivo", data.retiros_efectivo);
+    setMoney("reversas_efectivo", data.reversas_efectivo);
     setMoney("monto_ventas", data.monto_ventas);
     document.getElementById("cantidad_ventas").textContent = data.cantidad_ventas || 0;
     setMoney("monto_total", data.monto_total);
@@ -182,14 +187,16 @@ function renderSalesTable() {
     var pagos = v.pagos || [];
     for (var k = 0; k < pagos.length; k++) {
       var pg = pagos[k];
-      pagosHtml += '<small>' + (pg.nombre_metodo_pago || pg.metodo || 'Pago') + ': $' + (pg.monto || 0) + '</small>';
+      pagosHtml += '<small>' + formatPaymentMethod(pg.nombre_metodo_pago || pg.metodo || 'Pago') + ': $' + (pg.monto || 0) + '</small>';
     }
 
     var anulado = v.anulado === 1 || v.anulado === '1';
     var anuladoStyle = anulado ? ' style="text-decoration:line-through;color:#94a3b8;"' : '';
     var anuladoBadge = anulado ? ' <span style="background:#fef2f2;color:#dc2626;padding:1px 6px;border-radius:10px;font-size:10px;font-weight:600;">ANULADA</span>' : '';
 
-    var canEdit = cuadrePermissions.editar && !anulado;
+    // A confirmed sale is immutable. Corrections use anulation or return so
+    // stock, payments, cash and audit always move together.
+    var canEdit = false;
 
     tr.innerHTML =
       '<td' + anuladoStyle + '>' + v.id_pedido + anuladoBadge + ' <span style="font-size:10px;color:#94a3b8;">' + (v.cliente_nombre || 'CF') + '</span></td>' +
@@ -212,6 +219,11 @@ function escapeHtml(str) {
   var div = document.createElement("div");
   div.appendChild(document.createTextNode(str));
   return div.innerHTML;
+}
+
+function formatPaymentMethod(method) {
+  var labels = { EFECTIVO:'Efectivo', TARJETA_CREDITO:'Tarjeta crédito', TARJETA_DEBITO:'Tarjeta débito', TRANSFERENCIA:'Transferencia', OTRO:'Otro' };
+  return labels[String(method || '').toUpperCase()] || escapeHtml(method || 'Pago');
 }
 
 function formatDateString(dateStr) {
@@ -404,10 +416,9 @@ function solicitarDevolucionTotal(id) {
   if (!sale) { showToast('<i class="fas fa-exclamation-circle"></i> Venta no encontrada'); return; }
   if (!confirm('¿Solicitar la devolución total de la venta #' + id + '?\n\nUse Anular cuando fue un error de caja. Use Devolver cuando el cliente devuelve productos.')) return;
   var items=(sale.items||[]).map(function(it){
-    var qty=parseFloat(it.cantidad_pedida||it.cantidad||1)||1;
-    var subtotal=parseInt(it.precio_total||0)||0;
-    return {id_producto:parseInt(it.id_producto),cantidad:qty,precio_unitario:Math.round(subtotal/qty),subtotal:subtotal};
-  });
+    var qty=parseFloat(it.cantidad_disponible_devolucion !== undefined ? it.cantidad_disponible_devolucion : (it.cantidad_pedida||it.cantidad||0))||0;
+    return qty>0 ? {id_detalle_pedido:parseInt(it.id_detalle_pedido||0),id_producto:parseInt(it.id_producto),cantidad:qty} : null;
+  }).filter(Boolean);
   if (!items.length) { showToast('<i class="fas fa-exclamation-circle"></i> La venta no tiene productos'); return; }
   apiPost(API_POS, { accion:'devolucion_crear', id_pedido:id, tipo:'TOTAL', motivo:'Devolución total autorizada desde cuadre', items:items }, function (d) {
     showToast('<i class="fas fa-check-circle"></i> Devolución procesada: $' + (d.monto_devuelto||0));

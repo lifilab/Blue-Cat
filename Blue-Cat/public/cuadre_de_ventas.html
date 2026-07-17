@@ -337,6 +337,7 @@
       <div class="summary-card">
         <div class="label">Tarjeta</div>
         <div class="value money" id="tarjeta">--</div>
+        <div class="label">Crédito <span id="credito">--</span> · Débito <span id="debito">--</span></div>
       </div>
       <div class="summary-card">
         <div class="label">Transferencia</div>
@@ -351,8 +352,20 @@
         <div class="value" id="cantidad_ventas">--</div>
       </div>
       <div class="summary-card">
-        <div class="label">Monto Total</div>
+        <div class="label">Efectivo esperado en caja</div>
         <div class="value green" id="monto_total">--</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">Ingresos manuales</div>
+        <div class="value money" id="ingresos_efectivo">--</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">Retiros de efectivo</div>
+        <div class="value money" id="retiros_efectivo">--</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">Anulaciones/devoluciones</div>
+        <div class="value money" id="reversas_efectivo">--</div>
       </div>
       <div class="summary-card">
         <div class="label">Diferencia</div>
@@ -481,7 +494,7 @@
   </div>
 
   <script src="../assets/js/supervisor-approval.js?v=1"></script>
-  <script src="../assets/js/cuadre_de_ventas.js?v=6"></script>
+  <script src="../assets/js/cuadre_de_ventas.js?v=7"></script>
   <script src="../assets/js/navbar.js?v=3"></script>
 </body>
 </html>

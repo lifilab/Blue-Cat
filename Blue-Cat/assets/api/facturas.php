@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/_db.php';
+require_once __DIR__ . '/_pos_integrity.php';
 $uid = requireUser();
 
 function requierePermiso($modulo, $accion) {
@@ -138,13 +139,8 @@ function crearFactura($conn, $uid, $input) {
 
     $conn->begin_transaction();
     try {
-        // Get next folio
-        $stmt = $conn->prepare("SELECT COALESCE(MAX(folio),0)+1 as next_folio FROM factura WHERE id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user=?)");
-        $stmt->bind_param("i", $uid);
-        $stmt->execute();
-        $folio = (int)$stmt->get_result()->fetch_assoc()['next_folio'];
-        $stmt->close();
-        $numero = 'F-' . str_pad($folio, 8, '0', STR_PAD_LEFT);
+        $document=posNextFolio($conn,$tenant->accountId,'FACTURA');
+        $folio=$document['folio'];$numero=$document['numero'];
 
         $items = $input['items'] ?? [];
         $subtotal = 0; $descuento = 0; $neto = 0; $iva = 0; $total = 0;
@@ -311,12 +307,8 @@ function crearNotaCredito($conn, $uid, $input) {
         $stmt->close();
         if (!$orig) json(['error'=>'Factura original no encontrada'], 404);
 
-        $stmt_nc = $conn->prepare("SELECT COALESCE(MAX(folio),0)+1 as next FROM factura WHERE id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user=?) AND tipo='NOTA_CREDITO'");
-        $stmt_nc->bind_param("i", $uid);
-        $stmt_nc->execute();
-        $folio_nc = (int)$stmt_nc->get_result()->fetch_assoc()['next'];
-        $stmt_nc->close();
-        $numero_nc = 'NC-' . str_pad($folio_nc, 8, '0', STR_PAD_LEFT);
+        $document=posNextFolio($conn,$tenant->accountId,'NOTA_CREDITO');
+        $folio_nc=$document['folio'];$numero_nc=$document['numero'];
 
         $total_nc = 0;
         $id_pedido_null = null;
@@ -402,12 +394,9 @@ function crearNotaDebito($conn, $uid, $input) {
         $stmt->close();
         if (!$orig) json(['error'=>'Factura original no encontrada'], 404);
 
-        $stmt_nd = $conn->prepare("SELECT COALESCE(MAX(folio),0)+1 as next FROM factura WHERE id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user=?) AND tipo='NOTA_DEBITO'");
-        $stmt_nd->bind_param("i", $uid);
-        $stmt_nd->execute();
-        $folio_nd = (int)$stmt_nd->get_result()->fetch_assoc()['next'];
-        $stmt_nd->close();
-        $numero_nd = 'ND-' . str_pad($folio_nd, 8, '0', STR_PAD_LEFT);
+        $tenant=tenantContext($uid);
+        $document=posNextFolio($conn,$tenant->accountId,'NOTA_DEBITO');
+        $folio_nd=$document['folio'];$numero_nd=$document['numero'];
 
         $tipo_nd = 'NOTA_DEBITO';
         $estado_nd = 'EMITIDA';

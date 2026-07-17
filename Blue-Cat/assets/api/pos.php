@@ -1,6 +1,9 @@
 <?php
 require_once __DIR__ . '/_db.php';
 require_once __DIR__ . '/_supervisor.php';
+require_once __DIR__ . '/_pos_integrity.php';
+require_once __DIR__ . '/_pos_returns.php';
+require_once __DIR__ . '/_promotion_engine.php';
 $uid = requireUser();
 $conn = getDB();
 $tenant = tenantContext($uid);
@@ -27,7 +30,7 @@ function getOpenSesion($conn, $uid) {
 }
 
 function getOpenCaja($conn, $uid) {
-    $sql = "SELECT * FROM pos_caja WHERE id_user = ? AND estado = 'ABIERTA' ORDER BY id_caja DESC LIMIT 1";
+    $sql = "SELECT c.*,s.id_sucursal FROM pos_caja c LEFT JOIN sucursal s ON s.id_cuenta=c.id_cuenta AND s.activo=1 AND (s.nombre=c.sucursal OR s.codigo=c.sucursal) WHERE c.id_user = ? AND c.estado = 'ABIERTA' ORDER BY c.id_caja DESC LIMIT 1";
     $stmt = $conn->prepare($sql);
     $stmt->bind_param('i', $uid);
     $stmt->execute();
@@ -68,6 +71,7 @@ if ($method === 'GET') {
         case 'cotizaciones':        GET_cotizaciones();       break;
         case 'reservas':            GET_reservas();           break;
         case 'venta_detalle':       GET_venta_detalle();      break;
+        case 'documento':           GET_documento();          break;
         case 'reporte_ventas_hora': GET_reporte_ventas_hora();break;
         case 'reporte_ventas_cajero':GET_reporte_ventas_cajero();break;
         case 'reporte_productos_top':GET_reporte_productos_top();break;
@@ -91,16 +95,17 @@ if ($method === 'GET') {
         case 'venta_crear':         if (!verificarPermiso('pos','realizar_venta')) json(['error'=>true,'message'=>'Permiso denegado'],403); POST_venta_crear($data); break;
         case 'venta_anular':        POST_venta_anular($data); break;
         case 'cliente_crear':       POST_cliente_crear($data);    break;
-        case 'promocion_crear':     POST_promocion_crear($data);  break;
+        case 'promocion_crear':     if (!verificarPermiso('pos','crear_promocion')) json(['error'=>true,'message'=>'Permiso denegado: pos.crear_promocion'],403); POST_promocion_crear($data);  break;
+        case 'promociones_evaluar': POST_promociones_evaluar($data);break;
         case 'promocion_validar':   POST_promocion_validar($data);break;
-        case 'promocion_eliminar':  POST_promocion_eliminar($data);break;
+        case 'promocion_eliminar':  if (!verificarPermiso('pos','crear_promocion')) json(['error'=>true,'message'=>'Permiso denegado: pos.crear_promocion'],403); POST_promocion_eliminar($data);break;
         case 'cotizacion_crear':    POST_cotizacion_crear($data);  break;
-        case 'cotizacion_convertir':POST_cotizacion_convertir($data);break;
+        case 'cotizacion_convertir':json(['error'=>true,'message'=>'Actualice el POS: la cotización debe cargarse al carrito y cobrarse por el flujo normal.'],409);break;
         case 'cotizacion_eliminar': POST_cotizacion_eliminar($data);break;
         case 'reserva_crear':       POST_reserva_crear($data);     break;
         case 'reserva_cumplir':     POST_reserva_cumplir($data);   break;
         case 'reserva_cancelar':    POST_reserva_cancelar($data);  break;
-        case 'devolucion_crear':    POST_devolucion_crear($data);  break;
+        case 'devolucion_crear':    POST_devolucion_crear_v2($data);  break;
         default:
             json(['error' => true, 'message' => 'Acción no válida'], 400);
     }
@@ -352,10 +357,9 @@ function GET_clientes() {
     $porPagina = max(1, min(100, (int) ($_GET['por_pagina'] ?? 20)));
     $offset = ($pagina - 1) * $porPagina;
 
-    $cuenta = buildCuentaFilter($conn, $uid, 'id_user');
-    $where = $cuenta['sql'];
-    $params = $cuenta['params'];
-    $types  = $cuenta['types'];
+    $where = 'id_cuenta=? AND COALESCE(activo,1)=1';
+    $params = [$tenant->accountId];
+    $types  = 'i';
 
     if ($search !== '') {
         $searchParam = "%{$search}%";
@@ -527,11 +531,11 @@ function GET_promociones() {
             FROM pos_promocion pp
             LEFT JOIN pos_promocion_producto ppp ON pp.id_promocion = ppp.id_promocion
             LEFT JOIN producto pr ON ppp.id_producto = pr.id_producto
-            WHERE pp.id_user = ?
+            WHERE pp.id_cuenta = ?
             GROUP BY pp.id_promocion
             ORDER BY pp.id_promocion DESC";
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param('i', $uid);
+    $stmt->bind_param('i', $tenant->accountId);
     $stmt->execute();
     $result = $stmt->get_result();
     $promociones = [];
@@ -546,9 +550,9 @@ function GET_promociones() {
 function GET_cotizaciones() {
     global $conn, $uid, $tenant;
 
-    $sql = "SELECT * FROM pos_cotizacion WHERE id_user = ? ORDER BY id_cotizacion DESC";
+    $sql = "SELECT * FROM pos_cotizacion WHERE id_cuenta = ? ORDER BY id_cotizacion DESC";
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param('i', $uid);
+    $stmt->bind_param('i', $tenant->accountId);
     $stmt->execute();
     $result = $stmt->get_result();
     $cotizaciones = [];
@@ -561,9 +565,11 @@ function GET_cotizaciones() {
     foreach ($cotizaciones as &$cot) {
         $cid = (int) $cot['id_cotizacion'];
         $cot['items'] = [];
-        $sql = "SELECT * FROM pos_cotizacion_detalle WHERE id_cotizacion = ?";
+        $sql = "SELECT d.*,p.cantidad stock_actual,p.tipo_venta,p.unidad_abrev,p.activo producto_activo
+                FROM pos_cotizacion_detalle d LEFT JOIN producto p ON p.id_producto=d.id_producto AND p.id_cuenta=?
+                WHERE d.id_cotizacion = ?";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param('i', $cid);
+        $stmt->bind_param('ii', $tenant->accountId,$cid);
         $stmt->execute();
         $r = $stmt->get_result();
         while ($item = $r->fetch_assoc()) {
@@ -600,12 +606,12 @@ function GET_venta_detalle() {
         json(['error' => true, 'message' => 'ID de pedido requerido'], 400);
     }
 
-    $sql = "SELECT p.*, s.empleado
+    $sql = "SELECT p.*, s.empleado, s.id_user AS sesion_user
             FROM pedido p
             JOIN sesion s ON p.id_sesion = s.id_sesion
-            WHERE p.id_pedido = ?";
+            WHERE p.id_pedido = ? AND p.id_cuenta = ?";
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param('i', $pedidoId);
+    $stmt->bind_param('ii', $pedidoId, $tenant->accountId);
     $stmt->execute();
     $result = $stmt->get_result();
     $venta = $result->fetch_assoc();
@@ -614,12 +620,18 @@ function GET_venta_detalle() {
     if (!$venta) {
         json(['error' => true, 'message' => 'Pedido no encontrado'], 404);
     }
+    if ((int)$venta['sesion_user'] !== $uid && !verificarPermiso('ventas','ver_todos')) {
+        json(['error' => true, 'message' => 'No autorizado para ver esta venta'], 403);
+    }
 
     // Items
-    $sql = "SELECT dp.*, p.nombre_producto, p.codigo_de_barras
+    $sql = "SELECT dp.*, p.nombre_producto, p.codigo_de_barras,
+                   COALESCE(SUM(dd.cantidad),0) AS cantidad_devuelta,
+                   dp.cantidad_pedida-COALESCE(SUM(dd.cantidad),0) AS cantidad_disponible_devolucion
             FROM detalle_pedido dp
             JOIN producto p ON dp.id_producto = p.id_producto
-            WHERE dp.id_pedido = ?";
+            LEFT JOIN pos_devolucion_detalle dd ON dd.id_detalle_pedido=dp.id_detalle_pedido
+            WHERE dp.id_pedido = ? GROUP BY dp.id_detalle_pedido";
     $stmt = $conn->prepare($sql);
     $stmt->bind_param('i', $pedidoId);
     $stmt->execute();
@@ -642,7 +654,26 @@ function GET_venta_detalle() {
     }
     $stmt->close();
 
-    json(['venta' => $venta]);
+    json($venta);
+}
+
+function GET_documento() {
+    global $conn,$uid,$tenant;
+    $orderId=(int)($_GET['id']??0);
+    if($orderId<=0)json(['error'=>true,'message'=>'ID de pedido requerido'],400);
+    $stmt=$conn->prepare("SELECT d.contenido_json,s.id_user sesion_user
+        FROM pos_documento_snapshot d JOIN pedido p ON p.id_pedido=d.id_pedido
+        JOIN sesion s ON s.id_sesion=p.id_sesion
+        WHERE d.id_pedido=? AND d.id_cuenta=? LIMIT 1");
+    $stmt->bind_param('ii',$orderId,$tenant->accountId);$stmt->execute();$row=$stmt->get_result()->fetch_assoc();$stmt->close();
+    if(!$row)json(['error'=>true,'message'=>'Documento no encontrado'],404);
+    if((int)$row['sesion_user']!==$uid&&!verificarPermiso('ventas','ver_todos'))json(['error'=>true,'message'=>'No autorizado'],403);
+    $document=json_decode($row['contenido_json'],true);
+    if(!is_array($document))json(['error'=>true,'message'=>'Documento almacenado inválido'],500);
+    $stmt=$conn->prepare('SELECT logo FROM config_boleta WHERE id_cuenta=? AND activo=1 ORDER BY id_config DESC LIMIT 1');
+    $stmt->bind_param('i',$tenant->accountId);$stmt->execute();$config=$stmt->get_result()->fetch_assoc();$stmt->close();
+    insertAuditoria($conn,$uid,'documento_consultar',"Documento de venta #{$orderId} consultado para impresión",$orderId,'pedido');
+    json(['documento'=>$document,'logo'=>$config['logo']??'']);
 }
 
 function GET_reporte_ventas_hora() {
@@ -777,18 +808,30 @@ function GET_permisos_usuario() {
 function POST_caja_abrir($data) {
     global $conn, $uid, $tenant;
 
-    $codigo         = $data->codigo ?? '';
+    $codigo         = strtoupper(trim((string)($data->codigo ?? '')));
     $nombreCaja     = $data->nombre ?? $data->nombre_caja ?? 'Caja Principal';
     $sucursal       = $data->sucursal ?? 'Principal';
     $montoApertura  = (int) ($data->monto_apertura ?? 0);
+    if (!preg_match('/^[A-Z0-9_-]{2,40}$/', $codigo)) {
+        json(['error'=>true,'message'=>'Código de caja inválido. Use letras, números, guion o guion bajo.'],400);
+    }
+    if ($montoApertura<0) json(['error'=>true,'message'=>'El monto de apertura no puede ser negativo.'],400);
 
     // Get open caja with FOR UPDATE
     $conn->begin_transaction();
 
     try {
-        $sql = "SELECT id_caja FROM pos_caja WHERE id_user = ? AND estado = 'ABIERTA' FOR UPDATE";
+        $sql="INSERT INTO pos_caja_fisica(id_cuenta,codigo,nombre,sucursal,activo) VALUES(?,?,?,?,1)
+              ON DUPLICATE KEY UPDATE nombre=VALUES(nombre),sucursal=VALUES(sucursal)";
+        $stmt=$conn->prepare($sql);$stmt->bind_param('isss',$tenant->accountId,$codigo,$nombreCaja,$sucursal);$stmt->execute();$stmt->close();
+        $stmt=$conn->prepare("SELECT id_caja_fisica FROM pos_caja_fisica WHERE id_cuenta=? AND codigo=? AND activo=1 FOR UPDATE");
+        $stmt->bind_param('is',$tenant->accountId,$codigo);$stmt->execute();$physical=$stmt->get_result()->fetch_assoc();$stmt->close();
+        if(!$physical)throw new Exception('La caja física no está activa.');
+        $physicalId=(int)$physical['id_caja_fisica'];
+
+        $sql = "SELECT id_caja FROM pos_caja WHERE id_user = ? AND id_cuenta=? AND estado = 'ABIERTA' FOR UPDATE";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param('i', $uid);
+        $stmt->bind_param('ii', $uid,$tenant->accountId);
         $stmt->execute();
         $result = $stmt->get_result();
         if ($result->fetch_assoc()) {
@@ -796,6 +839,10 @@ function POST_caja_abrir($data) {
             throw new Exception('Ya existe una caja abierta. Ciérrela primero.');
         }
         $stmt->close();
+
+        $stmt=$conn->prepare("SELECT id_caja FROM pos_caja WHERE id_caja_fisica=? AND estado='ABIERTA' FOR UPDATE");
+        $stmt->bind_param('i',$physicalId);$stmt->execute();$occupied=$stmt->get_result()->fetch_assoc();$stmt->close();
+        if($occupied)throw new Exception('Esta caja física ya está abierta por otro cajero.');
 
         // Get employee name
         $sql = "SELECT nombre FROM usuario WHERE id_user = ?";
@@ -817,10 +864,10 @@ function POST_caja_abrir($data) {
         $stmt->close();
 
         // INSERT pos_caja
-        $sql = "INSERT INTO pos_caja (id_user, id_cuenta, codigo, nombre, sucursal, estado, monto_apertura, monto_actual, fecha_apertura, id_sesion)
-                VALUES (?, ?, ?, ?, ?, 'ABIERTA', ?, ?, NOW(), ?)";
+        $sql = "INSERT INTO pos_caja (id_user, id_cuenta, id_caja_fisica, codigo, nombre, sucursal, estado, monto_apertura, monto_actual, fecha_apertura, id_sesion)
+                VALUES (?, ?, ?, ?, ?, ?, 'ABIERTA', ?, ?, NOW(), ?)";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param('iisssiii', $uid, $tenant->accountId, $codigo, $nombreCaja, $sucursal, $montoApertura, $montoApertura, $idSesion);
+        $stmt->bind_param('iiisssiii', $uid, $tenant->accountId, $physicalId, $codigo, $nombreCaja, $sucursal, $montoApertura, $montoApertura, $idSesion);
         $stmt->execute();
         $idCaja = $conn->insert_id;
         $stmt->close();
@@ -851,7 +898,7 @@ function POST_caja_abrir($data) {
 
         json(['success' => true, 'caja' => $caja]);
 
-    } catch (Exception $e) {
+    } catch (Throwable $e) {
         $conn->rollback();
         json(['error' => true, 'message' => $e->getMessage()], 400);
     }
@@ -865,7 +912,8 @@ function POST_caja_cerrar($data) {
     $conn->begin_transaction();
 
     try {
-        $caja = getOpenCaja($conn, $uid);
+        $stmt=$conn->prepare("SELECT * FROM pos_caja WHERE id_user=? AND id_cuenta=? AND estado='ABIERTA' ORDER BY id_caja DESC LIMIT 1 FOR UPDATE");
+        $stmt->bind_param('ii',$uid,$tenant->accountId);$stmt->execute();$caja=$stmt->get_result()->fetch_assoc();$stmt->close();
         if (!$caja) {
             throw new Exception('No hay caja abierta.');
         }
@@ -878,7 +926,7 @@ function POST_caja_cerrar($data) {
         $sql = "SELECT COALESCE(SUM(CASE WHEN tipo = 'INGRESO' OR tipo = 'APERTURA' THEN monto ELSE 0 END), 0) AS ingresos,
                        COALESCE(SUM(CASE WHEN tipo = 'EGRESO' THEN monto ELSE 0 END), 0) AS egresos
                 FROM pos_movimiento_caja
-                WHERE id_caja = ? AND tipo != 'CIERRE'";
+                WHERE id_caja = ? AND tipo != 'CIERRE' AND UPPER(TRIM(metodo)) = 'EFECTIVO'";
         $stmt = $conn->prepare($sql);
         $stmt->bind_param('i', $idCaja);
         $stmt->execute();
@@ -936,7 +984,11 @@ function POST_caja_movimiento($data) {
     $tipo     = strtoupper($data->tipo ?? 'INGRESO');
     $monto    = (int) ($data->monto ?? 0);
     $concepto = $data->concepto ?? '';
-    $metodo   = $data->metodo ?? 'EFECTIVO';
+    try {
+        $metodo = posCanonicalPaymentMethod($data->metodo ?? 'EFECTIVO');
+    } catch (InvalidArgumentException $e) {
+        json(['error' => true, 'message' => $e->getMessage()], 400);
+    }
     $referencia = $data->referencia ?? null;
     $idPedido = $data->id_pedido ?? null;
 
@@ -945,6 +997,9 @@ function POST_caja_movimiento($data) {
     }
     if (!in_array($tipo, ['INGRESO', 'EGRESO'])) {
         json(['error' => true, 'message' => 'Tipo debe ser INGRESO o EGRESO'], 400);
+    }
+    if ($metodo !== 'EFECTIVO') {
+        json(['error' => true, 'message' => 'Los ingresos y retiros manuales de caja deben ser en efectivo.'], 400);
     }
 
     $caja = getOpenCaja($conn, $uid);
@@ -960,6 +1015,9 @@ function POST_caja_movimiento($data) {
     $conn->begin_transaction();
 
     try {
+        $stmt=$conn->prepare("SELECT id_caja FROM pos_caja WHERE id_caja=? AND id_user=? AND id_cuenta=? AND estado='ABIERTA' FOR UPDATE");
+        $stmt->bind_param('iii',$idCaja,$uid,$tenant->accountId);$stmt->execute();$lockedCaja=$stmt->get_result()->fetch_assoc();$stmt->close();
+        if(!$lockedCaja)throw new Exception('La caja fue cerrada antes de registrar el movimiento.');
         $sql = "INSERT INTO pos_movimiento_caja (id_caja, id_user, tipo, concepto, monto, metodo, referencia, id_pedido)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
         $stmt = $conn->prepare($sql);
@@ -995,14 +1053,19 @@ function POST_venta_crear($data) {
 
     $items          = $data->items ?? [];
     $pagos          = $data->pagos ?? [];
+    $idempotencyKey = trim((string) ($data->idempotency_key ?? ''));
+    $requestHash    = posSaleRequestHash($data);
     $tipoDocumento  = $data->tipo_documento ?? 'BOLETA';
-    $idCliente      = $data->id_cliente ?? null;
-    $clienteNombre  = $data->cliente_nombre ?? '';
-    $clienteRut     = $data->cliente_rut ?? '';
-    $clienteCorreo  = $data->cliente_correo ?? '';
-    $clienteTelefono = $data->cliente_telefono ?? '';
+    $clienteData    = $data->cliente ?? null;
+    $idCliente      = $data->id_cliente ?? posPaymentValue($clienteData, 'id_cliente');
+    $clienteNombre  = $data->cliente_nombre ?? posPaymentValue($clienteData, 'nombre', '');
+    $clienteRut     = $data->cliente_rut ?? posPaymentValue($clienteData, 'rut', '');
+    $clienteCorreo  = $data->cliente_correo ?? posPaymentValue($clienteData, 'correo', '');
+    $clienteTelefono = $data->cliente_telefono ?? posPaymentValue($clienteData, 'telefono', '');
     $idPromocion    = $data->id_promocion ?? null;
-    $descuentoTotal = (int) ($data->descuento ?? 0);
+    $idCotizacion   = (int)($data->id_cotizacion ?? 0);
+    $descuentoTotal = 0;
+    $couponCodes    = (array)($data->cupones ?? []);
 
     if (empty($items)) {
         json(['error' => true, 'message' => 'Se requiere al menos un producto'], 400);
@@ -1011,15 +1074,46 @@ function POST_venta_crear($data) {
         json(['error' => true, 'message' => 'Se requiere al menos un método de pago'], 400);
     }
 
+    if (!preg_match('/^[A-Za-z0-9][A-Za-z0-9._:-]{15,63}$/', $idempotencyKey)) {
+        json(['error' => true, 'message' => 'La venta requiere una clave de idempotencia válida.'], 400);
+    }
+
+    $sql = "SELECT i.solicitud_hash, i.estado, p.id_pedido, p.precio_total, p.monto_recibido, p.vuelto, p.folio, p.numero_documento
+            FROM pos_venta_idempotencia i
+            LEFT JOIN pedido p ON p.id_pedido=i.id_pedido
+            WHERE i.id_cuenta=? AND i.clave=? LIMIT 1";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param('is', $tenant->accountId, $idempotencyKey);
+    $stmt->execute();
+    $previous = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    if ($previous) {
+        if (!hash_equals((string) $previous['solicitud_hash'], $requestHash)) {
+            json(['error' => true, 'message' => 'La clave de idempotencia ya fue usada con otra venta.'], 409);
+        }
+        if ($previous['estado'] === 'COMPLETADA' && $previous['id_pedido']) {
+            json([
+                'success' => true,
+                'id_pedido' => (int) $previous['id_pedido'],
+                'total' => (int) $previous['precio_total'],
+                'monto_recibido' => (int) $previous['monto_recibido'],
+                'cambio' => (int) $previous['vuelto'],
+                'folio' => (int) $previous['folio'],
+                'numero_documento' => $previous['numero_documento'],
+                'idempotent_replay' => true,
+            ]);
+        }
+    }
+
     // Validate promocion if descuento > 0
     if ($descuentoTotal > 0) {
         if (!$idPromocion) {
             json(['error' => true, 'message' => 'Descuento sin promoción asociada'], 400);
         }
-        $sql = "SELECT * FROM pos_promocion WHERE id_promocion = ? AND id_user = ? AND activo = 1";
+        $sql = "SELECT * FROM pos_promocion WHERE id_promocion = ? AND id_cuenta = ? AND activo = 1";
         $stmt = $conn->prepare($sql);
         $pid = (int) $idPromocion;
-        $stmt->bind_param('ii', $pid, $uid);
+        $stmt->bind_param('ii', $pid, $tenant->accountId);
         $stmt->execute();
         $result = $stmt->get_result();
         $promo = $result->fetch_assoc();
@@ -1040,20 +1134,56 @@ function POST_venta_crear($data) {
     }
 
     $priceOverrides=[];
+    $basePrices=[];
     foreach ($items as $item) {
         $idp=(int)($item->id_producto??0); $sent=(int)($item->precio_unitario??0);
         $stmt=$conn->prepare('SELECT precio_venta FROM producto WHERE id_producto=? AND id_cuenta=? AND activo=1');
         $stmt->bind_param('ii',$idp,$tenant->accountId); $stmt->execute(); $row=$stmt->get_result()->fetch_assoc(); $stmt->close();
         if (!$row) json(['error'=>true,'message'=>'Producto no encontrado o inactivo'],400);
         $base=(int)$row['precio_venta'];
+        $basePrices[$idp]=$base;
         if ($sent!==$base) $priceOverrides[]=['id_producto'=>$idp,'precio_base'=>$base,'precio_nuevo'=>$sent];
     }
     if ($priceOverrides) {
         $ctx=['entidad_tipo'=>'venta','entidad_id'=>'nueva','cambios'=>$priceOverrides];
         supervisorRequire('pos.cambiar_precio',$ctx,$data->supervisor_token ?? null);
     }
+    $authorizedPrices=$basePrices;
+    foreach($priceOverrides as $override)$authorizedPrices[(int)$override['id_producto']]=(int)$override['precio_nuevo'];
     $conn->begin_transaction();
     try {
+        // The unique key serializes simultaneous retries. INSERT IGNORE waits
+        // for an in-flight transaction using the same key.
+        $sql = "INSERT IGNORE INTO pos_venta_idempotencia
+                    (id_cuenta,id_user,clave,solicitud_hash,estado)
+                VALUES (?,?,?,?,'PROCESANDO')";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param('iiss', $tenant->accountId, $uid, $idempotencyKey, $requestHash);
+        $stmt->execute();
+        $reserved = $stmt->affected_rows === 1;
+        $stmt->close();
+        if (!$reserved) {
+            $conn->rollback();
+            $stmt = $conn->prepare("SELECT i.solicitud_hash,i.estado,p.id_pedido,p.precio_total,p.monto_recibido,p.vuelto,p.folio,p.numero_documento FROM pos_venta_idempotencia i LEFT JOIN pedido p ON p.id_pedido=i.id_pedido WHERE i.id_cuenta=? AND i.clave=? LIMIT 1");
+            $stmt->bind_param('is', $tenant->accountId, $idempotencyKey);
+            $stmt->execute();
+            $existing = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if (!$existing || !hash_equals((string) $existing['solicitud_hash'], $requestHash)) {
+                json(['error' => true, 'message' => 'La clave de idempotencia ya fue usada con otra venta.'], 409);
+            }
+            json([
+                'success' => true,
+                'id_pedido' => (int) $existing['id_pedido'],
+                'total' => (int) $existing['precio_total'],
+                'monto_recibido' => (int) $existing['monto_recibido'],
+                'cambio' => (int) $existing['vuelto'],
+                'folio' => (int) $existing['folio'],
+                'numero_documento' => $existing['numero_documento'],
+                'idempotent_replay' => true,
+            ]);
+        }
+
         // Get session with FOR UPDATE
         $sql = "SELECT * FROM sesion WHERE id_user = ? AND fecha_cierre IS NULL ORDER BY id_sesion DESC LIMIT 1 FOR UPDATE";
         $stmt = $conn->prepare($sql);
@@ -1074,16 +1204,70 @@ function POST_venta_crear($data) {
             throw new Exception('No se encontró una bodega activa.');
         }
 
-        // Get open caja
-        $caja = getOpenCaja($conn, $uid);
-        $idCaja = $caja ? (int) $caja['id_caja'] : null;
+        // Lock the cashier's open register for the complete sale.
+        $requestedCaja = (int) ($data->id_caja ?? 0);
+        $sql = "SELECT * FROM pos_caja WHERE id_user=? AND id_cuenta=? AND estado='ABIERTA' ORDER BY id_caja DESC LIMIT 1 FOR UPDATE";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param('ii', $uid, $tenant->accountId);
+        $stmt->execute();
+        $caja = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        if (!$caja || ($requestedCaja > 0 && $requestedCaja !== (int) $caja['id_caja'])) {
+            throw new Exception('No hay una caja abierta válida para esta venta.');
+        }
+        $idCaja = (int) $caja['id_caja'];
+        $saleSucursal=(int)($data->id_sucursal??0);
+        if($saleSucursal>0){$stmt=$conn->prepare('SELECT id_sucursal FROM sucursal WHERE id_sucursal=? AND id_cuenta=? AND activo=1 AND (nombre=? OR codigo=?)');$stmt->bind_param('iiss',$saleSucursal,$tenant->accountId,$caja['sucursal'],$caja['sucursal']);$stmt->execute();$validBranch=$stmt->get_result()->fetch_assoc();$stmt->close();if(!$validBranch)throw new Exception('La sucursal no corresponde a la caja abierta.');}
+        else{$stmt=$conn->prepare('SELECT id_sucursal FROM sucursal WHERE id_cuenta=? AND activo=1 AND (nombre=? OR codigo=?) ORDER BY id_sucursal LIMIT 1');$stmt->bind_param('iss',$tenant->accountId,$caja['sucursal'],$caja['sucursal']);$stmt->execute();$branch=$stmt->get_result()->fetch_assoc();$stmt->close();$saleSucursal=(int)($branch['id_sucursal']??0);}
 
-        // Calculate total from items (all in cents)
-        $precioTotal = 0;
-        foreach ($items as $item) {
-            $cantidad = (float) ($item->cantidad ?? 0);
-            $precioUnitario = (int) ($item->precio_unitario ?? 0);
-            $precioTotal += (int) round($precioUnitario * $cantidad);
+        if ($idCotizacion>0) {
+            $stmt=$conn->prepare('SELECT id_cotizacion FROM pos_cotizacion WHERE id_cotizacion=? AND id_cuenta=? AND convertida=0 FOR UPDATE');
+            $stmt->bind_param('ii',$idCotizacion,$tenant->accountId);$stmt->execute();$quote=$stmt->get_result()->fetch_assoc();$stmt->close();
+            if(!$quote)throw new Exception('La cotización no existe o ya fue convertida.');
+        }
+
+        if ((int)$idCliente > 0) {
+            $clientIdInt=(int)$idCliente;
+            $stmt=$conn->prepare('SELECT id_cliente,nombre,rut,correo,telefono FROM cliente WHERE id_cliente=? AND id_cuenta=? AND COALESCE(activo,1)=1 FOR UPDATE');
+            $stmt->bind_param('ii',$clientIdInt,$tenant->accountId);$stmt->execute();$clientRow=$stmt->get_result()->fetch_assoc();$stmt->close();
+            if(!$clientRow)throw new Exception('El cliente seleccionado no existe, está inactivo o pertenece a otra cuenta.');
+            $idCliente=$clientIdInt;$clienteNombre=$clientRow['nombre'];$clienteRut=$clientRow['rut'];$clienteCorreo=$clientRow['correo'];$clienteTelefono=$clientRow['telefono'];
+        } else {
+            $idCliente=null;
+        }
+
+        // The rule engine owns eligibility and monetary calculation. It also
+        // locks products/promotions so the preview cannot diverge at checkout.
+        $promotionEvaluation=promotionEvaluate($conn,$tenant->accountId,$uid,(array)$items,$idCliente,$couponCodes,[
+            'id_sucursal'=>$saleSucursal,'canal'=>trim((string)($data->canal??'POS'))?:'POS','price_overrides'=>$authorizedPrices
+        ],true);
+        $precioTotal=(int)$promotionEvaluation['subtotal'];
+        $descuentoTotal=(int)$promotionEvaluation['descuento'];
+        $promotionLineMap=[];
+        foreach($promotionEvaluation['lineas'] as $promotionLine)$promotionLineMap[(int)$promotionLine['id_producto']]=$promotionLine;
+
+        // Recalculate promotions from server-owned data. The browser may display
+        // a discount, but it cannot decide its monetary value.
+        if (false && $descuentoTotal > 0) { // Reemplazado por promotionEvaluate().
+            $stmt = $conn->prepare("SELECT * FROM pos_promocion WHERE id_promocion=? AND id_cuenta=? AND activo=1 FOR UPDATE");
+            $promoId = (int) $idPromocion;
+            $stmt->bind_param('ii', $promoId, $tenant->accountId);
+            $stmt->execute();
+            $lockedPromo = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if (!$lockedPromo) throw new Exception('Promoción no disponible.');
+            if ((int) $lockedPromo['monto_minimo'] > $precioTotal) {
+                throw new Exception('La venta no alcanza el monto mínimo de la promoción.');
+            }
+            $expectedDiscount = 0;
+            if ($lockedPromo['tipo'] === 'PORCENTAJE') {
+                $expectedDiscount = (int) round($precioTotal * (int) $lockedPromo['valor'] / 100);
+            } elseif ($lockedPromo['tipo'] === 'FIJO') {
+                $expectedDiscount = min((int) $lockedPromo['valor'], $precioTotal);
+            }
+            if ($descuentoTotal !== $expectedDiscount) {
+                throw new Exception('El descuento cambió. Vuelva a aplicar la promoción.');
+            }
         }
 
         // Apply descuento
@@ -1092,40 +1276,52 @@ function POST_venta_crear($data) {
             $precioFinal = 0;
         }
 
-        // Calculate pago total
-        $pagoTotal = 0;
-        foreach ($pagos as $pago) {
-            $pagoTotal += (int) ($pago->monto ?? 0);
-        }
-
-        $diferenciaPedido = $pagoTotal - $precioFinal;
+        $paymentSummary = posNormalizePayments((array) $pagos, $precioFinal);
+        $pagosNormalizados = $paymentSummary['pagos'];
+        $pagoTotal = $paymentSummary['pago_total'];
+        $montoRecibido = $paymentSummary['monto_recibido'];
+        $vuelto = $paymentSummary['vuelto'];
+        $diferenciaPedido = 0;
+        $document = posNextFolio($conn,$tenant->accountId,$tipoDocumento);
+        $folio=$document['folio'];$numeroDocumento=$document['numero'];$tipoDocumento=$document['tipo'];
 
         // INSERT pedido
         $sql = "INSERT INTO pedido (id_cuenta, id_sesion, id_cliente, id_caja, id_bodega, tipo_documento,
-                    cliente_nombre, cliente_rut, cliente_correo, cliente_telefono,
-                    precio_total, pago_total, diferencia, fecha)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
+                    folio, numero_documento, cliente_nombre, cliente_rut, cliente_correo, cliente_telefono,
+                    precio_total, pago_total, monto_recibido, vuelto, diferencia, fecha)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param('iiiisssssiiii', $tenant->accountId, $idSesion, $idCliente, $idCaja, $idBodega, $tipoDocumento,
+        $stmt->bind_param('iiiiisisssssiiiii', $tenant->accountId, $idSesion, $idCliente, $idCaja, $idBodega, $tipoDocumento,
+            $folio,$numeroDocumento,
             $clienteNombre, $clienteRut, $clienteCorreo, $clienteTelefono,
-            $precioFinal, $pagoTotal, $diferenciaPedido);
+            $precioFinal, $pagoTotal, $montoRecibido, $vuelto, $diferenciaPedido);
         $stmt->execute();
         $idPedido = $conn->insert_id;
         $stmt->close();
 
         // Process items
+        $receiptItems=[];
+        $promotionRemainingDiscount=[];$promotionRemainingQuantity=[];
+        foreach($promotionLineMap as $productId=>$line){$promotionRemainingDiscount[$productId]=(int)$line['descuento'];$promotionRemainingQuantity[$productId]=(float)$line['cantidad'];}
         foreach ($items as $item) {
             $idProducto     = (int) ($item->id_producto ?? 0);
             $cantidad       = (float) ($item->cantidad ?? 0);
             $precioUnitario = (int) ($item->precio_unitario ?? 0);
-            $itemTotal      = (int) round($precioUnitario * $cantidad);
+            $itemOriginalTotal = (int) round($precioUnitario * $cantidad);
+            $remainingQty=$promotionRemainingQuantity[$idProducto]??$cantidad;
+            $remainingDiscount=$promotionRemainingDiscount[$idProducto]??0;
+            $itemDiscount=$cantidad+0.0001>=$remainingQty?$remainingDiscount:(int)round($remainingDiscount*$cantidad/max(.001,$remainingQty));
+            $itemDiscount=min($itemDiscount,$itemOriginalTotal);
+            $itemTotal=$itemOriginalTotal-$itemDiscount;
+            $promotionRemainingDiscount[$idProducto]=max(0,$remainingDiscount-$itemDiscount);
+            $promotionRemainingQuantity[$idProducto]=max(0,$remainingQty-$cantidad);
 
             if ($idProducto <= 0 || $cantidad <= 0) {
                 throw new Exception('Ítem inválido: producto o cantidad no válidos.');
             }
 
             // Check product exists and get data
-            $sql = "SELECT * FROM producto WHERE id_producto = ? AND id_cuenta = ? AND activo = 1";
+            $sql = "SELECT * FROM producto WHERE id_producto = ? AND id_cuenta = ? AND activo = 1 FOR UPDATE";
             $stmt = $conn->prepare($sql);
             $stmt->bind_param('ii', $idProducto, $tenant->accountId);
             $stmt->execute();
@@ -1136,16 +1332,33 @@ function POST_venta_crear($data) {
             if (!$producto) {
                 throw new Exception("Producto ID {$idProducto} no encontrado o inactivo.");
             }
+            if ($precioUnitario <= 0) {
+                throw new Exception('El precio unitario debe ser mayor a cero.');
+            }
+            if (!isset($basePrices[$idProducto]) || (int) $producto['precio_venta'] !== $basePrices[$idProducto]) {
+                throw new Exception('El precio del producto cambió. Recargue el POS y vuelva a intentar.');
+            }
 
             $tipoVenta = $producto['tipo_venta'] ?? 'UNIDAD';
+            if ($tipoVenta === 'UNIDAD' && abs($cantidad - round($cantidad)) > 0.000001) {
+                throw new Exception("El producto \"{$producto['nombre_producto']}\" solo admite cantidades enteras.");
+            }
+            if ($tipoVenta !== 'UNIDAD' && abs($cantidad - round($cantidad, 3)) > 0.000001) {
+                throw new Exception("El producto \"{$producto['nombre_producto']}\" admite como máximo 3 decimales.");
+            }
             $costoUnit = (int) round(((float) ($producto['costo_promedio'] ?? 0)) * 100);
+            $linePromotion=$promotionLineMap[$idProducto]??[];
+            $receiptItems[]=['id_producto'=>$idProducto,'codigo'=>$producto['codigo_de_barras'],'sku'=>$producto['sku'],'nombre'=>$producto['nombre_producto'],'cantidad'=>$cantidad,
+                'precio_original'=>$precioUnitario,'descuento'=>$itemDiscount,'precio_final_promedio'=>$cantidad>0?(int)round($itemTotal/$cantidad):0,
+                'subtotal_original'=>$itemOriginalTotal,'subtotal'=>$itemTotal,'promociones'=>$linePromotion['promociones']??[],'unidades_beneficiadas'=>$linePromotion['unidades_beneficiadas']??0];
 
             // INSERT detalle_pedido
-            $sql = "INSERT INTO detalle_pedido (id_pedido, id_producto, cantidad_pedida, precio_total)
-                    VALUES (?, ?, ?, ?)";
+            $sql = "INSERT INTO detalle_pedido (id_pedido,id_producto,cantidad_pedida,precio_unitario_original,descuento,precio_unitario_final,precio_total)
+                    VALUES (?,?,?,?,?,?,?)";
             $stmt = $conn->prepare($sql);
             $cantidadPedida = $cantidad;
-            $stmt->bind_param('iidi', $idPedido, $idProducto, $cantidadPedida, $itemTotal);
+            $precioFinalPromedio=$cantidad>0?(int)round($itemTotal/$cantidad):0;
+            $stmt->bind_param('iidiiii',$idPedido,$idProducto,$cantidadPedida,$precioUnitario,$itemDiscount,$precioFinalPromedio,$itemTotal);
             $stmt->execute();
             $stmt->close();
 
@@ -1165,15 +1378,15 @@ function POST_venta_crear($data) {
             }
 
             // Kardex
-            $salidaKardex = ($tipoVenta === 'UNIDAD') ? (int) ceil($cantidad) : (int) round($cantidad * 1000);
-            $salidaReal   = ($tipoVenta === 'UNIDAD') ? (int) ceil($cantidad) : 0;
+            $salidaReal = ($tipoVenta === 'UNIDAD') ? (int) round($cantidad) : $cantidad;
             actualizarKardex($conn, $uid, $idProducto, $idBodega, 'VENTA', $idPedido, 'PEDIDO', 0, $salidaReal, $costoUnit, "Venta #{$idPedido}");
         }
 
         // INSERT pagos
-        foreach ($pagos as $pago) {
-            $metodoPago = $pago->metodo ?? $pago->nombre_metodo_pago ?? 'EFECTIVO';
-            $montoPago  = (int) ($pago->monto ?? 0);
+        foreach ($pagosNormalizados as $pago) {
+            $metodoPago = $pago['metodo'];
+            $montoPago  = $pago['monto'];
+            $referenciaPago = $pago['referencia'] ?: null;
 
             $sql = "INSERT INTO metodo_de_pago (id_pedido, nombre_metodo_pago, monto)
                     VALUES (?, ?, ?)";
@@ -1182,49 +1395,99 @@ function POST_venta_crear($data) {
             $stmt->execute();
             $stmt->close();
 
-            // Update caja monto_actual
+            // monto_actual represents physical cash only.
             if ($idCaja) {
-                $sql = "UPDATE pos_caja SET monto_actual = monto_actual + ? WHERE id_caja = ?";
-                $stmt = $conn->prepare($sql);
-                $stmt->bind_param('ii', $montoPago, $idCaja);
-                $stmt->execute();
-                $stmt->close();
+                if ($metodoPago === 'EFECTIVO') {
+                    $sql = "UPDATE pos_caja SET monto_actual = monto_actual + ? WHERE id_caja = ?";
+                    $stmt = $conn->prepare($sql);
+                    $stmt->bind_param('ii', $montoPago, $idCaja);
+                    $stmt->execute();
+                    $stmt->close();
+                }
 
                 // INSERT movimiento caja
-                $sql = "INSERT INTO pos_movimiento_caja (id_caja, id_user, tipo, concepto, monto, metodo, id_pedido)
-                        VALUES (?, ?, 'INGRESO', 'Venta', ?, ?, ?)";
+                $sql = "INSERT INTO pos_movimiento_caja (id_caja, id_user, tipo, concepto, monto, metodo, referencia, id_pedido)
+                        VALUES (?, ?, 'INGRESO', 'Venta', ?, ?, ?, ?)";
                 $stmt = $conn->prepare($sql);
-                $stmt->bind_param('iiisi', $idCaja, $uid, $montoPago, $metodoPago, $idPedido);
+                $stmt->bind_param('iiissi', $idCaja, $uid, $montoPago, $metodoPago, $referenciaPago, $idPedido);
                 $stmt->execute();
                 $stmt->close();
             }
         }
 
-        // INSERT descuento if applicable
-        if ($descuentoTotal > 0 && $idPromocion) {
-            $promoIdInt = (int) $idPromocion;
-            $sql = "INSERT INTO pos_descuento (id_pedido, id_promocion, tipo, monto, motivo, autorizado_por)
-                    VALUES (?, ?, 'PROMOCION', ?, 'Descuento por promoción', ?)";
-            $stmt = $conn->prepare($sql);
-            $stmt->bind_param('iiii', $idPedido, $promoIdInt, $descuentoTotal, $uid);
-            $stmt->execute();
-            $stmt->close();
-
-            // Increment uso de promocion
-            $sql = "UPDATE pos_promocion SET usado = usado + 1 WHERE id_promocion = ?";
-            $stmt = $conn->prepare($sql);
-            $stmt->bind_param('i', $promoIdInt);
-            $stmt->execute();
-            $stmt->close();
+        // Persist each applied rule and its exact allocation. This makes the
+        // receipt, reports and future returns reproducible.
+        foreach($promotionEvaluation['aplicadas'] as $application){
+            $promoIdInt=(int)$application['id_promocion'];$applicationDiscount=(int)$application['descuento'];
+            $stmt=$conn->prepare("INSERT INTO pos_descuento(id_pedido,id_promocion,tipo,monto,motivo,autorizado_por) VALUES(?,?,'PROMOCION',?,'Motor de promociones',?)");
+            $stmt->bind_param('iiii',$idPedido,$promoIdInt,$applicationDiscount,$uid);$stmt->execute();$stmt->close();
+            $applicationJson=json_encode($application,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);$applications=(float)$application['aplicaciones'];$promoCode=(string)$application['codigo'];
+            $stmt=$conn->prepare('INSERT INTO pos_promocion_aplicacion(id_cuenta,id_pedido,id_promocion,id_cliente,id_user,codigo,aplicaciones,descuento,detalle_json) VALUES(?,?,?,?,?,?,?,?,?)');
+            $stmt->bind_param('iiiiisdis',$tenant->accountId,$idPedido,$promoIdInt,$idCliente,$uid,$promoCode,$applications,$applicationDiscount,$applicationJson);$stmt->execute();$stmt->close();
+            $stmt=$conn->prepare('UPDATE pos_promocion SET usado=usado+1 WHERE id_promocion=? AND id_cuenta=?');$stmt->bind_param('ii',$promoIdInt,$tenant->accountId);$stmt->execute();$stmt->close();
+            promotionAudit($conn,$tenant->accountId,$uid,$promoIdInt,$idPedido,$idCliente,'APLICADA','Condiciones cumplidas',$applicationDiscount,$application);
         }
+        foreach($promotionEvaluation['rechazadas'] as $rejection){
+            if(!in_array(strtoupper((string)($rejection['codigo']??'')),array_map('strtoupper',$couponCodes),true))continue;
+            $rejectedId=isset($rejection['id_promocion'])?(int)$rejection['id_promocion']:null;
+            promotionAudit($conn,$tenant->accountId,$uid,$rejectedId,$idPedido,$idCliente,'RECHAZADA',(string)$rejection['motivo'],0,$rejection);
+        }
+
+        if($idCotizacion>0){
+            $stmt=$conn->prepare('UPDATE pos_cotizacion SET convertida=1,id_pedido=? WHERE id_cotizacion=? AND id_cuenta=? AND convertida=0');
+            $stmt->bind_param('iii',$idPedido,$idCotizacion,$tenant->accountId);$stmt->execute();$converted=$stmt->affected_rows===1;$stmt->close();
+            if(!$converted)throw new RuntimeException('No se pudo vincular la cotización a la venta.');
+        }
+
+        $stmt=$conn->prepare('SELECT * FROM config_boleta WHERE id_cuenta=? AND activo=1 ORDER BY id_config DESC LIMIT 1');
+        $stmt->bind_param('i',$tenant->accountId);$stmt->execute();$receiptConfig=$stmt->get_result()->fetch_assoc()?:[];$stmt->close();
+        // The logo is loaded from the current account asset when reprinting; it
+        // is not duplicated into every sale snapshot.
+        unset($receiptConfig['logo']);
+        $snapshot=json_encode([
+            'version'=>1,'id_pedido'=>$idPedido,'folio'=>$folio,'numero_documento'=>$numeroDocumento,
+            'tipo_documento'=>$tipoDocumento,'fecha'=>date('Y-m-d H:i:s'),
+            'cliente'=>['nombre'=>$clienteNombre,'rut'=>$clienteRut,'correo'=>$clienteCorreo,'telefono'=>$clienteTelefono],
+            'items'=>$receiptItems,'promociones'=>$promotionEvaluation['aplicadas'],'promociones_rechazadas'=>$promotionEvaluation['rechazadas'],
+            'pagos'=>$pagosNormalizados,'subtotal'=>$precioTotal,'descuento'=>$descuentoTotal,
+            'total'=>$precioFinal,'monto_recibido'=>$montoRecibido,'vuelto'=>$vuelto,'config'=>$receiptConfig,
+        ],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+        if($snapshot===false)throw new RuntimeException('No se pudo generar el documento de la venta.');
+        $stmt=$conn->prepare('INSERT INTO pos_documento_snapshot(id_cuenta,id_pedido,contenido_json) VALUES(?,?,?)');
+        $stmt->bind_param('iis',$tenant->accountId,$idPedido,$snapshot);$stmt->execute();$stmt->close();
 
         insertAuditoria($conn, $uid, 'venta_crear', "Pedido #{$idPedido} creado. Total: {$precioFinal}", $idPedido, 'pedido');
 
+        $sql = "UPDATE pos_venta_idempotencia
+                SET estado='COMPLETADA',id_pedido=?,completed_at=NOW()
+                WHERE id_cuenta=? AND clave=? AND solicitud_hash=?";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param('iiss', $idPedido, $tenant->accountId, $idempotencyKey, $requestHash);
+        $stmt->execute();
+        if ($stmt->affected_rows !== 1) {
+            $stmt->close();
+            throw new RuntimeException('No se pudo completar el control de idempotencia.');
+        }
+        $stmt->close();
+
         $conn->commit();
 
-        json(['success' => true, 'id_pedido' => $idPedido, 'total' => $precioFinal]);
+        json([
+            'success' => true,
+            'id_pedido' => $idPedido,
+            'total' => $precioFinal,
+            'monto_recibido' => $montoRecibido,
+            'cambio' => $vuelto,
+            'folio' => $folio,
+            'numero_documento' => $numeroDocumento,
+            'subtotal' => $precioTotal,
+            'descuento' => $descuentoTotal,
+            'promociones' => $promotionEvaluation['aplicadas'],
+            'items_documento' => $receiptItems,
+            'idempotent_replay' => false,
+        ]);
 
-    } catch (Exception $e) {
+    } catch (Throwable $e) {
         $conn->rollback();
         json(['error' => true, 'message' => $e->getMessage()], 400);
     }
@@ -1285,6 +1548,12 @@ function POST_venta_anular($data) {
         $stmt->close();
 
         $idBodega = (int) $pedido['id_bodega'];
+        $originalCajaId=(int)($pedido['id_caja']??0);
+        $stmt=$conn->prepare("SELECT estado FROM pos_caja WHERE id_caja=? AND id_cuenta=? FOR UPDATE");
+        $stmt->bind_param('ii',$originalCajaId,$tenant->accountId);$stmt->execute();$originalCaja=$stmt->get_result()->fetch_assoc();$stmt->close();
+        if(!$originalCaja||$originalCaja['estado']!=='ABIERTA'){
+            throw new Exception('La caja original está cerrada. Procese una devolución en la caja actual.');
+        }
 
         // Get detalle
         $sql = "SELECT * FROM detalle_pedido WHERE id_pedido = ?";
@@ -1352,17 +1621,20 @@ function POST_venta_anular($data) {
         if ($idCaja > 0) {
             foreach ($pagos as $pago) {
                 $montoPago = (int) $pago['monto'];
+                $metodoPago = posCanonicalPaymentMethod($pago['nombre_metodo_pago'] ?? 'EFECTIVO');
 
-                $sql = "UPDATE pos_caja SET monto_actual = monto_actual - ? WHERE id_caja = ?";
-                $stmt = $conn->prepare($sql);
-                $stmt->bind_param('ii', $montoPago, $idCaja);
-                $stmt->execute();
-                $stmt->close();
+                if ($metodoPago === 'EFECTIVO') {
+                    $sql = "UPDATE pos_caja SET monto_actual = monto_actual - ? WHERE id_caja = ?";
+                    $stmt = $conn->prepare($sql);
+                    $stmt->bind_param('ii', $montoPago, $idCaja);
+                    $stmt->execute();
+                    $stmt->close();
+                }
 
                 $sql = "INSERT INTO pos_movimiento_caja (id_caja, id_user, tipo, concepto, monto, metodo, id_pedido)
-                        VALUES (?, ?, 'EGRESO', 'Anulación de venta', ?, 'EFECTIVO', ?)";
+                        VALUES (?, ?, 'EGRESO', 'Anulación de venta', ?, ?, ?)";
                 $stmt = $conn->prepare($sql);
-                $stmt->bind_param('iiii', $idCaja, $uid, $montoPago, $pedidoId);
+                $stmt->bind_param('iiisi', $idCaja, $uid, $montoPago, $metodoPago, $pedidoId);
                 $stmt->execute();
                 $stmt->close();
             }
@@ -1412,7 +1684,7 @@ function POST_cliente_crear($data) {
 function POST_promocion_crear($data) {
     global $conn, $uid, $tenant;
 
-    $codigo       = $data->codigo ?? '';
+    $codigo       = strtoupper(trim((string)($data->codigo ?? '')));
     $nombre       = $data->nombre ?? '';
     $tipo         = $data->tipo ?? 'DESCUENTO';
     $valor        = (int) ($data->valor ?? 0);
@@ -1427,40 +1699,72 @@ function POST_promocion_crear($data) {
     $aplicaMarca  = $data->aplica_marca ?? null;
     $combinable   = (int) ($data->combinable ?? 0);
     $productos    = $data->productos ?? [];
+    $productosCodigos = (array)($data->productos_codigos ?? []);
+    $beneficioCodigos = (array)($data->beneficio_codigos ?? []);
+    $cantidadPagada = isset($data->cantidad_pagada) ? (float)$data->cantidad_pagada : null;
+    $cantidadBeneficiada = isset($data->cantidad_beneficiada) ? (float)$data->cantidad_beneficiada : null;
+    $prioridad = max(0,(int)($data->prioridad ?? 100));
+    $requiereCodigo = (int)(bool)($data->requiere_codigo ?? false);
+    $maxAplicaciones = (int)($data->max_aplicaciones_transaccion ?? 0) ?: null;
+    $maxUsosCliente = (int)($data->max_usos_cliente ?? 0) ?: null;
+    $segmentoCliente = trim((string)($data->segmento_cliente ?? '')) ?: null;
+    $listaPrecios = trim((string)($data->lista_precios ?? '')) ?: null;
+    $idSucursal = (int)($data->id_sucursal ?? 0) ?: null;
+    $canal = trim((string)($data->canal ?? '')) ?: null;
+    $motivo = trim((string)($data->motivo ?? '')) ?: null;
+    $condicionesJson = json_encode((array)($data->condiciones ?? []),JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+    $beneficioJson = json_encode((array)($data->beneficio ?? []),JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
 
-    if (empty($nombre) || empty($codigo)) {
-        json(['error' => true, 'message' => 'Nombre y código son requeridos'], 400);
-    }
+    if (empty($nombre)) json(['error'=>true,'message'=>'Nombre requerido'],400);
+    if ($codigo==='') $codigo='PROMO-'.strtoupper(substr(bin2hex(random_bytes(5)),0,10));
+    if (!preg_match('/^[A-Z0-9][A-Z0-9._-]{2,29}$/',$codigo)) json(['error'=>true,'message'=>'Código inválido. Use 3 a 30 letras, números, punto, guion o guion bajo.'],400);
+    $allowedTypes=['2X1','3X2','NXM','CANTIDAD','PORCENTAJE','DESCUENTO_PCT','FIJO','DESCUENTO_MONTO','PRECIO_ESPECIAL','COMPRA_X_DESCUENTO_Y','BUY_X_GET_Y','COMBO'];
+    if(!in_array(strtoupper($tipo),$allowedTypes,true))json(['error'=>true,'message'=>'Tipo de promoción no soportado'],400);
+    if($fechaInicio&&$fechaFin&&$fechaFin<$fechaInicio)json(['error'=>true,'message'=>'La fecha final no puede ser anterior a la inicial'],400);
 
     $conn->begin_transaction();
     try {
-        $sql = "INSERT INTO pos_promocion (id_user, id_cuenta, codigo, nombre, tipo, valor, monto_minimo, cantidad_minima,
-                    fecha_inicio, fecha_fin, dias_semana, hora_inicio, hora_fin, aplica_categoria, aplica_marca, combinable)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        if($idSucursal)requireTenantEntity($conn,$tenant,'sucursal',$idSucursal);
+        $sql = "INSERT INTO pos_promocion (id_user,id_cuenta,codigo,nombre,tipo,valor,monto_minimo,cantidad_minima,cantidad_pagada,cantidad_beneficiada,
+                    fecha_inicio,fecha_fin,dias_semana,hora_inicio,hora_fin,aplica_categoria,aplica_marca,combinable,prioridad,requiere_codigo,
+                    max_aplicaciones_transaccion,max_usos_cliente,segmento_cliente,lista_precios,id_sucursal,canal,condiciones_json,beneficio_json,motivo)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param('iisssiiisssssssi', $uid, $tenant->accountId, $codigo, $nombre, $tipo, $valor, $montoMinimo, $cantidadMinima,
-            $fechaInicio, $fechaFin, $diasSemana, $horaInicio, $horaFin, $aplicaCategoria, $aplicaMarca, $combinable);
+        $stmt->bind_param('iisssiidddsssssssiiiiississss',$uid,$tenant->accountId,$codigo,$nombre,$tipo,$valor,$montoMinimo,$cantidadMinima,$cantidadPagada,$cantidadBeneficiada,
+            $fechaInicio,$fechaFin,$diasSemana,$horaInicio,$horaFin,$aplicaCategoria,$aplicaMarca,$combinable,$prioridad,$requiereCodigo,
+            $maxAplicaciones,$maxUsosCliente,$segmentoCliente,$listaPrecios,$idSucursal,$canal,$condicionesJson,$beneficioJson,$motivo);
         $stmt->execute();
         $idPromocion = $conn->insert_id;
         $stmt->close();
 
         // Insert producto associations
         if (!empty($productos)) {
-            $sql = "INSERT INTO pos_promocion_producto (id_promocion, id_producto) VALUES (?, ?)";
+            $sql = "INSERT INTO pos_promocion_producto (id_promocion,id_producto,codigo_producto,sku) SELECT ?,id_producto,codigo_de_barras,sku FROM producto WHERE id_producto=? AND id_cuenta=?";
             $stmt = $conn->prepare($sql);
             foreach ($productos as $pid) {
                 $productoId = (int) $pid;
-                $stmt->bind_param('ii', $idPromocion, $productoId);
+                $stmt->bind_param('iii', $idPromocion, $productoId,$tenant->accountId);
                 $stmt->execute();
+                if($stmt->affected_rows!==1)throw new InvalidArgumentException("Producto #{$productoId} no pertenece a la cuenta.");
             }
             $stmt->close();
         }
 
+        $insertCodes=function(array $codes,string $role)use($conn,$tenant,$idPromocion){
+            $find=$conn->prepare('SELECT id_producto,codigo_de_barras,sku FROM producto WHERE id_cuenta=? AND activo=1 AND (UPPER(codigo_de_barras)=? OR UPPER(sku)=?) LIMIT 1');
+            $insert=$conn->prepare('INSERT INTO pos_promocion_producto(id_promocion,id_producto,rol,codigo_producto,sku) VALUES(?,?,?,?,?)');
+            foreach($codes as $raw){$code=strtoupper(trim((string)$raw));if($code==='')continue;$find->bind_param('iss',$tenant->accountId,$code,$code);$find->execute();$product=$find->get_result()->fetch_assoc();if(!$product)throw new InvalidArgumentException("No existe producto activo con código o SKU {$code}.");$productId=(int)$product['id_producto'];$barcode=$product['codigo_de_barras'];$sku=$product['sku'];$insert->bind_param('iisss',$idPromocion,$productId,$role,$barcode,$sku);$insert->execute();}
+            $find->close();$insert->close();
+        };
+        $insertCodes($productosCodigos,'ELEGIBLE');
+        $insertCodes($beneficioCodigos,'BENEFICIO');
+
         insertAuditoria($conn, $uid, 'promocion_crear', "Promoción \"{$nombre}\" creada", $idPromocion, 'pos_promocion');
+        promotionAudit($conn,$tenant->accountId,$uid,$idPromocion,null,null,'CREADA',$motivo?:'Regla configurada',0,['tipo'=>$tipo,'codigo'=>$codigo,'productos_codigos'=>$productosCodigos,'beneficio_codigos'=>$beneficioCodigos]);
 
         $conn->commit();
 
-        json(['success' => true, 'id_promocion' => $idPromocion]);
+        json(['success' => true, 'id_promocion' => $idPromocion,'codigo'=>$codigo]);
 
     } catch (Exception $e) {
         $conn->rollback();
@@ -1468,73 +1772,37 @@ function POST_promocion_crear($data) {
     }
 }
 
+function POST_promociones_evaluar($data) {
+    global $conn, $uid, $tenant;
+    $items = (array) ($data->items ?? []);
+    if (!$items) json(['error'=>true,'message'=>'Agregue productos para evaluar promociones.'],400);
+    $idCliente = (int) ($data->id_cliente ?? 0);
+    $coupons = (array) ($data->cupones ?? []);
+    try {
+        $result = promotionEvaluate($conn,$tenant->accountId,$uid,$items,$idCliente ?: null,$coupons,[
+            'id_sucursal'=>(int)($data->id_sucursal ?? 0),
+            'canal'=>trim((string)($data->canal ?? 'POS')) ?: 'POS',
+            'lista_precios'=>trim((string)($data->lista_precios ?? '')),
+        ]);
+        json($result);
+    } catch (Throwable $e) {
+        json(['error'=>true,'message'=>$e->getMessage()],400);
+    }
+}
+
 function POST_promocion_validar($data) {
     global $conn, $uid, $tenant;
 
     $codigo = $data->codigo ?? '';
-    $subtotal = (int) ($data->subtotal ?? 0);
-
     if (empty($codigo)) {
         json(['error' => true, 'message' => 'Código de promoción requerido'], 400);
     }
-
-    $sql = "SELECT * FROM pos_promocion WHERE codigo = ? AND id_user = ? AND activo = 1";
-    $stmt = $conn->prepare($sql);
-    $stmt->bind_param('si', $codigo, $uid);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $promo = $result->fetch_assoc();
-    $stmt->close();
-
-    if (!$promo) {
-        json(['valida' => false, 'message' => 'Promoción no encontrada o inactiva']);
-    }
-
-    // Date validation
-    $hoy = date('Y-m-d');
-    if ($promo['fecha_inicio'] && $promo['fecha_inicio'] > $hoy) {
-        json(['valida' => false, 'message' => 'Promoción aún no comienza']);
-    }
-    if ($promo['fecha_fin'] && $promo['fecha_fin'] < $hoy) {
-        json(['valida' => false, 'message' => 'Promoción expirada']);
-    }
-
-    // Minimum amount
-    $montoMin = (int) $promo['monto_minimo'];
-    if ($montoMin > 0 && $subtotal < $montoMin) {
-        json(['valida' => false, 'message' => "Requiere compra mínima de \${$montoMin}"]);
-    }
-
-    // Calculate descuento
-    $tipo  = $promo['tipo'];
-    $valor = (int) $promo['valor'];
-    $descuento = 0;
-
-    if ($tipo === 'PORCENTAJE') {
-        $descuento = (int) round($subtotal * $valor / 100);
-    } elseif ($tipo === 'FIJO') {
-        $descuento = min($valor, $subtotal);
-    }
-
-    // Get associated products
-    $sql = "SELECT id_producto FROM pos_promocion_producto WHERE id_promocion = ?";
-    $stmt = $conn->prepare($sql);
-    $pid = (int) $promo['id_promocion'];
-    $stmt->bind_param('i', $pid);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $productosIds = [];
-    while ($row = $result->fetch_assoc()) {
-        $productosIds[] = (int) $row['id_producto'];
-    }
-    $stmt->close();
-
-    json([
-        'valida'       => true,
-        'promocion'    => $promo,
-        'descuento'    => $descuento,
-        'productos_ids'=> $productosIds,
-    ]);
+    try {
+        $evaluation=promotionEvaluate($conn,$tenant->accountId,$uid,(array)($data->items??[]),(int)($data->id_cliente??0)?:null,[$codigo],['canal'=>'POS']);
+        $applied=array_values(array_filter($evaluation['aplicadas'],fn($p)=>strcasecmp((string)$p['codigo'],(string)$codigo)===0));
+        if(!$applied){$reason='La promoción no cumple sus condiciones.';foreach($evaluation['rechazadas'] as $rejection)if(strcasecmp((string)$rejection['codigo'],(string)$codigo)===0){$reason=$rejection['motivo'];break;}json(['valida'=>false,'message'=>$reason]);}
+        json(['valida'=>true,'promocion'=>$applied[0],'descuento'=>$applied[0]['descuento'],'descripcion'=>$applied[0]['nombre'],'evaluacion'=>$evaluation]);
+    } catch(Throwable $e){json(['valida'=>false,'message'=>$e->getMessage()]);}
 }
 
 function POST_promocion_eliminar($data) {
@@ -1545,9 +1813,10 @@ function POST_promocion_eliminar($data) {
         json(['error' => true, 'message' => 'ID de promoción requerido'], 400);
     }
 
-    $sql = "DELETE FROM pos_promocion WHERE id_promocion = ? AND id_user = ?";
+    $motivo=trim((string)($data->motivo??'Desactivada desde el administrador POS'));
+    $sql = "UPDATE pos_promocion SET activo=0,estado='INACTIVA',motivo=? WHERE id_promocion = ? AND id_cuenta = ? AND activo=1";
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param('ii', $idPromocion, $uid);
+    $stmt->bind_param('sii',$motivo,$idPromocion,$tenant->accountId);
     $stmt->execute();
     $affected = $stmt->affected_rows;
     $stmt->close();
@@ -1556,7 +1825,8 @@ function POST_promocion_eliminar($data) {
         json(['error' => true, 'message' => 'Promoción no encontrada'], 404);
     }
 
-    json(['success' => true, 'message' => 'Promoción eliminada']);
+    promotionAudit($conn,$tenant->accountId,$uid,$idPromocion,null,null,'ELIMINADA',$motivo,0);
+    json(['success' => true, 'message' => 'Promoción desactivada']);
 }
 
 function POST_cotizacion_crear($data) {
@@ -1564,7 +1834,7 @@ function POST_cotizacion_crear($data) {
 
     $items          = $data->items ?? [];
     $codigo         = $data->codigo ?? ('COT-' . date('Ymd') . '-' . rand(100, 999));
-    $idCliente      = $data->id_cliente ?? null;
+    $idCliente      = (int)($data->id_cliente ?? 0) ?: null;
     $clienteNombre  = $data->cliente_nombre ?? '';
     $clienteRut     = $data->cliente_rut ?? '';
     $clienteCorreo  = $data->cliente_correo ?? '';
@@ -1572,6 +1842,7 @@ function POST_cotizacion_crear($data) {
     $descuento      = (int) ($data->descuento ?? 0);
     $validez        = $data->validez ?? '7 días';
     $notas          = $data->notas ?? '';
+    $couponCodes    = (array)($data->cupones ?? []);
 
     if (empty($items)) {
         json(['error' => true, 'message' => 'Se requiere al menos un producto'], 400);
@@ -1579,25 +1850,18 @@ function POST_cotizacion_crear($data) {
 
     $conn->begin_transaction();
     try {
-        // Calculate subtotal
-        $subtotal = 0;
-        foreach ($items as $item) {
-            $cantidad = (float) ($item->cantidad ?? 0);
-            $precio   = (int) ($item->precio_unitario ?? 0);
-            $subtotal += (int) round($precio * $cantidad);
-        }
-
-        $total = $subtotal - $descuento;
-        if ($total < 0) {
-            $total = 0;
-        }
+        if($idCliente){$stmt=$conn->prepare('SELECT nombre,rut,correo,telefono FROM cliente WHERE id_cliente=? AND id_cuenta=? AND COALESCE(activo,1)=1');$stmt->bind_param('ii',$idCliente,$tenant->accountId);$stmt->execute();$client=$stmt->get_result()->fetch_assoc();$stmt->close();if(!$client)throw new InvalidArgumentException('El cliente seleccionado no existe o pertenece a otra cuenta.');$clienteNombre=$client['nombre'];$clienteRut=$client['rut'];$clienteCorreo=$client['correo'];$clienteTelefono=$client['telefono'];}
+        $evaluation=promotionEvaluate($conn,$tenant->accountId,$uid,(array)$items,$idCliente,$couponCodes,['canal'=>'POS','id_sucursal'=>(int)($data->id_sucursal??0)],true);
+        $subtotal=(int)$evaluation['subtotal'];$descuento=(int)$evaluation['descuento'];$total=(int)$evaluation['total'];
+        $quoteLines=[];foreach($evaluation['lineas'] as $line)$quoteLines[(int)$line['id_producto']]=$line;
+        $couponsJson=json_encode($couponCodes,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);$promotionsJson=json_encode($evaluation['aplicadas'],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
 
         $sql = "INSERT INTO pos_cotizacion (id_user, id_cuenta, codigo, id_cliente, cliente_nombre, cliente_rut, cliente_correo, cliente_telefono,
-                    subtotal, descuento, total, validez, notas)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                    subtotal, descuento, total, validez, notas,cupones_json,promociones_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?,?)";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param('iisissssiiiis', $uid, $tenant->accountId, $codigo, $idCliente, $clienteNombre, $clienteRut, $clienteCorreo, $clienteTelefono,
-            $subtotal, $descuento, $total, $validez, $notas);
+        $stmt->bind_param('iisissssiiissss', $uid, $tenant->accountId, $codigo, $idCliente, $clienteNombre, $clienteRut, $clienteCorreo, $clienteTelefono,
+            $subtotal, $descuento, $total, $validez, $notas,$couponsJson,$promotionsJson);
         $stmt->execute();
         $idCotizacion = $conn->insert_id;
         $stmt->close();
@@ -1608,11 +1872,13 @@ function POST_cotizacion_crear($data) {
         $stmt = $conn->prepare($sql);
         foreach ($items as $item) {
             $idProducto     = $item->id_producto ?? null;
-            $productoNombre = $item->producto ?? '';
-            $sku            = $item->sku ?? '';
+            $canonicalLine=$quoteLines[(int)$idProducto]??null;
+            if(!$canonicalLine)throw new InvalidArgumentException('Producto inválido en cotización.');
+            $productoNombre = $canonicalLine['nombre_producto'];
+            $sku            = $canonicalLine['sku']?:$canonicalLine['codigo_de_barras'];
             $cantidad       = (float) ($item->cantidad ?? 1);
-            $precioUnitario = (int) ($item->precio_unitario ?? 0);
-            $itemDesc       = (int) ($item->descuento ?? 0);
+            $precioUnitario = (int)$canonicalLine['precio_original'];
+            $itemDesc       = (int)round((int)$canonicalLine['descuento']*$cantidad/max(.001,(float)$canonicalLine['cantidad']));
             $itemSubtotal   = (int) round($precioUnitario * $cantidad) - $itemDesc;
 
             $stmt->bind_param('iissdiii', $idCotizacion, $idProducto, $productoNombre, $sku, $cantidad, $precioUnitario, $itemDesc, $itemSubtotal);
@@ -1624,7 +1890,7 @@ function POST_cotizacion_crear($data) {
 
         $conn->commit();
 
-        json(['success' => true, 'id_cotizacion' => $idCotizacion, 'total' => $total]);
+        json(['success' => true, 'id_cotizacion' => $idCotizacion, 'codigo'=>$codigo, 'total' => $total]);
 
     } catch (Exception $e) {
         $conn->rollback();
@@ -1825,9 +2091,9 @@ function POST_cotizacion_eliminar($data) {
         json(['error' => true, 'message' => 'ID de cotización requerido'], 400);
     }
 
-    $sql = "DELETE FROM pos_cotizacion WHERE id_cotizacion = ? AND id_user = ?";
+    $sql = "DELETE FROM pos_cotizacion WHERE id_cotizacion = ? AND id_cuenta = ? AND convertida=0";
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param('ii', $idCotizacion, $uid);
+    $stmt->bind_param('ii', $idCotizacion, $tenant->accountId);
     $stmt->execute();
     $affected = $stmt->affected_rows;
     $stmt->close();
@@ -2034,10 +2300,12 @@ function POST_devolucion_crear($data) {
                 $montoPago=(int)($pago['monto']??0);
                 $montoReversa=($idx===$cantidadPagos-1)?$restante:min($restante,(int)round($montoPago*$montoTotal/$totalOriginal));
                 if ($montoReversa<=0) continue;
-                $metodo=(string)($pago['nombre_metodo_pago']??'EFECTIVO');
+                $metodo=posCanonicalPaymentMethod($pago['nombre_metodo_pago']??'EFECTIVO');
                 $concepto="Devolución venta #{$pedidoId}";
-                $stmt=$conn->prepare('UPDATE pos_caja SET monto_actual=monto_actual-? WHERE id_caja=?');
-                $stmt->bind_param('ii',$montoReversa,$idCaja);$stmt->execute();$stmt->close();
+                if ($metodo==='EFECTIVO') {
+                    $stmt=$conn->prepare('UPDATE pos_caja SET monto_actual=monto_actual-? WHERE id_caja=?');
+                    $stmt->bind_param('ii',$montoReversa,$idCaja);$stmt->execute();$stmt->close();
+                }
                 $stmt=$conn->prepare("INSERT INTO pos_movimiento_caja(id_caja,id_user,tipo,concepto,monto,metodo,id_pedido) VALUES(?,?,'EGRESO',?,?,?,?)");
                 $stmt->bind_param('iisisi',$idCaja,$uid,$concepto,$montoReversa,$metodo,$pedidoId);$stmt->execute();$stmt->close();
                 $restante-=$montoReversa;
