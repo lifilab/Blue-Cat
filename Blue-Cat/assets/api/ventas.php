@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/_db.php';
+require_once __DIR__ . '/_pos_integrity.php';
 $uid = requireUser();
 $conn = getDB();
 $method = $_SERVER['REQUEST_METHOD'];
@@ -90,7 +91,13 @@ function buildWhere($conn, $uid) {
 function calcResumen($conn, $w) {
     $r = $conn->query("SELECT COUNT(*) as cant, COALESCE(SUM(p.precio_total),0) as total FROM pedido p LEFT JOIN sesion s ON p.id_sesion=s.id_sesion WHERE $w AND p.anulado=0")->fetch_assoc();
     $res = ['total_ventas'=>(int)$r['cant'],'total_monto'=>(int)$r['total'],'promedio_ticket'=>$r['cant']>0 ? round($r['total']/$r['cant']) : 0];
-    $met = $conn->query("SELECT mp.nombre_metodo_pago, COALESCE(SUM(mp.monto),0) as total FROM metodo_de_pago mp INNER JOIN pedido p ON mp.id_pedido=p.id_pedido LEFT JOIN sesion s ON p.id_sesion=s.id_sesion WHERE $w AND p.anulado=0 GROUP BY mp.nombre_metodo_pago")->fetch_all(MYSQLI_ASSOC);
+    $methodCase = "CASE
+        WHEN UPPER(TRIM(mp.nombre_metodo_pago))='EFECTIVO' THEN 'EFECTIVO'
+        WHEN UPPER(TRIM(mp.nombre_metodo_pago)) IN ('TARJETA_CREDITO','TARJETA','CRÉDITO','CREDITO') THEN 'TARJETA_CREDITO'
+        WHEN UPPER(TRIM(mp.nombre_metodo_pago)) IN ('TARJETA_DEBITO','DÉBITO','DEBITO') THEN 'TARJETA_DEBITO'
+        WHEN UPPER(TRIM(mp.nombre_metodo_pago))='TRANSFERENCIA' THEN 'TRANSFERENCIA'
+        ELSE 'OTRO' END";
+    $met = $conn->query("SELECT $methodCase nombre_metodo_pago, COALESCE(SUM(mp.monto),0) as total FROM metodo_de_pago mp INNER JOIN pedido p ON mp.id_pedido=p.id_pedido LEFT JOIN sesion s ON p.id_sesion=s.id_sesion WHERE $w AND p.anulado=0 GROUP BY $methodCase")->fetch_all(MYSQLI_ASSOC);
     $res['por_metodo'] = [];
     foreach ($met as $m) $res['por_metodo'][$m['nombre_metodo_pago']] = (int)$m['total'];
     $a = $conn->query("SELECT COUNT(*) as cant, COALESCE(SUM(p.precio_total),0) as total FROM pedido p LEFT JOIN sesion s ON p.id_sesion=s.id_sesion WHERE $w AND p.anulado=1")->fetch_assoc();
@@ -105,15 +112,16 @@ if ($method === 'GET') {
     elseif ($accion === 'detalle') detalle($conn, $uid);
     elseif ($accion === 'resumen') resumen($conn, $uid);
     elseif ($accion === 'sesiones') sesiones($conn, $uid);
-    elseif ($accion === 'cuadre') { requierePermiso('ventas','cuadre'); cuadre($conn, $uid, $_GET); }
+    elseif ($accion === 'cuadre') { requierePermiso('ventas','cuadre'); cuadreV2($conn, $uid, $_GET); }
     elseif ($accion === 'exportar') { requierePermiso('ventas','exportar'); exportar($conn, $uid); }
     else json(['error'=>'Acción no válida'], 400);
 } elseif ($method === 'POST') {
     $input = getJsonInput();
     $accion = $input['accion'] ?? '';
-    if ($accion === 'cuadre') { requierePermiso('ventas','cuadre'); cuadre($conn, $uid, $input); }
-    elseif ($accion === 'editar') { requierePermiso('ventas','editar'); editar($conn, $uid, $input); }
-    elseif ($accion === 'eliminar') { requierePermiso('ventas','eliminar'); eliminar($conn, $uid, $input); }
+    if ($accion === 'cuadre') { requierePermiso('ventas','cuadre'); cuadreV2($conn, $uid, $input); }
+    elseif ($accion === 'editar' || $accion === 'eliminar') {
+        json(['error'=>'Las ventas confirmadas son inmutables. Use anulación o devolución autorizada.'], 409);
+    }
     else json(['error'=>'Acción no válida'], 400);
 } else {
     json(['error'=>'Método no soportado'], 405);
@@ -142,7 +150,12 @@ function listar($conn, $uid) {
         $id_values = array_column($ventas, 'id_pedido');
         $placeholders = implode(',', array_fill(0, count($id_values), '?'));
         $types = str_repeat('i', count($id_values));
-        $stmt = $conn->prepare("SELECT dp.*, pr.nombre_producto, pr.codigo_de_barras FROM detalle_pedido dp LEFT JOIN producto pr ON dp.id_producto=pr.id_producto WHERE dp.id_pedido IN ($placeholders)");
+        $stmt = $conn->prepare("SELECT dp.*, pr.nombre_producto, pr.codigo_de_barras,
+            COALESCE(SUM(dd.cantidad),0) cantidad_devuelta,
+            dp.cantidad_pedida-COALESCE(SUM(dd.cantidad),0) cantidad_disponible_devolucion
+            FROM detalle_pedido dp LEFT JOIN producto pr ON dp.id_producto=pr.id_producto
+            LEFT JOIN pos_devolucion_detalle dd ON dd.id_detalle_pedido=dp.id_detalle_pedido
+            WHERE dp.id_pedido IN ($placeholders) GROUP BY dp.id_detalle_pedido");
         $stmt->bind_param($types, ...$id_values);
         $stmt->execute();
         $items = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
@@ -223,6 +236,62 @@ function exportar($conn, $uid) {
     echo '</tbody></table></body></html>';
     exit;
 }
+function cuadreV2($conn, $uid, $input) {
+    $idSesion=(int)($input['id_sesion']??0);
+    if (!$idSesion) {
+        $stmt=$conn->prepare("SELECT id_sesion FROM sesion WHERE id_user=? AND fecha_cierre IS NULL ORDER BY id_sesion DESC LIMIT 1");
+        $stmt->bind_param('i',$uid);$stmt->execute();$row=$stmt->get_result()->fetch_assoc();$stmt->close();
+        if (!$row) json(['error'=>'No hay sesión activa. Abra caja primero.'],400);
+        $idSesion=(int)$row['id_sesion'];
+    }
+    $stmt=$conn->prepare('SELECT * FROM sesion WHERE id_sesion=?');
+    $stmt->bind_param('i',$idSesion);$stmt->execute();$ses=$stmt->get_result()->fetch_assoc();$stmt->close();
+    if (!$ses) json(['error'=>'Sesión no encontrada'],404);
+    if ((int)$ses['id_user']!==$uid) {
+        if (!verificarPermiso('ventas','ver_todos') || getCuentaId($conn,(int)$ses['id_user'])!==getCuentaId($conn,$uid)) {
+            json(['error'=>'No autorizado'],403);
+        }
+    }
+
+    $stmt=$conn->prepare('SELECT COUNT(*) cantidad,COALESCE(SUM(precio_total),0) total FROM pedido WHERE id_sesion=? AND anulado=0');
+    $stmt->bind_param('i',$idSesion);$stmt->execute();$ventas=$stmt->get_result()->fetch_assoc();$stmt->close();
+    $stmt=$conn->prepare("SELECT
+        COALESCE(SUM(CASE WHEN UPPER(TRIM(m.nombre_metodo_pago))='EFECTIVO' THEN m.monto ELSE 0 END),0) efectivo,
+        COALESCE(SUM(CASE WHEN UPPER(TRIM(m.nombre_metodo_pago)) IN ('TARJETA_CREDITO','TARJETA','CRÉDITO','CREDITO') THEN m.monto ELSE 0 END),0) credito,
+        COALESCE(SUM(CASE WHEN UPPER(TRIM(m.nombre_metodo_pago)) IN ('TARJETA_DEBITO','DÉBITO','DEBITO') THEN m.monto ELSE 0 END),0) debito,
+        COALESCE(SUM(CASE WHEN UPPER(TRIM(m.nombre_metodo_pago))='TRANSFERENCIA' THEN m.monto ELSE 0 END),0) transferencia,
+        COALESCE(SUM(CASE WHEN UPPER(TRIM(m.nombre_metodo_pago))='OTRO' THEN m.monto ELSE 0 END),0) otro
+        FROM metodo_de_pago m JOIN pedido p ON p.id_pedido=m.id_pedido
+        WHERE p.id_sesion=? AND p.anulado=0");
+    $stmt->bind_param('i',$idSesion);$stmt->execute();$methods=$stmt->get_result()->fetch_assoc();$stmt->close();
+
+    $accountId=getCuentaId($conn,(int)$ses['id_user']);
+    $stmt=$conn->prepare('SELECT id_caja FROM pos_caja WHERE id_sesion=? AND id_cuenta=? ORDER BY id_caja DESC LIMIT 1');
+    $stmt->bind_param('ii',$idSesion,$accountId);$stmt->execute();$cash=$stmt->get_result()->fetch_assoc();$stmt->close();
+    $ledger=['esperado'=>(int)($ses['monto_apertura']??0),'ingresos'=>0,'retiros'=>0,'reversas'=>0];
+    if ($cash) {
+        $cashId=(int)$cash['id_caja'];
+        $stmt=$conn->prepare("SELECT
+            COALESCE(SUM(CASE WHEN tipo IN ('APERTURA','INGRESO') THEN monto WHEN tipo='EGRESO' THEN -monto ELSE 0 END),0) esperado,
+            COALESCE(SUM(CASE WHEN tipo='INGRESO' AND id_pedido IS NULL THEN monto ELSE 0 END),0) ingresos,
+            COALESCE(SUM(CASE WHEN tipo='EGRESO' AND id_pedido IS NULL THEN monto ELSE 0 END),0) retiros,
+            COALESCE(SUM(CASE WHEN tipo='EGRESO' AND id_pedido IS NOT NULL THEN monto ELSE 0 END),0) reversas
+            FROM pos_movimiento_caja
+            WHERE id_caja=? AND tipo<>'CIERRE' AND UPPER(TRIM(metodo))='EFECTIVO'");
+        $stmt->bind_param('i',$cashId);$stmt->execute();$ledger=$stmt->get_result()->fetch_assoc();$stmt->close();
+    }
+    $credit=(int)$methods['credito'];$debit=(int)$methods['debito'];
+    json([
+        'empleado'=>$ses['empleado']??'','nota'=>$ses['nota']??'','fecha_apertura'=>$ses['fecha_ingreso'],
+        'monto_apertura'=>(int)($ses['monto_apertura']??0),'efectivo'=>(int)$methods['efectivo'],
+        'credito'=>$credit,'debito'=>$debit,'tarjeta'=>$credit+$debit,
+        'transferencia'=>(int)$methods['transferencia'],'otro'=>(int)$methods['otro'],
+        'ingresos_efectivo'=>(int)$ledger['ingresos'],'retiros_efectivo'=>(int)$ledger['retiros'],
+        'reversas_efectivo'=>(int)$ledger['reversas'],'monto_total'=>(int)$ledger['esperado'],
+        'monto_ventas'=>(int)$ventas['total'],'cantidad_ventas'=>(int)$ventas['cantidad'],'id_sesion'=>$idSesion
+    ]);
+}
+
 function cuadre($conn, $uid, $input) {
     $id_sesion = (int)($input['id_sesion'] ?? 0);
     if (!$id_sesion) {

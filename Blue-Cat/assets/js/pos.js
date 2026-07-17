@@ -4,6 +4,9 @@ var cajaState = null, selectedClient = null, promoApplied = null;
 var _debounceTimer = null;
 var configBoleta = null; // Configuración de boletas
 var userPermissions = {}; // Permisos del usuario
+var _saleRequestKey = null;
+var _paymentSubmitting = false;
+var _pendingCotizacionId = 0;
 
 document.addEventListener('DOMContentLoaded', init);
 
@@ -60,7 +63,7 @@ function loadConfigBoleta() {
 }
 
 /* ── API call helper ── */
-function api(method, data, cb) {
+function api(method, data, cb, errCb) {
   var xhr = new XMLHttpRequest();
   var url = '../assets/api/pos.php';
   data = data || {};
@@ -82,22 +85,23 @@ function api(method, data, cb) {
       try {
         var e = JSON.parse(xhr.responseText);
         if (window.SupervisorApproval && window.SupervisorApproval.handle(e, function(token) {
-          data.supervisor_token = token; api(method, data, cb);
+          data.supervisor_token = token; api(method, data, cb, errCb);
         })) return;
 
         toast(e.message || (typeof e.error === 'string' ? e.error : 'Error ' + xhr.status), 'err');
         console.error('POS API ERROR [' + xhr.status + ' ' + url + ']', e);
+        if (errCb) errCb(e, xhr.status);
       }
-      catch (e2) { toast('Error del servidor', 'err'); }
+      catch (e2) { toast('Error del servidor', 'err'); if (errCb) errCb(e2, xhr.status); }
     }
   };
-  xhr.onerror = function () { toast('Error de conexión', 'err'); };
+  xhr.onerror = function () { toast('Error de conexión', 'err'); if (errCb) errCb(new Error('network'), 0); };
   if (method === 'POST') xhr.send(JSON.stringify(data));
   else xhr.send();
 }
 
 function apiGet(params, cb) { api('GET', params, cb); }
-function apiPost(data, cb) { api('POST', data, cb); }
+function apiPost(data, cb, errCb) { api('POST', data, cb, errCb); }
 
 /* ═══════════════════════════════════════════
    DASHBOARD
@@ -149,10 +153,12 @@ function loadCajaState() {
 
 function showAbrirCaja() {
   var nombreUsuario = sessionStorage.getItem('user_name') || 'Usuario';
+  var codigoCaja = localStorage.getItem('bluecat_pos_caja_codigo') || 'CAJA-01';
   var m = showModal(`
     <h3 style="font-size:18px;font-weight:700;margin-bottom:16px;"><i class="fas fa-cash-register" style="color:#4f46e5;"></i> Abrir Caja</h3>
     <div class="gr2">
       <div class="fld"><label>Monto Apertura *</label><input id="ac-monto" type="number" min="0" value="0"></div>
+      <div class="fld"><label>Código caja física *</label><input id="ac-codigo" value="${esc(codigoCaja)}" maxlength="40"></div>
       <div class="fld"><label>Nombre Caja</label><input id="ac-nombre" value="Caja Principal"></div>
       <div class="fld"><label>Empleado</label><input id="ac-emp" value="${nombreUsuario}" readonly style="background:#f1f5f9;cursor:not-allowed;"></div>
       <div class="fld"><label>Sucursal</label><input id="ac-suc" value="Principal"></div>
@@ -165,12 +171,15 @@ function showAbrirCaja() {
 
 function abrirCaja() {
   var monto = parseInt($('ac-monto').value) || 0;
+  var codigo = ($('ac-codigo').value || '').trim().toUpperCase();
+  if (!codigo) { toast('Indique el código de la caja física', 'err'); return; }
   apiPost({
-    accion: 'caja_abrir', monto_apertura: monto,
+    accion: 'caja_abrir', monto_apertura: monto, codigo: codigo,
     nombre_caja: $('ac-nombre').value, empleado: $('ac-emp').value,
     sucursal: $('ac-suc').value, nota: $('ac-nota').value
   }, function (d) {
-    toast('<i class="fas fa-check-circle"></i> Caja abierta: ' + d.codigo);
+    localStorage.setItem('bluecat_pos_caja_codigo', codigo);
+    toast('<i class="fas fa-check-circle"></i> Caja abierta: ' + (d.caja ? d.caja.codigo : codigo));
     closeModal();
     loadCajaState();
   });
@@ -197,7 +206,7 @@ function showMovimiento(tipo) {
     <h3 style="font-size:18px;font-weight:700;margin-bottom:16px;"><i class="fas fa-${tipo === 'INGRESO' ? 'arrow-down' : 'arrow-up'}" style="color:#4f46e5;"></i> ${tipo === 'INGRESO' ? 'Ingreso' : 'Egreso'} de Caja</h3>
     <div class="gr2">
       <div class="fld"><label>Monto *</label><input id="mv-monto" type="number" min="0"></div>
-      <div class="fld"><label>Método</label><select id="mv-metodo"><option value="EFECTIVO">Efectivo</option><option value="TARJETA">Tarjeta</option><option value="TRANSFERENCIA">Transferencia</option></select></div>
+      <div class="fld"><label>Método</label><select id="mv-metodo" disabled><option value="EFECTIVO">Efectivo</option></select></div>
     </div>
     <div class="fld"><label>Concepto *</label><input id="mv-concepto"></div>
     <div class="fld"><label>Referencia</label><input id="mv-ref"></div>
@@ -453,6 +462,7 @@ function clearCart() {
   cart = [];
   promoApplied = null;
   selectedClient = null;
+  _pendingCotizacionId = 0;
   $('cart-client').innerHTML = '<i class="fas fa-user"></i> Consumidor Final';
   renderCart();
 }
@@ -467,7 +477,8 @@ function applyPromo() {
   var total = items.reduce(function (s, it) { return s + it.precio_unitario * it.cantidad; }, 0);
 
   apiPost({ accion: 'promocion_validar', codigo: code, items: items, subtotal: total }, function (d) {
-    promoApplied = { descuento: d.descuento, descripcion: d.descripcion, id_promocion: d.id_promocion };
+    var promo=d.promocion||{};
+    promoApplied = { descuento: d.descuento, descripcion: promo.nombre||promo.descripcion||promo.codigo||code, id_promocion: promo.id_promocion };
     $('promo-tag').innerHTML = '<span class="promo-tag"><i class="fas fa-tag"></i> ' + esc(d.descripcion) + ' (-' + fm(d.descuento) + ')</span>';
     $('promo-input').value = '';
     renderCart();
@@ -560,6 +571,19 @@ function saveQuickClient() {
 /* ═══════════════════════════════════════════
    PAYMENT
    ═══════════════════════════════════════════ */
+function newSaleRequestKey() {
+  if (window.crypto && typeof window.crypto.randomUUID === 'function') return window.crypto.randomUUID();
+  var bytes = new Uint8Array(16);
+  if (window.crypto && window.crypto.getRandomValues) window.crypto.getRandomValues(bytes);
+  else for (var i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  return Array.prototype.map.call(bytes, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+}
+
+function paymentMethodLabel(method) {
+  var labels = { EFECTIVO: 'Efectivo', TARJETA_CREDITO: 'Tarjeta crédito', TARJETA_DEBITO: 'Tarjeta débito', TRANSFERENCIA: 'Transferencia', OTRO: 'Otro' };
+  return labels[method] || method;
+}
+
 function showPayment() {
   if (cart.length === 0) { toast('Carrito vacío', 'err'); return; }
   if (!cajaState || cajaState.estado !== 'ABIERTA') { toast('Debe abrir caja primero', 'err'); return; }
@@ -577,10 +601,10 @@ function showPayment() {
       <div style="font-size:32px;font-weight:800;color:#1e293b;">${fm(total)}</div>
     </div>
     <div class="pay-grid">
-      <button class="pay-method" onclick="addPayment('Efectivo')"><i class="fas fa-money-bill-wave"></i> Efectivo</button>
-      <button class="pay-method" onclick="addPayment('Tarjeta')"><i class="fas fa-credit-card"></i> Tarjeta</button>
-      <button class="pay-method" onclick="addPayment('Transferencia')"><i class="fas fa-university"></i> Transferencia</button>
-      <button class="pay-method" onclick="addPayment('Débito')"><i class="fas fa-credit-card"></i> Débito</button>
+      <button class="pay-method" onclick="addPayment('EFECTIVO')"><i class="fas fa-money-bill-wave"></i> Efectivo</button>
+      <button class="pay-method" onclick="addPayment('TARJETA_CREDITO')"><i class="fas fa-credit-card"></i> Crédito</button>
+      <button class="pay-method" onclick="addPayment('TARJETA_DEBITO')"><i class="fas fa-credit-card"></i> Débito</button>
+      <button class="pay-method" onclick="addPayment('TRANSFERENCIA')"><i class="fas fa-university"></i> Transferencia</button>
     </div>
     <div id="payment-list" style="margin:8px 0;"></div>
     <div id="payment-summary" style="display:flex;justify-content:space-between;font-size:14px;font-weight:600;padding:8px 0;border-top:1px solid #e2e8f0;">
@@ -595,6 +619,8 @@ function showPayment() {
   window._payments = [];
   window._payTotal = 0;
   window._payTarget = total;
+  _saleRequestKey = newSaleRequestKey();
+  _paymentSubmitting = false;
   updatePaymentUI();
 }
 
@@ -603,7 +629,7 @@ function addPayment(metodo) {
   if (resto <= 0) { toast('Ya está cubierto', 'ok'); return; }
   // Prompt for amount
   var m2 = showModal(`
-    <h3 style="font-size:18px;font-weight:700;margin-bottom:12px;"><i class="fas fa-${metodo === 'EFECTIVO' ? 'money-bill-wave' : 'credit-card'}"></i> ${metodo}</h3>
+    <h3 style="font-size:18px;font-weight:700;margin-bottom:12px;"><i class="fas fa-${metodo === 'EFECTIVO' ? 'money-bill-wave' : 'credit-card'}"></i> ${paymentMethodLabel(metodo)}</h3>
     <div class="fld"><label>Monto</label><input id="pm-monto" type="number" min="1" value="${resto}"></div>
     <div class="fld"><label>Referencia / Aut. (opcional)</label><input id="pm-ref"></div>
     <div class="mcb">
@@ -616,6 +642,10 @@ function addPayment(metodo) {
 
 function confirmPaymentMethod(metodo) {
   var monto = parseInt($('pm-monto').value) || 0;
+  var restante = window._payTarget - window._payTotal;
+  if (metodo !== 'EFECTIVO' && monto > restante) {
+    toast('Solo el efectivo puede superar el saldo y generar vuelto', 'err'); return;
+  }
   if (monto <= 0) { toast('Monto inválido', 'err'); return; }
   var ref = $('pm-ref').value || '';
   window._payments.push({ metodo: metodo, monto: monto, referencia: ref });
@@ -629,7 +659,7 @@ function updatePaymentUI() {
   var ph = '';
   for (var i = 0; i < (window._payments || []).length; i++) {
     var p = window._payments[i];
-    ph += '<div style="display:flex;justify-content:space-between;padding:4px 8px;background:#f8fafc;border-radius:6px;margin:2px 0;"><span><strong>' + p.metodo + '</strong></span><span>' + fm(p.monto) + '</span></div>';
+    ph += '<div style="display:flex;justify-content:space-between;padding:4px 8px;background:#f8fafc;border-radius:6px;margin:2px 0;"><span><strong>' + paymentMethodLabel(p.metodo) + '</strong></span><span>' + fm(p.monto) + '</span></div>';
   }
   if (list) list.innerHTML = ph;
   var totalEl = $('pay-total');
@@ -649,23 +679,34 @@ function updatePaymentUI() {
 }
 
 function confirmPayment() {
+  if (_paymentSubmitting) return;
   var items = cart.map(function (c) { return { id_producto: c.id, cantidad: c.cant, precio_unitario: c.price }; });
   var pagos = window._payments;
   var total = window._payTarget;
+  _paymentSubmitting = true;
+  var confirmBtn = $('pay-confirm-btn');
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Procesando...'; }
 
   apiPost({
     accion: 'venta_crear', items: items, pagos: pagos,
+    idempotency_key: _saleRequestKey,
+    id_cotizacion: _pendingCotizacionId || 0,
     descuento: promoApplied ? promoApplied.descuento : 0,
     id_promocion: promoApplied ? promoApplied.id_promocion : 0,
     id_caja: cajaState.id_caja,
     cliente: selectedClient,
     tipo_documento: ($('doc-tipo') ? $('doc-tipo').value : 'BOLETA')
   }, function (d) {
+    _paymentSubmitting = false;
+    _saleRequestKey = null;
     closeModal();
     showReceipt(d, items, pagos);
     clearCart();
     loadDashboard();
     loadCajaState();
+  }, function () {
+    _paymentSubmitting = false;
+    updatePaymentUI();
   });
 }
 
@@ -693,7 +734,7 @@ function showReceipt(data, items, pagos) {
 
   var payLines = '';
   for (var k = 0; k < pagos.length; k++) {
-    payLines += '<div class="rec-line"><span>' + pagos[k].metodo + '</span><span>' + fm(pagos[k].monto) + '</span></div>';
+    payLines += '<div class="rec-line"><span>' + paymentMethodLabel(pagos[k].metodo) + '</span><span>' + fm(pagos[k].monto) + '</span></div>';
   }
 
   // Datos de la empresa desde configuración
@@ -728,6 +769,7 @@ function showReceipt(data, items, pagos) {
   }
   
   headerHTML += '<div style="text-align:center;font-size:10px;margin-bottom:6px;">' + now.toLocaleString('es-CL') + '</div>';
+  if (data.numero_documento) headerHTML += '<div style="text-align:center;font-size:11px;font-weight:700;margin-bottom:6px;">' + esc(data.numero_documento) + '</div>';
   
   // Información del cliente (si está configurado para mostrar)
   var clienteHTML = '';
@@ -919,11 +961,38 @@ function showVentaDetalle(id) {
         ${v.devuelto ? '<div style="color:#d97706;font-weight:600;margin-top:4px;">⚠ Con devolución</div>' : ''}
       </div>
       <div class="mcb">
+        <button class="btn-g" onclick="reimprimirVenta(${v.id_pedido})"><i class="fas fa-print"></i> Reimprimir</button>
         ${!v.anulado ? '<button class="btn-d" onclick="anularVenta(' + v.id_pedido + ')"><i class="fas fa-ban"></i> Anular</button>' : ''}
         ${!v.anulado ? '<button class="btn-p" onclick="showDevolucion(' + v.id_pedido + ')"><i class="fas fa-undo"></i> Devolución</button>' : ''}
         <button class="btn-g" onclick="closeModal()">Cerrar</button>
       </div>
     `);
+  });
+}
+
+function reimprimirVenta(idPedido) {
+  apiGet({ accion: 'documento', id: idPedido }, function (payload) {
+    var d = payload.documento || {};
+    var cfg = d.config || {};
+    var logo = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(payload.logo || '') ? payload.logo : '';
+    var lines = (d.items || []).map(function (it) {
+      return '<div class="rec-line"><span>' + esc(it.nombre || 'Producto') + ' x' + it.cantidad + '</span><span>' + fm(it.subtotal) + '</span></div>';
+    }).join('');
+    var payments = (d.pagos || []).map(function (p) {
+      return '<div class="rec-line"><span>' + paymentMethodLabel(p.metodo) + '</span><span>' + fm(p.monto) + '</span></div>';
+    }).join('');
+    var html = '<div class="rec">' +
+      (logo ? '<div style="text-align:center;margin-bottom:8px;"><img src="' + logo + '" style="max-width:120px;max-height:80px;"></div>' : '') +
+      '<div class="rec-header">' + esc(cfg.nombre_empresa || 'Mi Empresa') + '</div>' +
+      '<div style="text-align:center;font-size:10px;">' + esc(d.numero_documento || ('Venta #' + idPedido)) + '<br>' + esc(d.fecha || '') + '</div>' +
+      '<div class="rec-divider"></div>' + lines + '<div class="rec-divider"></div>' +
+      '<div class="rec-line" style="font-weight:700;font-size:15px;"><span>TOTAL</span><span>' + fm(d.total) + '</span></div>' +
+      '<div class="rec-divider"></div>' + payments +
+      (d.vuelto > 0 ? '<div class="rec-line"><span>Vuelto</span><span>' + fm(d.vuelto) + '</span></div>' : '') +
+      '<div style="text-align:center;font-size:9px;color:#64748b;margin-top:8px;">COPIA / REIMPRESIÓN</div>' +
+      '<div class="mcb"><button class="btn-p" onclick="printReceipt()"><i class="fas fa-print"></i> Imprimir</button><button class="btn-g" onclick="closeModal()">Cerrar</button></div></div>';
+    var modal = showModal(html);
+    window._lastReceiptHTML = modal.querySelector('.rec').outerHTML;
   });
 }
 
@@ -942,12 +1011,15 @@ function anularVenta(id) {
 function showDevolucion(idPedido) {
   apiGet({ accion: 'venta_detalle', id: idPedido }, function (v) {
     var items = (v.items || []).map(function (it, i) {
-      return '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;"><input type="checkbox" class="dev-check" data-id="' + it.id_producto + '" data-precio="' + Math.round(it.precio_total / it.cantidad_pedida) + '" data-cant="' + it.cantidad_pedida + '"> ' + esc(it.nombre_producto) + ' x' + it.cantidad_pedida + ' (' + fm(it.precio_total) + ')</label>';
+      var available = parseFloat(it.cantidad_disponible_devolucion || 0);
+      if (available <= 0) return '';
+      var step = String(it.cantidad_pedida).indexOf('.') >= 0 ? '0.001' : '1';
+      return '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;"><input type="checkbox" class="dev-check" data-detail="' + it.id_detalle_pedido + '" data-id="' + it.id_producto + '"> ' + esc(it.nombre_producto) + ' <input type="number" class="dev-qty" min="' + step + '" max="' + available + '" step="' + step + '" value="' + available + '" style="width:80px;"> disponibles ' + available + ' (' + fm(it.precio_total) + ')</label>';
     }).join('');
 
     showModal(`
       <h3 style="font-size:18px;font-weight:700;margin-bottom:12px;"><i class="fas fa-undo" style="color:#4f46e5;"></i> Devolución - Venta #${idPedido}</h3>
-      <div class="fld"><label>Tipo</label><select id="dev-tipo"><option value="PARCIAL">Parcial</option><option value="TOTAL">Total</option><option value="CAMBIO">Cambio</option></select></div>
+      <p style="font-size:12px;color:#64748b;margin-bottom:8px;">El sistema calculará si la devolución es parcial o total y el monto exacto.</p>
       <div class="fld" style="margin:8px 0;">${items}</div>
       <div class="fld"><label>Motivo</label><textarea id="dev-motivo" rows="2"></textarea></div>
       <div class="mcb">
@@ -964,15 +1036,15 @@ function confirmDevolucion(idPedido) {
   var items = [];
   for (var i = 0; i < checks.length; i++) {
     items.push({
+      id_detalle_pedido: parseInt(checks[i].dataset.detail),
       id_producto: parseInt(checks[i].dataset.id),
-      cantidad: parseInt(checks[i].dataset.cant),
-      precio_unitario: parseInt(checks[i].dataset.precio)
+      cantidad: parseFloat(checks[i].closest('label').querySelector('.dev-qty').value)
     });
   }
-  var tipo = $('dev-tipo').value;
   var motivo = $('dev-motivo').value;
+  if (!motivo || motivo.trim().length < 3) { toast('Indique el motivo de la devolución', 'err'); return; }
 
-  apiPost({ accion: 'devolucion_crear', id_pedido: idPedido, items: items, tipo: tipo, motivo: motivo }, function (d) {
+  apiPost({ accion: 'devolucion_crear', id_pedido: idPedido, items: items, motivo: motivo }, function (d) {
     toast('Devolución procesada: ' + fm(d.monto_devuelto));
     closeModal();
     loadDashboard();
@@ -984,7 +1056,7 @@ function confirmDevolucion(idPedido) {
    PROMOCIONES MANAGEMENT
    ═══════════════════════════════════════════ */
 function loadPromociones() {
-  apiGet({ accion: 'promociones' }, function (d) { window._promos = d || []; });
+  apiGet({ accion: 'promociones' }, function (d) { window._promos = d.promociones || d || []; });
 }
 
 function showPromoManager() {
@@ -1073,7 +1145,7 @@ function showCotizacion() {
 }
 
 function saveCotizacion() {
-  var items = cart.map(function (c) { return { id_producto: c.id, producto: c.name, sku: c.sku, cantidad: c.cant, precio: c.price }; });
+  var items = cart.map(function (c) { return { id_producto: c.id, producto: c.name, sku: c.sku, cantidad: c.cant, precio_unitario: c.price }; });
   apiPost({
     accion: 'cotizacion_crear', items: items,
     cliente_nombre: $('cot-cliente').value, cliente_rut: $('cot-rut').value,
@@ -1089,8 +1161,10 @@ function saveCotizacion() {
 
 function showCotizacionesList() {
   apiGet({ accion: 'cotizaciones' }, function (d) {
-    var lista = (d || []).map(function (c) {
-      return '<div style="display:flex;justify-content:space-between;padding:8px;border-bottom:1px solid #e2e8f0;"><div><strong>' + esc(c.codigo) + '</strong> · ' + esc(c.cliente_nombre || 'Sin cliente') + '<br><span style="font-size:11px;color:#64748b;">' + c.fecha_creacion + ' · ' + fm(c.total) + ' · ' + c.items + ' ítems</span></div><div>' + (c.convertida ? '<span class="badge badge-ACTIVO">Convertida</span>' : '<button class="btn-p" style="padding:4px 10px;font-size:12px;" onclick="convertirCot(' + c.id_cotizacion + ')"><i class="fas fa-check"></i></button>') + '</div></div>';
+    var quotes = d.cotizaciones || d || [];
+    window._cotizaciones = quotes;
+    var lista = quotes.map(function (c) {
+      return '<div style="display:flex;justify-content:space-between;padding:8px;border-bottom:1px solid #e2e8f0;"><div><strong>' + esc(c.codigo) + '</strong> · ' + esc(c.cliente_nombre || 'Sin cliente') + '<br><span style="font-size:11px;color:#64748b;">' + c.fecha_creacion + ' · ' + fm(c.total) + ' · ' + (c.items || []).length + ' ítems</span></div><div>' + (c.convertida ? '<span class="badge badge-ACTIVO">Convertida</span>' : '<button class="btn-p" style="padding:4px 10px;font-size:12px;" onclick="convertirCot(' + c.id_cotizacion + ')" title="Cargar al carrito"><i class="fas fa-cart-plus"></i></button>') + '</div></div>';
     }).join('') || '<p style="color:#94a3b8;">Sin cotizaciones</p>';
     showModal(`
       <h3 style="font-size:18px;font-weight:700;margin-bottom:12px;"><i class="fas fa-file-invoice" style="color:#4f46e5;"></i> Cotizaciones</h3>
@@ -1101,9 +1175,20 @@ function showCotizacionesList() {
 }
 
 function convertirCot(id) {
-  apiPost({ accion: 'cotizacion_convertir', id_cotizacion: id }, function (d) {
-    toast(d.message || 'Convertida');
-    closeModal();
-    showCotizacionesList();
-  });
+  var quote = null;
+  for (var i=0;i<(window._cotizaciones||[]).length;i++) if (Number(window._cotizaciones[i].id_cotizacion)===Number(id)) quote=window._cotizaciones[i];
+  if (!quote || Number(quote.convertida)) { toast('Cotización no disponible', 'err'); return; }
+  var nextCart=[];
+  for (var j=0;j<(quote.items||[]).length;j++) {
+    var it=quote.items[j],qty=parseFloat(it.cantidad)||0,stock=parseFloat(it.stock_actual)||0;
+    if (!it.id_producto || !Number(it.producto_activo)) { toast('La cotización contiene un producto inactivo', 'err'); return; }
+    if (qty<=0 || stock<qty) { toast('Stock insuficiente para ' + esc(it.producto||'producto'), 'err'); return; }
+    nextCart.push({id:parseInt(it.id_producto),name:it.producto||'Producto',price:parseInt(it.precio_unitario)||0,
+      sku:it.sku||'',cant:qty,stock:stock,tipoVenta:it.tipo_venta||'UNIDAD',unidad:it.unidad_abrev||'u'});
+  }
+  if (!nextCart.length) { toast('Cotización sin productos', 'err'); return; }
+  cart=nextCart;_pendingCotizacionId=parseInt(id);
+  selectedClient=quote.id_cliente?{id_cliente:parseInt(quote.id_cliente),nombre:quote.cliente_nombre||'',rut:quote.cliente_rut||'',correo:quote.cliente_correo||'',telefono:quote.cliente_telefono||''}:null;
+  $('cart-client').innerHTML=selectedClient?'<i class="fas fa-user-check"></i> '+esc(selectedClient.nombre||'Cliente'):'<i class="fas fa-user"></i> Consumidor Final';
+  closeAllModals();renderCart();toast('Cotización cargada. Revise y presione Cobrar.');
 }
