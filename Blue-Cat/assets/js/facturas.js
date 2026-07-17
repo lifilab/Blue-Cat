@@ -12,7 +12,7 @@ document.addEventListener('DOMContentLoaded', function() {
 function showToast(msg, type) {
   var t = document.createElement('div');
   t.className = 'toast toast-' + (type === 'error' ? 'err' : 'ok');
-  t.innerHTML = msg;
+  BlueCatSecurity.renderToast(t, msg, type);
   document.body.appendChild(t);
   requestAnimationFrame(function() { t.classList.add('show'); });
   setTimeout(function() { t.classList.remove('show'); setTimeout(function() { t.remove(); }, 300); }, 2500);
@@ -20,6 +20,7 @@ function showToast(msg, type) {
 
 /* ── Number format ── */
 function fm(n) { return '$' + Math.round(Number(n)).toLocaleString('es-CL'); }
+function esc(s) { var d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
 
 /* ── KPIs ── */
 function loadKPIs() {
@@ -89,13 +90,13 @@ function renderTable(data, total, page, pages) {
     var tr = document.createElement('tr');
     tr.innerHTML =
       '<td>' + f.id_factura + '</td>' +
-      '<td><strong>' + (f.folio || '-') + '</strong></td>' +
-      '<td>' + (f.razon_social || f.cliente_nombre || 'Sin cliente') + '</td>' +
-      '<td>' + (f.rut || '-') + '</td>' +
+      '<td><strong>' + esc(f.folio || '-') + '</strong></td>' +
+      '<td>' + esc(f.razon_social || f.cliente_nombre || 'Sin cliente') + '</td>' +
+      '<td>' + esc(f.rut || '-') + '</td>' +
       '<td><strong>' + fm(f.total) + '</strong></td>' +
       '<td>' + fm(f.pagado) + '</td>' +
       '<td>' + fm(f.saldo) + '</td>' +
-      '<td><span class="badge ' + badgeClass + '">' + f.estado + '</span></td>' +
+      '<td><span class="badge ' + badgeClass + '">' + esc(f.estado) + '</span></td>' +
       '<td style="font-size:12px;color:#64748b;">' + (f.fecha_emision ? f.fecha_emision.substring(0,10) : '-') + '</td>' +
       '<td class="actions-cell" style="white-space:nowrap;">' +
       '<button class="btn-icon" onclick="showDetail(' + f.id_factura + ')" title="Ver detalle"><i class="fas fa-eye"></i></button>' +
@@ -138,39 +139,39 @@ function showDetail(id) {
     var itemsHtml = '';
     for (var i = 0; i < (f.detalle || []).length; i++) {
       var d = f.detalle[i];
-      itemsHtml += '<tr><td>' + d.producto + '</td><td>' + d.cantidad + '</td><td>' + fm(d.precio) + '</td><td>' + fm(d.total) + '</td></tr>';
+      itemsHtml += '<tr><td>' + esc(d.producto) + '</td><td>' + Number(d.cantidad || 0) + '</td><td>' + fm(d.precio) + '</td><td>' + fm(d.total) + '</td></tr>';
     }
     var pagosHtml = '';
     for (var j = 0; j < (f.pagos || []).length; j++) {
       var p = f.pagos[j];
-      pagosHtml += '<div class="historial-item"><span class="hi-action">' + p.metodo + '</span><span>' + fm(p.monto) + '</span><span class="hi-date">' + (p.fecha || '') + '</span></div>';
+      pagosHtml += '<div class="historial-item"><span class="hi-action">' + esc(p.metodo) + '</span><span>' + fm(p.monto) + '</span><span class="hi-date">' + esc(p.fecha || '') + '</span></div>';
     }
     var histHtml = '';
     for (var k = 0; k < (f.historial || []).length; k++) {
       var h = f.historial[k];
-      histHtml += '<div class="historial-item"><span class="hi-date">' + (h.fecha || '') + '</span><span class="hi-action">' + h.accion + '</span><span class="hi-user">' + (h.usuario || '') + '</span><span class="hi-detail">' + (h.valor_nuevo || '') + '</span></div>';
+      histHtml += '<div class="historial-item"><span class="hi-date">' + esc(h.fecha || '') + '</span><span class="hi-action">' + esc(h.accion) + '</span><span class="hi-user">' + esc(h.usuario || '') + '</span><span class="hi-detail">' + esc(h.valor_nuevo || '') + '</span></div>';
     }
 
     content.innerHTML =
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">' +
-      '<h3 style="font-size:18px;font-weight:700;color:#1e293b;"><i class="fas fa-file-invoice" style="color:#4f46e5;"></i> Factura ' + f.numero + '</h3>' +
-      '<span class="badge ' + badgeClass + '" style="font-size:13px;padding:4px 14px;">' + f.estado + '</span>' +
+      '<h3 style="font-size:18px;font-weight:700;color:#1e293b;"><i class="fas fa-file-invoice" style="color:#4f46e5;"></i> Factura ' + esc(f.numero) + '</h3>' +
+      '<span class="badge ' + badgeClass + '" style="font-size:13px;padding:4px 14px;">' + esc(f.estado) + '</span>' +
       '</div>' +
       '<div class="detail-grid">' +
       '<div class="detail-section"><h4><i class="fas fa-info-circle"></i> Información General</h4>' +
-      '<div class="detail-row"><span class="dl">Folio</span><span class="dv">' + (f.folio || '-') + '</span></div>' +
-      '<div class="detail-row"><span class="dl">Número</span><span class="dv">' + (f.numero || '-') + '</span></div>' +
-      '<div class="detail-row"><span class="dl">Tipo</span><span class="dv">' + (f.tipo || '-') + '</span></div>' +
-      '<div class="detail-row"><span class="dl">Emisión</span><span class="dv">' + (f.fecha_emision || '-') + '</span></div>' +
-      '<div class="detail-row"><span class="dl">Vencimiento</span><span class="dv">' + (f.fecha_vencimiento || '-') + '</span></div>' +
-      '<div class="detail-row"><span class="dl">Vendedor</span><span class="dv">' + (f.vendedor || '-') + '</span></div>' +
+      '<div class="detail-row"><span class="dl">Folio</span><span class="dv">' + esc(f.folio || '-') + '</span></div>' +
+      '<div class="detail-row"><span class="dl">Número</span><span class="dv">' + esc(f.numero || '-') + '</span></div>' +
+      '<div class="detail-row"><span class="dl">Tipo</span><span class="dv">' + esc(f.tipo || '-') + '</span></div>' +
+      '<div class="detail-row"><span class="dl">Emisión</span><span class="dv">' + esc(f.fecha_emision || '-') + '</span></div>' +
+      '<div class="detail-row"><span class="dl">Vencimiento</span><span class="dv">' + esc(f.fecha_vencimiento || '-') + '</span></div>' +
+      '<div class="detail-row"><span class="dl">Vendedor</span><span class="dv">' + esc(f.vendedor || '-') + '</span></div>' +
       '</div>' +
       '<div class="detail-section"><h4><i class="fas fa-user"></i> Cliente</h4>' +
-      '<div class="detail-row"><span class="dl">RUT</span><span class="dv">' + (f.rut || '-') + '</span></div>' +
-      '<div class="detail-row"><span class="dl">Razón Social</span><span class="dv">' + (f.razon_social || '-') + '</span></div>' +
-      '<div class="detail-row"><span class="dl">Dirección</span><span class="dv">' + (f.direccion || '-') + '</span></div>' +
-      '<div class="detail-row"><span class="dl">Correo</span><span class="dv">' + (f.correo || '-') + '</span></div>' +
-      '<div class="detail-row"><span class="dl">Giro</span><span class="dv">' + (f.giro || '-') + '</span></div>' +
+      '<div class="detail-row"><span class="dl">RUT</span><span class="dv">' + esc(f.rut || '-') + '</span></div>' +
+      '<div class="detail-row"><span class="dl">Razón Social</span><span class="dv">' + esc(f.razon_social || '-') + '</span></div>' +
+      '<div class="detail-row"><span class="dl">Dirección</span><span class="dv">' + esc(f.direccion || '-') + '</span></div>' +
+      '<div class="detail-row"><span class="dl">Correo</span><span class="dv">' + esc(f.correo || '-') + '</span></div>' +
+      '<div class="detail-row"><span class="dl">Giro</span><span class="dv">' + esc(f.giro || '-') + '</span></div>' +
       '</div>' +
       '</div>' +
       '<h4 style="margin-top:14px;font-size:13px;font-weight:600;color:#1e293b;"><i class="fas fa-box"></i> Productos</h4>' +

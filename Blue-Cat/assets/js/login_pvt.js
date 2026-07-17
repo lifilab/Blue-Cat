@@ -136,7 +136,7 @@ function CloseSesionPopUp() {
 function showToast(msg, type) {
   var t = document.createElement('div');
   t.className = 'toast toast-' + (type === 'error' ? 'err' : 'ok');
-  t.innerHTML = msg;
+  BlueCatSecurity.renderToast(t, msg, type);
   document.body.appendChild(t);
   requestAnimationFrame(function() { t.classList.add('show'); });
   setTimeout(function() { t.classList.remove('show'); setTimeout(function() { t.remove(); }, 300); }, 2500);

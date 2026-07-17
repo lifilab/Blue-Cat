@@ -4,6 +4,7 @@ date_default_timezone_set('America/Santiago');
 require_once __DIR__ . '/env_loader.php';
 $configuredEnv = getenv('BLUECAT_ENV_FILE');
 loadEnv($configuredEnv !== false && $configuredEnv !== '' ? $configuredEnv : dirname(__DIR__, 2) . '/.env');
+require_once __DIR__ . '/_security.php';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Blue-Cat ERP v1.0 — Core Database Helper
@@ -61,17 +62,14 @@ function json($data, int $code = 200): void {
 
 // ── Session / Auth Helpers ───────────────────────────────────────────────────
 
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
-
 function getSessionUserId(): int {
     return isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : 0;
 }
 
 function requireUser(): int {
     $uid = getSessionUserId();
-    if ($uid === 0) {
+    if ($uid === 0 || !securityValidateSession(getDB(), $uid)) {
+        if ($uid > 0) securityDestroySession();
         http_response_code(401);
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode([
@@ -94,6 +92,10 @@ function makeJsonInputObject(array $data): ArrayObject {
 }
 
 function getJsonInput(): ?ArrayObject {
+    $declaredLength = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
+    if ($declaredLength > 4 * 1024 * 1024) {
+        json(['error'=>true,'message'=>'La solicitud supera el limite de 4 MB.'], 413);
+    }
     $raw = file_get_contents('php://input');
     $testJson = getenv('BLUECAT_TEST_JSON');
     $testJsonFile = getenv('BLUECAT_TEST_JSON_FILE');
@@ -109,6 +111,9 @@ function getJsonInput(): ?ArrayObject {
     }
     if ($raw === false || trim($raw) === '') {
         return null;
+    }
+    if (strlen($raw) > 4 * 1024 * 1024) {
+        json(['error'=>true,'message'=>'La solicitud supera el limite de 4 MB.'], 413);
     }
     $data = json_decode($raw, true);
     return (json_last_error() === JSON_ERROR_NONE && is_array($data)) ? makeJsonInputObject($data) : null;
@@ -156,6 +161,13 @@ function verificarPermiso(string $modulo, string $accion): bool {
     }
 
     return $granted;
+}
+
+function requirePermission(string $modulo, string $accion): void {
+    requireUser();
+    if (!verificarPermiso($modulo, $accion)) {
+        json(['error'=>true,'message'=>"Permiso denegado: {$modulo}.{$accion}"], 403);
+    }
 }
 
 // ── Audit Logger ─────────────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/_db.php';
 $uid = requireUser();
+requirePermission('facturas', 'ver');
 $conn = getDB();
 $tenant = tenantContext($uid);
 

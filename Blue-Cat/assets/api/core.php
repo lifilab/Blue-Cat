@@ -8,33 +8,50 @@ $input = getJsonInput();
 $accion = $input['accion'] ?? $_GET['accion'] ?? '';
 
 function requierePermiso($modulo, $accion) {
-    if (!verificarPermiso($modulo, $accion)) {
-        json(['error' => 'Permiso denegado: ' . $modulo . '.' . $accion], 403);
-    }
+    requirePermission($modulo, $accion);
 }
 
 function coreLog($conn, $uid, $accion, $entidad, $id_entidad = null, $detalle = null, $nivel = 'INFO', $va = null, $vn = null) {
-    $idCuenta = tenantContext($uid)->accountId;
-    $ip = $_SERVER['REMOTE_ADDR'] ?? '';
-    $ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
-    $vn = $detalle !== null ? json_encode($detalle, JSON_UNESCAPED_UNICODE) : $vn;
-    $stmt = $conn->prepare("INSERT INTO core_auditoria (id_cuenta,id_user,accion,entidad,id_entidad,valor_anterior,valor_nuevo,ip,user_agent,nivel) VALUES (?,?,?,?,?,?,?,?,?,?)");
-    $stmt->bind_param("iississsss", $idCuenta, $uid, $accion, $entidad, $id_entidad, $va, $vn, $ip, $ua, $nivel);
-    $stmt->execute();
-    $stmt->close();
+    try {
+        $idCuenta = tenantContext($uid)->accountId;
+        $ip = $_SERVER['REMOTE_ADDR'] ?? '';
+        $ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
+        $vn = $detalle !== null ? json_encode($detalle, JSON_UNESCAPED_UNICODE) : $vn;
+        $stmt = $conn->prepare("INSERT INTO core_auditoria (id_cuenta,id_user,accion,entidad,id_entidad,valor_anterior,valor_nuevo,ip,user_agent,nivel) VALUES (?,?,?,?,?,?,?,?,?,?)");
+        if (!$stmt) return;
+        $stmt->bind_param("iississsss", $idCuenta, $uid, $accion, $entidad, $id_entidad, $va, $vn, $ip, $ua, $nivel);
+        $stmt->execute();
+        $stmt->close();
+    } catch (Throwable $error) {
+        // Audit telemetry never interrupts the business operation.
+    }
+}
+
+function coreIsLockoutCritical(string $module, string $action): bool {
+    return $module === 'configuracion' && in_array($action, ['gestionar_roles','gestionar_usuarios'], true);
 }
 
 
 // La navegación necesita sidebar sin acceso a Configuración. El resto de este
 // endpoint pertenece al panel administrativo y se autoriza también en servidor.
-$accionesPublicas = ['sidebar', 'validar_licencia'];
+$accionesPublicas = ['sidebar', 'validar_licencia', 'sesiones_activas', 'sesion_cerrar', 'auditoria'];
+$accionesRoles = ['roles','permisos','rol_permisos','usuario_roles','rol_crear','rol_permiso_toggle','usuario_rol_toggle'];
+$accionesUsuarios = ['usuarios','usuario_crear','usuario_editar'];
+$accionesEspecializadas = array_merge($accionesRoles,$accionesUsuarios,['usuario_cambiar_password']);
 if (!in_array($accion, $accionesPublicas, true)) {
     requierePermiso('configuracion', 'ver');
     $accionesLectura = ['dashboard','empresas','sucursales','roles','permisos','rol_permisos','usuario_roles','usuarios','monedas','impuestos','numeraciones','parametros','planes','suscripciones','modulos','plan_modulos','sesiones_activas','config_boleta'];
-    if (!in_array($accion, $accionesLectura, true)) {
+    if (!in_array($accion, $accionesLectura, true) && !in_array($accion,$accionesEspecializadas,true)) {
         requierePermiso('configuracion', 'editar');
     }
 }
+
+if (in_array($accion, $accionesRoles, true)) requierePermiso('configuracion', 'gestionar_roles');
+if (in_array($accion, $accionesUsuarios, true)) requierePermiso('configuracion', 'gestionar_usuarios');
+if ($accion === 'usuario_cambiar_password') requierePermiso('usuarios', 'restablecer_password');
+if ($accion === 'sesiones_activas') requierePermiso('seguridad', 'ver_sesiones');
+if ($accion === 'sesion_cerrar') requierePermiso('seguridad', 'revocar_sesiones');
+if ($accion === 'auditoria') requierePermiso('seguridad', 'ver_auditoria');
 
 switch ($accion) {
 
@@ -187,6 +204,12 @@ case 'rol_permiso_toggle':
     requireTenantRole($conn,$context,$id_rol,true);
     $stmt = $conn->prepare("SELECT id_rol_permiso FROM rol_permiso WHERE id_rol=? AND id_permiso=?"); $stmt->bind_param("ii", $id_rol, $id_permiso); $stmt->execute(); $r = $stmt->get_result(); $stmt->close();
     if ($r->num_rows) {
+        $stmt=$conn->prepare('SELECT modulo,accion FROM permiso WHERE id_permiso=?');$stmt->bind_param('i',$id_permiso);$stmt->execute();$permission=$stmt->get_result()->fetch_assoc();$stmt->close();
+        if ($permission && coreIsLockoutCritical($permission['modulo'],$permission['accion'])) {
+            $stmt=$conn->prepare("SELECT COUNT(DISTINCT u.id_user) total FROM usuario u JOIN usuario_rol ur ON ur.id_user=u.id_user JOIN rol_permiso rp ON rp.id_rol=ur.id_rol JOIN permiso p ON p.id_permiso=rp.id_permiso WHERE u.id_cuenta=? AND u.activo=1 AND p.modulo=? AND p.accion=? AND NOT(rp.id_rol=? AND rp.id_permiso=?)");
+            $stmt->bind_param('issii',$accountId,$permission['modulo'],$permission['accion'],$id_rol,$id_permiso);$stmt->execute();$remaining=(int)$stmt->get_result()->fetch_assoc()['total'];$stmt->close();
+            if ($remaining===0) json(['error'=>'No puede quitar el último acceso administrativo de la cuenta.'],409);
+        }
         $stmt = $conn->prepare("DELETE FROM rol_permiso WHERE id_rol=? AND id_permiso=?"); $stmt->bind_param("ii", $id_rol, $id_permiso); $stmt->execute(); $stmt->close();
         coreLog($conn, $uid, 'QUITAR_PERMISO', 'rol_permiso', null, ['id_rol' => $id_rol, 'id_permiso' => $id_permiso]);
         json(['success' => true, 'estado' => 'quitado']);
@@ -214,6 +237,9 @@ case 'usuario_rol_toggle':
     requireTenantRole($conn,$context,$id_rol,true);
     $stmt = $conn->prepare("SELECT id_usuario_rol FROM usuario_rol WHERE id_user=? AND id_rol=?"); $stmt->bind_param("ii", $uid_target, $id_rol); $stmt->execute(); $r = $stmt->get_result(); $stmt->close();
     if ($r->num_rows) {
+        $stmt=$conn->prepare("SELECT COUNT(DISTINCT u.id_user) total FROM usuario u JOIN usuario_rol ur ON ur.id_user=u.id_user JOIN rol_permiso rp ON rp.id_rol=ur.id_rol JOIN permiso p ON p.id_permiso=rp.id_permiso WHERE u.id_cuenta=? AND u.activo=1 AND p.modulo='configuracion' AND p.accion='gestionar_roles' AND NOT(ur.id_user=? AND ur.id_rol=?)");
+        $stmt->bind_param('iii',$accountId,$uid_target,$id_rol);$stmt->execute();$remainingAdmins=(int)$stmt->get_result()->fetch_assoc()['total'];$stmt->close();
+        if ($remainingAdmins===0) json(['error'=>'No puede quitar el rol del último administrador de la cuenta.'],409);
         $stmt = $conn->prepare("DELETE FROM usuario_rol WHERE id_user=? AND id_rol=?"); $stmt->bind_param("ii", $uid_target, $id_rol); $stmt->execute(); $stmt->close();
         coreLog($conn, $uid, 'QUITAR_ROL', 'usuario_rol', null, ['id_user' => $uid_target, 'id_rol' => $id_rol]);
         json(['success' => true, 'estado' => 'quitado']);
@@ -237,14 +263,16 @@ case 'usuario_crear':
     $nombre = $input['nombre'] ?? '';
     $correo = $input['correo'] ?? '';
     $password = $input['password'] ?? '';
-    if (!$nombre || !$correo || !$password) json(['error' => 'Nombre, correo y contraseña requeridos'], 400);
-    $hash = password_hash($password, PASSWORD_DEFAULT);
+    if (!$nombre || !filter_var($correo, FILTER_VALIDATE_EMAIL) || !$password) json(['error' => 'Nombre, correo válido y contraseña requeridos'], 400);
+    $passwordErrors = securityPasswordErrors((string)$password);
+    if ($passwordErrors) json(['error' => 'La contraseña requiere '.implode(', ', $passwordErrors).'.'], 400);
+    $hash = securityHashPassword((string)$password);
     $nombre_completo = $input['nombre_completo'] ?? '';
     $cargo = $input['cargo'] ?? '';
     $telefono = $input['telefono'] ?? '';
     $id_sucursal = (int)($input['id_sucursal'] ?? 0);
     $id_cuenta=$accountId; if($id_sucursal>0) requireTenantEntity($conn,$context,'sucursal',$id_sucursal);
-    $stmt = $conn->prepare("INSERT INTO usuario (nombre, correo, password, nombre_completo, cargo, telefono, id_sucursal, id_cuenta, validar_sesion) VALUES (?,?,?,?,?,?,?,?,1)");
+    $stmt = $conn->prepare("INSERT INTO usuario (nombre, correo, password, nombre_completo, cargo, telefono, id_sucursal, id_cuenta, validar_sesion, password_changed_at) VALUES (?,?,?,?,?,?,?,?,0,NOW())");
     $stmt->bind_param("ssssssii", $nombre, $correo, $hash, $nombre_completo, $cargo, $telefono, $id_sucursal, $id_cuenta);
     $stmt->execute(); $id = (int)$conn->insert_id; $stmt->close();
     coreLog($conn, $uid, 'CREAR', 'usuario', $id, ['nombre' => $nombre, 'correo' => $correo]);
@@ -255,6 +283,11 @@ case 'usuario_editar':
     $id = (int)($input['id'] ?? 0);
     requireTenantUser($conn,$context,$id);
     if (isset($input['id_sucursal']) && (int)$input['id_sucursal']>0) requireTenantEntity($conn,$context,'sucursal',(int)$input['id_sucursal']);
+    if (isset($input['activo']) && (int)$input['activo']===0) {
+        $stmt=$conn->prepare("SELECT COUNT(DISTINCT u.id_user) total FROM usuario u JOIN usuario_rol ur ON ur.id_user=u.id_user JOIN rol_permiso rp ON rp.id_rol=ur.id_rol JOIN permiso p ON p.id_permiso=rp.id_permiso WHERE u.id_cuenta=? AND u.activo=1 AND u.id_user<>? AND p.modulo='configuracion' AND p.accion='gestionar_roles'");
+        $stmt->bind_param('ii',$accountId,$id);$stmt->execute();$remainingAdmins=(int)$stmt->get_result()->fetch_assoc()['total'];$stmt->close();
+        if ($remainingAdmins===0 && verificarPermiso('configuracion','gestionar_roles')) json(['error'=>'No puede desactivar el último administrador de la cuenta.'],409);
+    }
     $allowed = ['nombre_completo', 'cargo', 'telefono', 'id_sucursal', 'id_departamento', 'idioma', 'activo'];
     $fields = []; $params = []; $types = '';
     foreach ($input as $k => $v) { if (in_array($k, $allowed)) { $fields[] = "$k=?"; $params[] = $v; $types .= 's'; } }
@@ -269,16 +302,20 @@ case 'usuario_editar':
     break;
 
 case 'usuario_cambiar_password':
-    requierePermiso('usuarios', 'editar_cuentas');
     $id = (int)($input['id_user'] ?? 0);
     $password = $input['password'] ?? '';
     if (!$id || !$password) json(['error' => 'Datos incompletos'], 400);
     requireTenantUser($conn,$context,$id);
-    if (strlen($password) < 6) json(['error' => 'La contraseña debe tener al menos 6 caracteres'], 400);
+    $passwordErrors = securityPasswordErrors((string)$password);
+    if ($passwordErrors) json(['error' => 'La contraseña requiere '.implode(', ', $passwordErrors).'.'], 400);
     
-    $hash = password_hash($password, PASSWORD_DEFAULT);
-    $stmt = $conn->prepare("UPDATE usuario SET password=? WHERE id_user=? AND id_cuenta={$accountId}");
+    $hash = securityHashPassword((string)$password);
+    $stmt = $conn->prepare("UPDATE usuario SET password=?,password_changed_at=NOW(),session_version=session_version+1,validar_sesion=0,intentos_fallidos=0,bloqueado_hasta=NULL,ultimo_fallo_login=NULL WHERE id_user=? AND id_cuenta={$accountId}");
     $stmt->bind_param("si", $hash, $id);
+    $stmt->execute();
+    $stmt->close();
+    $stmt = $conn->prepare("UPDATE core_sesion SET revoked_at=NOW(),revoked_by=?,revoke_reason='PASSWORD_RESET' WHERE id_user=? AND id_cuenta=? AND revoked_at IS NULL");
+    $stmt->bind_param('iii', $uid, $id, $accountId);
     $stmt->execute();
     $stmt->close();
     coreLog($conn, $uid, 'CAMBIAR_PASSWORD', 'usuario', $id, ['password_changed' => true]);
@@ -395,11 +432,11 @@ case 'auditoria':
     $offset = ($page - 1) * $limit;
     $nivel = $input['nivel'] ?? $_GET['nivel'] ?? '';
     if ($nivel) {
-        $stmt = $conn->prepare("SELECT COUNT(*) AS t FROM core_auditoria WHERE nivel=?"); $stmt->bind_param("s", $nivel); $stmt->execute(); $total = (int)$stmt->get_result()->fetch_assoc()['t']; $stmt->close();
-        $stmt = $conn->prepare("SELECT a.*, u.nombre AS user_nombre FROM core_auditoria a LEFT JOIN usuario u ON a.id_user=u.id_user WHERE nivel=? ORDER BY a.created_at DESC LIMIT ? OFFSET ?"); $stmt->bind_param("sii", $nivel, $limit, $offset);
+        $stmt = $conn->prepare("SELECT COUNT(*) AS t FROM core_auditoria WHERE id_cuenta=? AND nivel=?"); $stmt->bind_param("is", $accountId, $nivel); $stmt->execute(); $total = (int)$stmt->get_result()->fetch_assoc()['t']; $stmt->close();
+        $stmt = $conn->prepare("SELECT a.*, u.nombre AS user_nombre FROM core_auditoria a LEFT JOIN usuario u ON a.id_user=u.id_user WHERE a.id_cuenta=? AND a.nivel=? ORDER BY a.created_at DESC LIMIT ? OFFSET ?"); $stmt->bind_param("isii", $accountId, $nivel, $limit, $offset);
     } else {
-        $stmt = $conn->prepare("SELECT COUNT(*) AS t FROM core_auditoria"); $stmt->execute(); $total = (int)$stmt->get_result()->fetch_assoc()['t']; $stmt->close();
-        $stmt = $conn->prepare("SELECT a.*, u.nombre AS user_nombre FROM core_auditoria a LEFT JOIN usuario u ON a.id_user=u.id_user ORDER BY a.created_at DESC LIMIT ? OFFSET ?"); $stmt->bind_param("ii", $limit, $offset);
+        $stmt = $conn->prepare("SELECT COUNT(*) AS t FROM core_auditoria WHERE id_cuenta=?"); $stmt->bind_param('i', $accountId); $stmt->execute(); $total = (int)$stmt->get_result()->fetch_assoc()['t']; $stmt->close();
+        $stmt = $conn->prepare("SELECT a.*, u.nombre AS user_nombre FROM core_auditoria a LEFT JOIN usuario u ON a.id_user=u.id_user WHERE a.id_cuenta=? ORDER BY a.created_at DESC LIMIT ? OFFSET ?"); $stmt->bind_param("iii", $accountId, $limit, $offset);
     }
     $stmt->execute(); $items = []; $r = $stmt->get_result(); while ($f = $r->fetch_assoc()) $items[] = $f; $stmt->close();
     json(['items' => $items, 'total' => $total, 'page' => $page]);
@@ -433,7 +470,7 @@ case 'plan_crear':
 
 // ═══ SUSCRIPCIONES ═══
 case 'suscripciones':
-    $items = []; $r = $conn->query("SELECT s.*, p.nombre AS plan_nombre, e.razon_social AS empresa FROM suscripcion s JOIN plan p ON s.id_plan=p.id_plan JOIN empresa e ON s.id_empresa=e.id_empresa ORDER BY s.created_at DESC");
+    $items = []; $r = $conn->query("SELECT s.*, p.nombre AS plan_nombre, e.razon_social AS empresa FROM suscripcion s JOIN plan p ON s.id_plan=p.id_plan JOIN empresa e ON s.id_empresa=e.id_empresa WHERE e.id_cuenta={$accountId} ORDER BY s.created_at DESC");
     while ($f = $r->fetch_assoc()) $items[] = $f;
     json($items);
     break;
@@ -441,9 +478,10 @@ case 'suscripciones':
 case 'suscripcion_crear':
     $id_empresa_s = (int)($input['id_empresa'] ?? 0); $id_plan_s = (int)($input['id_plan'] ?? 0);
     if (!$id_empresa_s || !$id_plan_s) json(['error' => 'Empresa y plan requeridos'], 400);
+    requireTenantEntity($conn,$context,'empresa',$id_empresa_s);
     $stmt2 = $conn->prepare("SELECT max_usuarios FROM plan WHERE id_plan=?"); $stmt2->bind_param("i", $id_plan_s); $stmt2->execute(); $r = $stmt2->get_result()->fetch_assoc(); $stmt2->close();
     $max_users = (int)($r['max_usuarios'] ?? 0);
-    $r = $conn->query("SELECT COUNT(*) as t FROM usuario WHERE activo=1");
+    $r = $conn->query("SELECT COUNT(*) as t FROM usuario WHERE id_cuenta={$accountId} AND activo=1");
     $current = (int)$r->fetch_assoc()['t'];
     if ($current > $max_users) json(['error' => "Límite de usuarios excedido ($current/$max_users). Desactive usuarios o aumente el plan."], 400);
     $stmt = $conn->prepare("INSERT INTO suscripcion (id_empresa, id_plan, fecha_inicio, estado) VALUES (?,?,CURDATE(),'activa') ON DUPLICATE KEY UPDATE id_plan=?, estado='activa'");
@@ -541,9 +579,15 @@ case 'sidebar':
 
 // ═══ LICENCIA ═══
 case 'validar_licencia':
-    $r = $conn->query("SELECT COALESCE(p.max_usuarios + COALESCE(s.usuarios_extra,0), 5) AS max_u, 
-        (SELECT COUNT(*) FROM usuario WHERE activo=1) AS current_u
-        FROM plan p JOIN suscripcion s ON p.id_plan=s.id_plan WHERE s.estado='activa' LIMIT 1")->fetch_assoc();
+    $stmt = $conn->prepare("SELECT COALESCE(MAX(p.max_usuarios + COALESCE(s.usuarios_extra,0)),5) AS max_u,
+        (SELECT COUNT(*) FROM usuario WHERE id_cuenta=? AND activo=1) AS current_u
+        FROM plan p JOIN suscripcion s ON p.id_plan=s.id_plan
+        JOIN empresa e ON e.id_empresa=s.id_empresa
+        WHERE e.id_cuenta=? AND s.estado='activa'");
+    $stmt->bind_param('ii', $accountId, $accountId);
+    $stmt->execute();
+    $r = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
     $disponible = max(0, (int)$r['max_u'] - (int)$r['current_u']);
     json(['max_usuarios' => (int)$r['max_u'], 'actual' => (int)$r['current_u'], 'disponible' => $disponible, 'puede_crear' => $disponible > 0]);
     break;
@@ -551,19 +595,28 @@ case 'validar_licencia':
 // ═══ SESIONES ACTIVAS ═══
 case 'sesiones_activas':
     $items = [];
-    $r = $conn->query("SELECT sl.id_sesion_log, sl.id_user, u.nombre, u.nombre_completo, sl.accion, sl.ip, sl.created_at 
-        FROM sesion_log sl LEFT JOIN usuario u ON sl.id_user=u.id_user 
-        WHERE sl.created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
-        ORDER BY sl.created_at DESC LIMIT 100");
+    $stmt = $conn->prepare("SELECT cs.id_sesion,cs.id_user,u.nombre,u.nombre_completo,
+        CASE WHEN cs.revoked_at IS NULL AND cs.expires_at>NOW() THEN 'ACTIVA' ELSE 'CERRADA' END accion,
+        cs.created_at,cs.last_activity_at,cs.expires_at,cs.revoked_at,cs.revoke_reason
+        FROM core_sesion cs JOIN usuario u ON u.id_user=cs.id_user
+        WHERE cs.id_cuenta=? ORDER BY cs.last_activity_at DESC LIMIT 100");
+    $stmt->bind_param('i', $accountId);
+    $stmt->execute();
+    $r = $stmt->get_result();
     while ($f = $r->fetch_assoc()) $items[] = $f;
+    $stmt->close();
     json($items);
     break;
 
 case 'sesion_cerrar':
     $id_sesion = (int)($input['id_sesion'] ?? 0);
     if (!$id_sesion) json(['error'=>'ID requerido'],400);
-    $stmt = $conn->prepare("UPDATE sesion_log SET accion=CONCAT(accion,'_CERRADA') WHERE id_sesion_log=?"); $stmt->bind_param("i", $id_sesion); $stmt->execute(); $stmt->close();
-    coreLog($conn, $uid, 'CERRAR_SESION', 'sesion_log', $id_sesion);
+    $stmt = $conn->prepare("UPDATE core_sesion SET revoked_at=NOW(),revoked_by=?,revoke_reason='ADMIN_REVOKE' WHERE id_sesion=? AND id_cuenta=? AND revoked_at IS NULL");
+    $stmt->bind_param("iii", $uid, $id_sesion, $accountId);
+    $stmt->execute();
+    if ($stmt->affected_rows !== 1) { $stmt->close(); json(['error'=>'Sesión no encontrada o ya cerrada'],404); }
+    $stmt->close();
+    coreLog($conn, $uid, 'CERRAR_SESION', 'core_sesion', $id_sesion);
     json(['success'=>true]);
     break;
 

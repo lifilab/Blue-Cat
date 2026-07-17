@@ -20,11 +20,11 @@ $evaluate=function(int $promotion,string $code,array $items,?int $client=null)us
 $db->begin_transaction();
 try{
     $db->query("INSERT INTO cuenta(nombre,estado) VALUES('Promotion Engine Test','ACTIVA')");$account=(int)$db->insert_id;
-    $hash=password_hash('Promotion-Test-2026',PASSWORD_DEFAULT);$stmt=$db->prepare("INSERT INTO usuario(id_cuenta,nombre,correo,password,activo) VALUES(?,'promo-test','promo-test@local',?,1)");$stmt->bind_param('is',$account,$hash);$stmt->execute();$user=(int)$db->insert_id;$stmt->close();
+    $hash=password_hash('Promotion-Test-2026',PASSWORD_DEFAULT);$stmt=$db->prepare("INSERT INTO usuario(id_cuenta,nombre,correo,password,activo,validar_sesion) VALUES(?,'promo-test','promo-test@local',?,1,0)");$stmt->bind_param('is',$account,$hash);$stmt->execute();$user=(int)$db->insert_id;$stmt->close();
     $stmt=$db->prepare("INSERT INTO producto(id_user,id_cuenta,nombre_producto,precio_venta,codigo_de_barras,sku,activo) VALUES(?,?,?, ?,?,?,1)");
     $name='Producto A';$price=1000;$barcode='PROMO-A';$sku='SKU-A';$stmt->bind_param('iisiss',$user,$account,$name,$price,$barcode,$sku);$stmt->execute();$productA=(int)$db->insert_id;
     $name='Producto B';$price=2000;$barcode='PROMO-B';$sku='SKU-B';$stmt->bind_param('iisiss',$user,$account,$name,$price,$barcode,$sku);$stmt->execute();$productB=(int)$db->insert_id;$stmt->close();
-    $stmt=$db->prepare("INSERT INTO cliente(id_user,id_cuenta,codigo,nombre,categoria,clasificacion,lista_precios,activo) VALUES(?,?,'PROMO-CLIENT','Cliente VIP','VIP','VIP','MAYORISTA',1)");$stmt->bind_param('ii',$user,$account);$stmt->execute();$client=(int)$db->insert_id;$stmt->close();
+    $stmt=$db->prepare("INSERT INTO cliente(id_user,id_cuenta,codigo,nombre,razon_social,categoria,clasificacion,lista_precios,activo) VALUES(?,?,'PROMO-CLIENT','Cliente VIP','Cliente VIP','VIP','VIP','MAYORISTA',1)");$stmt->bind_param('ii',$user,$account);$stmt->execute();$client=(int)$db->insert_id;$stmt->close();
 
     $p=$insertPromotion('T-2X1','2X1',0,2,['cantidad_pagada'=>1]);$scope($p,$productA);
     [$one,$app]=$evaluate($p,'T-2X1',[['id_producto'=>$productA,'cantidad'=>1]]);$assert($app===null,'2x1 no beneficia una unidad');
@@ -44,5 +44,5 @@ try{
     [$r,$app]=$evaluate($p,'T-SEGMENT',[['id_producto'=>$productA,'cantidad'=>1]],null);$assert($app===null,'segmentación rechaza consumidor no autorizado');
 
     $db->rollback();
-}catch(Throwable $e){$db->rollback();fwrite(STDERR,'FAIL '.$e->getMessage()."\n");exit(1);}
+}catch(Throwable $e){$db->rollback();fwrite(STDERR,'FAIL '.$e->getMessage().' at line '.$e->getLine()."\n");exit(1);}
 exit($failures?1:0);

@@ -1,7 +1,7 @@
 <?php
 require_once __DIR__ . '/_db.php';
 $uid = requireUser();
-if (!verificarPermiso('inventario','importar')) json(['success'=>false,'msg'=>'Permiso denegado'],403);
+requirePermission('inventario','importar');
 $conn = getDB();
 $accountId = tenantContext($uid)->accountId;
 
@@ -17,26 +17,33 @@ function importarNumero($valor) {
 if (!isset($_FILES['file'])) json(['success'=>false,'msg'=>'No se recibió ningún archivo'],400);
 $file=$_FILES['file'];
 if ($file['error']!==UPLOAD_ERR_OK) json(['success'=>false,'msg'=>'Error en la subida: código '.$file['error']],400);
+if (!is_uploaded_file($file['tmp_name'])) json(['success'=>false,'msg'=>'Carga de archivo no válida'],400);
+if ((int)$file['size']<=0 || (int)$file['size']>5*1024*1024) json(['success'=>false,'msg'=>'El archivo debe pesar entre 1 byte y 5 MB'],400);
 $type=strtolower(pathinfo($file['name'],PATHINFO_EXTENSION));
 if (!in_array($type,['csv','xls'],true)) json(['success'=>false,'msg'=>'El archivo debe ser XLS o CSV'],400);
+$mime=(new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name'])?:'';
+$allowedMime=$type==='csv'
+    ? ['text/plain','text/csv','application/csv','application/vnd.ms-excel']
+    : ['text/html','text/plain','application/vnd.ms-excel'];
+if (!in_array($mime,$allowedMime,true)) json(['success'=>false,'msg'=>'El contenido no coincide con el formato indicado'],400);
 
 $rows=[];
 if ($type==='csv') {
     $fh=fopen($file['tmp_name'],'r');
     if (!$fh) json(['success'=>false,'msg'=>'No se pudo abrir el CSV'],400);
     fgetcsv($fh);
-    while (($row=fgetcsv($fh))!==false) $rows[]=$row;
+    while (($row=fgetcsv($fh))!==false) { $rows[]=$row; if(count($rows)>50000) json(['success'=>false,'msg'=>'El archivo supera 50.000 filas'],400); }
     fclose($fh);
 } else {
     $html=file_get_contents($file['tmp_name']);
     $dom=new DOMDocument();
     libxml_use_internal_errors(true);
-    $dom->loadHTML($html,LIBXML_NOERROR|LIBXML_NOWARNING);
+    $dom->loadHTML($html,LIBXML_NOERROR|LIBXML_NOWARNING|LIBXML_NONET);
     libxml_clear_errors();
     foreach ($dom->getElementsByTagName('tr') as $tr) {
         $cells=[];
         foreach ($tr->getElementsByTagName('td') as $td) $cells[]=trim($td->textContent);
-        if ($cells) $rows[]=$cells;
+        if ($cells) { $rows[]=$cells; if(count($rows)>50000) json(['success'=>false,'msg'=>'El archivo supera 50.000 filas'],400); }
     }
 }
 if (!$rows) json(['success'=>false,'msg'=>'El archivo no contiene productos'],400);
@@ -56,7 +63,7 @@ foreach($rows as $data) {
     $codigo=trim((string)$data[2]);
     $cantidad=importarNumero($data[3]);
     $categoria=isset($data[4])?trim((string)$data[4]):'';
-    if($nombre===''||$precio===null||$cantidad===null){$errores++;continue;}
+    if($nombre===''||mb_strlen($nombre)>200||mb_strlen($codigo)>100||mb_strlen($categoria)>100||$precio===null||$precio<0||$precio>2000000000||$cantidad===null||$cantidad<0||$cantidad>1000000000){$errores++;continue;}
     if($codigo!==''){$byCode->bind_param('is',$accountId,$codigo);$byCode->execute();$result=$byCode->get_result();}
     else{$byName->bind_param('is',$accountId,$nombre);$byName->execute();$result=$byName->get_result();}
     if($result&&$result->num_rows){

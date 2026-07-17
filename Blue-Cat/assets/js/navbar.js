@@ -137,6 +137,11 @@
       if (!response.ok) throw new Error('HTTP ' + response.status);
       return response.json();
     }).then(function (data) {
+      window.BlueCatPermissions = data.permisos || {};
+      window.blueCatHasPermission = function (modulo, accion) {
+        return !!(window.BlueCatPermissions[modulo] && window.BlueCatPermissions[modulo].indexOf(accion) !== -1);
+      };
+      document.dispatchEvent(new CustomEvent('bluecat:permissions-ready', { detail: window.BlueCatPermissions }));
       render(data.modulos || []);
     }).catch(function () {
       render([{ codigo: 'inicio', nombre: 'Inicio', icono: 'fa-home', ruta: 'Inicio.html' }]);

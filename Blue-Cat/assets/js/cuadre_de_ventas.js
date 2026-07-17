@@ -143,7 +143,7 @@ function setMoney(id, val) {
 function showToast(msg) {
   var t = document.createElement('div');
   t.className = 'pos-toast';
-  t.innerHTML = msg;
+  BlueCatSecurity.renderToast(t, msg, 'error');
   document.body.appendChild(t);
   requestAnimationFrame(function () { t.classList.add('show'); });
   setTimeout(function () { t.classList.remove('show'); setTimeout(function () { t.remove(); }, 300); }, 2500);
@@ -199,7 +199,7 @@ function renderSalesTable() {
     var canEdit = false;
 
     tr.innerHTML =
-      '<td' + anuladoStyle + '>' + v.id_pedido + anuladoBadge + ' <span style="font-size:10px;color:#94a3b8;">' + (v.cliente_nombre || 'CF') + '</span></td>' +
+      '<td' + anuladoStyle + '>' + Number(v.id_pedido || 0) + anuladoBadge + ' <span style="font-size:10px;color:#94a3b8;">' + escapeHtml(v.cliente_nombre || 'CF') + '</span></td>' +
       '<td class="items-cell"' + anuladoStyle + '>' + itemsHtml + '</td>' +
       '<td' + anuladoStyle + '><strong>$' + (v.precio_total || 0) + '</strong></td>' +
       '<td class="pagos-cell"' + anuladoStyle + '>' + pagosHtml + '</td>' +

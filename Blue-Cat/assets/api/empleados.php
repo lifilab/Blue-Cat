@@ -3,9 +3,7 @@ require_once __DIR__ . '/_db.php';
 $uid = requireUser();
 
 function requierePermiso($modulo, $accion) {
-    if (!verificarPermiso($modulo, $accion)) {
-        json(['error'=>'Permiso denegado: '.$modulo.'.'.$accion], 403);
-    }
+    requirePermission($modulo, $accion);
 }
 
 function requireEmpleadoActionScope(mysqli $conn, int $uid, string $accion, ArrayObject $input): void {
@@ -131,11 +129,11 @@ switch ($method) {
 
 /* ── HELPERS ── */
 function addAuditoria($conn, $id_empleado, $id_user, $accion, $detalle = null) {
-    $ip = $_SERVER['REMOTE_ADDR'] ?? '';
-    $stmt = $conn->prepare("INSERT INTO empleado_auditoria (id_empleado, id_user, accion, detalle, ip) VALUES (?,?,?,?,?)");
-    $stmt->bind_param("iisss", $id_empleado, $id_user, $accion, $detalle, $ip);
-    $stmt->execute();
-    $stmt->close();
+    try {
+        $ip = $_SERVER['REMOTE_ADDR'] ?? '';
+        $stmt = $conn->prepare("INSERT INTO empleado_auditoria (id_empleado, id_user, accion, detalle, ip) VALUES (?,?,?,?,?)");
+        if(!$stmt)return;$stmt->bind_param("iisss", $id_empleado, $id_user, $accion, $detalle, $ip);$stmt->execute();$stmt->close();
+    } catch(Throwable $error) { error_log('empleado_auditoria: '.$error->getMessage()); }
 }
 
 /* ── LIST ── */
@@ -1124,6 +1122,7 @@ function crearHistorial($conn, $uid, $input) {
    CREAR CREDENCIALES
    ═══════════════════════════════════════════ */
 function crearCredenciales($conn, $uid, $input) {
+    requirePermission('usuarios', 'editar_cuentas');
     $context = requireTenantContext($uid);
     $id_emp = (int)($input['id_empleado'] ?? 0);
     $correo = strtolower(trim((string)($input['correo'] ?? '')));
@@ -1132,7 +1131,8 @@ function crearCredenciales($conn, $uid, $input) {
 
     if (!$id_emp || !$correo || !$password) json(['error'=>'Empleado, correo y contraseña requeridos'], 400);
     if (!filter_var($correo, FILTER_VALIDATE_EMAIL)) json(['error'=>'Correo no válido'], 400);
-    if (strlen($password) < 6) json(['error'=>'La contraseña debe tener al menos 6 caracteres'], 400);
+    $passwordErrors = securityPasswordErrors((string)$password);
+    if ($passwordErrors) json(['error'=>'La contraseña requiere '.implode(', ', $passwordErrors).'.'], 400);
     // Validar antes de iniciar la transacción: una plantilla global no se puede
     // asignar y no debe provocar una creación parcial seguida de rollback.
     if ($id_rol) requireTenantRole($conn, $context, $id_rol, true);
@@ -1159,7 +1159,7 @@ function crearCredenciales($conn, $uid, $input) {
 
     $conn->begin_transaction();
     try {
-        $hash = password_hash($password, PASSWORD_DEFAULT);
+        $hash = securityHashPassword((string)$password);
         $nombre_completo = $emp['nombres'] . ' ' . $emp['apellidos'];
         $baseUsername = preg_replace('/[^a-zA-Z0-9._-]/', '', explode('@', $correo)[0]);
         if ($baseUsername === '') $baseUsername = 'usuario';
@@ -1170,7 +1170,7 @@ function crearCredenciales($conn, $uid, $input) {
 
         $idCuenta = $context->accountId;
         $idSucursal = $context->branchId;
-        $stmt = $conn->prepare("INSERT INTO usuario (nombre, correo, password, nombre_completo, activo, validar_sesion, id_empleado, id_cuenta, id_sucursal) VALUES (?,?,?,?,1,1,?,?,?)");
+        $stmt = $conn->prepare("INSERT INTO usuario (nombre, correo, password, nombre_completo, activo, validar_sesion, id_empleado, id_cuenta, id_sucursal, password_changed_at) VALUES (?,?,?,?,1,0,?,?,?,NOW())");
         $stmt->bind_param("ssssiii", $username, $correo, $hash, $nombre_completo, $id_emp, $idCuenta, $idSucursal);
         $stmt->execute();
         $id_user = (int)$conn->insert_id;
@@ -1221,8 +1221,13 @@ function eliminarEmpleado($conn, $uid, $input) {
     $conn->begin_transaction();
     try {
         // Desactivar solo la credencial propia del empleado, nunca al usuario propietario.
-        $stmt = $conn->prepare("UPDATE usuario SET activo=0 WHERE id_empleado = ? AND id_cuenta = ?");
+        $stmt = $conn->prepare("UPDATE usuario SET activo=0,validar_sesion=0,session_version=session_version+1 WHERE id_empleado = ? AND id_cuenta = ?");
         $stmt->bind_param("ii", $id, $context->accountId); $stmt->execute(); $stmt->close();
+        if ((int)($emp['id_user'] ?? 0) > 0) {
+            $targetUser=(int)$emp['id_user'];
+            $stmt=$conn->prepare("UPDATE core_sesion SET revoked_at=NOW(),revoked_by=?,revoke_reason='EMPLOYEE_DEACTIVATED' WHERE id_user=? AND id_cuenta=? AND revoked_at IS NULL");
+            $stmt->bind_param('iii',$uid,$targetUser,$context->accountId);$stmt->execute();$stmt->close();
+        }
         // Auditoría ANTES de eliminar
         $ip = $_SERVER['REMOTE_ADDR'] ?? '';
         $detalle = "Empleado {$emp['nombres']} {$emp['apellidos']} eliminado";
@@ -1281,25 +1286,30 @@ function vincularUsuario($conn, $uid, $input) {
 }
 
 function editarCredenciales($conn, $uid, $input) {
+    requirePermission('usuarios', 'editar_cuentas');
     $context = requireTenantContext($uid);
     $id_emp=(int)($input['id_empleado']??0); $nombre=trim($input['nombre']??''); $correo=trim($input['correo']??'');
     $password=$input['password']??''; $activo=!empty($input['activo'])?1:0;
     if(!$id_emp||$nombre==='') json(['error'=>'Empleado y usuario requeridos'],400);
     if($correo!==''&&!filter_var($correo,FILTER_VALIDATE_EMAIL)) json(['error'=>'Correo no válido'],400);
-    if($password!==''&&strlen($password)<6) json(['error'=>'La contraseña debe tener al menos 6 caracteres'],400);
+    if($password!==''){$passwordErrors=securityPasswordErrors((string)$password);if($passwordErrors)json(['error'=>'La contraseña requiere '.implode(', ',$passwordErrors).'.'],400);}
     $stmt=$conn->prepare("SELECT u.id_user FROM usuario u JOIN empleado e ON e.id_empleado=u.id_empleado AND e.id_cuenta=u.id_cuenta WHERE e.id_empleado=? AND e.id_cuenta=? LIMIT 1");
     $stmt->bind_param("ii",$id_emp,$context->accountId);$stmt->execute();$row=$stmt->get_result()->fetch_assoc();$stmt->close();
     if(!$row) json(['error'=>'Credenciales no encontradas'],404); $id_user=(int)$row['id_user'];
     $stmt=$conn->prepare("SELECT id_user FROM usuario WHERE (nombre=? OR (?<>'' AND correo=?)) AND id_user<>? LIMIT 1");
     $stmt->bind_param("sssi",$nombre,$correo,$correo,$id_user);$stmt->execute();$dup=$stmt->get_result()->fetch_assoc();$stmt->close();
     if($dup) json(['error'=>'El usuario o correo ya está registrado'],400);
-    if($password!==''){$hash=password_hash($password,PASSWORD_DEFAULT);$stmt=$conn->prepare("UPDATE usuario SET nombre=?,correo=?,password=?,activo=? WHERE id_user=? AND id_cuenta=?");$stmt->bind_param("sssiii",$nombre,$correo,$hash,$activo,$id_user,$context->accountId);}
-    else{$stmt=$conn->prepare("UPDATE usuario SET nombre=?,correo=?,activo=? WHERE id_user=? AND id_cuenta=?");$stmt->bind_param("ssiii",$nombre,$correo,$activo,$id_user,$context->accountId);}
-    $stmt->execute();$stmt->close(); addAuditoria($conn,$id_emp,$uid,'EDITAR_CREDENCIALES',"Usuario #$id_user actualizado");
+    $invalidate=0;
+    if($password!==''){$invalidate=1;$hash=securityHashPassword((string)$password);$stmt=$conn->prepare("UPDATE usuario SET nombre=?,correo=?,password=?,password_changed_at=NOW(),session_version=session_version+1,validar_sesion=0,intentos_fallidos=0,bloqueado_hasta=NULL,ultimo_fallo_login=NULL,activo=? WHERE id_user=? AND id_cuenta=?");$stmt->bind_param("sssiii",$nombre,$correo,$hash,$activo,$id_user,$context->accountId);}
+    else{$stmt=$conn->prepare("UPDATE usuario SET nombre=?,correo=?,activo=?,session_version=session_version+IF(?=0,1,0),validar_sesion=IF(?=0,0,validar_sesion) WHERE id_user=? AND id_cuenta=?");$stmt->bind_param("ssiiiii",$nombre,$correo,$activo,$activo,$activo,$id_user,$context->accountId);$invalidate=$activo===0?1:0;}
+    $stmt->execute();$stmt->close();
+    if($invalidate){$stmt=$conn->prepare("UPDATE core_sesion SET revoked_at=NOW(),revoked_by=?,revoke_reason='CREDENTIAL_CHANGE' WHERE id_user=? AND id_cuenta=? AND revoked_at IS NULL");$stmt->bind_param('iii',$uid,$id_user,$context->accountId);$stmt->execute();$stmt->close();}
+    addAuditoria($conn,$id_emp,$uid,'EDITAR_CREDENCIALES',"Usuario #$id_user actualizado");
     json(['success'=>true,'usuario'=>$nombre,'correo'=>$correo,'activo'=>$activo]);
 }
 
 function eliminarCredenciales($conn, $uid, $input) {
+    requirePermission('usuarios', 'editar_cuentas');
     $context = requireTenantContext($uid);
     $id_emp=(int)($input['id_empleado']??0); if(!$id_emp) json(['error'=>'ID requerido'],400);
     $stmt=$conn->prepare("SELECT u.id_user,u.correo FROM usuario u JOIN empleado e ON e.id_empleado=u.id_empleado AND e.id_cuenta=u.id_cuenta WHERE e.id_empleado=? AND e.id_cuenta=? LIMIT 1");

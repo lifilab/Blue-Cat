@@ -1,0 +1,23 @@
+name: Security baseline
+
+on:
+  push:
+    branches: [master, 'codex/**']
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  static-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+      - name: Validate PHP syntax
+        run: find Blue-Cat/assets/api Blue-Cat/scripts -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Verify security baseline
+        run: php Blue-Cat/scripts/verify-security-baseline.php

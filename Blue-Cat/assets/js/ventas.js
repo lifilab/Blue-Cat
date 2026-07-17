@@ -67,7 +67,7 @@ function apiVentasPost(accion, data, cb) {
 function toast(msg, type) {
   var t = document.createElement('div');
   t.className = 'toast toast-' + (type === 'err' ? 'err' : 'ok');
-  t.innerHTML = msg;
+  BlueCatSecurity.renderToast(t, msg, type);
   document.body.appendChild(t);
   requestAnimationFrame(function () { t.classList.add('show'); });
   setTimeout(function () { t.classList.remove('show'); setTimeout(function () { t.remove(); }, 300); }, 2500);

@@ -2,6 +2,7 @@
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/_db.php';
 $uid = requireUser();
+requirePermission('facturas', 'exportar');
 $conn = getDB();
 
 $formato = $_GET['formato'] ?? 'json';
@@ -17,8 +18,9 @@ if ($tipo === 'facturas' && !$id_factura) {
 }
 
 function exportFactura($conn, $uid, $id, $formato) {
-    $stmt = $conn->prepare("SELECT f.*, c.razon_social, c.rut, c.nombre as cliente_nombre, c.direccion, c.correo FROM factura f LEFT JOIN cliente c ON f.id_cliente = c.id_cliente WHERE f.id_factura = ? AND f.id_user = ?");
-    $stmt->bind_param("ii", $id, $uid);
+    $accountId = tenantContext($uid)->accountId;
+    $stmt = $conn->prepare("SELECT f.*, c.razon_social, c.rut, c.nombre as cliente_nombre, c.direccion, c.correo FROM factura f LEFT JOIN cliente c ON f.id_cliente = c.id_cliente AND c.id_cuenta=f.id_cuenta WHERE f.id_factura = ? AND f.id_cuenta = ?");
+    $stmt->bind_param("ii", $id, $accountId);
     $stmt->execute();
     $f = $stmt->get_result()->fetch_assoc();
     $stmt->close();
@@ -81,13 +83,15 @@ function exportListado($conn, $uid, $formato) {
     $desde = $_GET['desde'] ?? '';
     $hasta = $_GET['hasta'] ?? '';
 
-    $sql = "SELECT f.*, c.razon_social, c.rut FROM factura f LEFT JOIN cliente c ON f.id_cliente = c.id_cliente WHERE f.id_user = $uid";
-    if ($estado) $sql .= " AND f.estado = '" . $conn->real_escape_string($estado) . "'";
-    if ($desde)  $sql .= " AND f.fecha_emision >= '" . $conn->real_escape_string($desde) . "'";
-    if ($hasta)  $sql .= " AND f.fecha_emision <= '" . $conn->real_escape_string($hasta) . " 23:59:59'";
+    $accountId = tenantContext($uid)->accountId;
+    $sql = "SELECT f.*, c.razon_social, c.rut FROM factura f LEFT JOIN cliente c ON f.id_cliente = c.id_cliente AND c.id_cuenta=f.id_cuenta WHERE f.id_cuenta=?";
+    $params = [$accountId]; $types = 'i';
+    if ($estado) { $sql .= " AND f.estado=?"; $params[]=$estado; $types.='s'; }
+    if ($desde)  { $sql .= " AND f.fecha_emision>=?"; $params[]=$desde; $types.='s'; }
+    if ($hasta)  { $sql .= " AND f.fecha_emision<=?"; $params[]=$hasta.' 23:59:59'; $types.='s'; }
     $sql .= " ORDER BY f.id_factura DESC";
-
-    $rows = $conn->query($sql)->fetch_all(MYSQLI_ASSOC);
+    $stmt=$conn->prepare($sql);$stmt->bind_param($types,...$params);$stmt->execute();
+    $rows=$stmt->get_result()->fetch_all(MYSQLI_ASSOC);$stmt->close();
 
     if ($formato === 'csv') {
         header('Content-Type: text/csv; charset=utf-8');

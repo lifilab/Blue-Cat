@@ -21,12 +21,11 @@ if (isset($rootScopeActions[$accion])) {
 
 // ========== HELPERS ==========
 function invLog($conn, $uid, $accion, $entidad, $id_entidad=null, $detalle=null) {
-    $det = $detalle ? json_encode($detalle, JSON_UNESCAPED_UNICODE) : null;
-    $ip = $_SERVER['REMOTE_ADDR'] ?? '';
-    $stmt = $conn->prepare("INSERT INTO inventario_auditoria (id_user,accion,entidad,id_entidad,detalle,ip) VALUES (?,?,?,?,?,?)");
-    $stmt->bind_param("ississ", $uid, $accion, $entidad, $id_entidad, $det, $ip);
-    $stmt->execute();
-    $stmt->close();
+    try {
+        $det = $detalle ? json_encode($detalle, JSON_UNESCAPED_UNICODE) : null;$ip = $_SERVER['REMOTE_ADDR'] ?? '';
+        $stmt = $conn->prepare("INSERT INTO inventario_auditoria (id_user,accion,entidad,id_entidad,detalle,ip) VALUES (?,?,?,?,?,?)");
+        if(!$stmt)return;$stmt->bind_param("ississ", $uid, $accion, $entidad, $id_entidad, $det, $ip);$stmt->execute();$stmt->close();
+    } catch(Throwable $error) { error_log('inventario_auditoria: '.$error->getMessage()); }
 }
 
 function generarCodigo($conn, $tabla, $campo, $prefijo) {
@@ -40,9 +39,7 @@ function generarCodigo($conn, $tabla, $campo, $prefijo) {
 }
 
 function requierePermiso($modulo, $accion) {
-    if (!verificarPermiso($modulo, $accion)) {
-        json(['error'=>'Permiso denegado: '.$modulo.'.'.$accion], 403);
-    }
+    requirePermission($modulo, $accion);
 }
 
 // ========== DISPATCH ==========
