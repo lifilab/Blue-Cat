@@ -37,6 +37,7 @@ function securityHeaders(): void
 
 function securityRequireTransport(): void
 {
+    if (PHP_SAPI === 'cli') return;
     $forceHttps = filter_var((string)(getenv('FORCE_HTTPS') ?: 'false'), FILTER_VALIDATE_BOOLEAN);
     if (!$forceHttps || securityIsHttps()) return;
     http_response_code(426);

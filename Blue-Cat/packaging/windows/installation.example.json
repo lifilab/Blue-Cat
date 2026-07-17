@@ -1,0 +1,39 @@
+{
+  "company": {
+    "legal_name": "Comercial Ejemplo SpA",
+    "trade_name": "Mi Minimarket",
+    "tax_id": "76.000.000-0",
+    "business_activity": "Venta al por menor",
+    "address": "Dirección del comercio",
+    "city": "Santiago"
+  },
+  "administrator": {
+    "username": "administrador",
+    "full_name": "Administrador del comercio",
+    "email": "admin@ejemplo.local",
+    "password": "REEMPLAZAR-EN-EL-ASISTENTE"
+  },
+  "currency": {
+    "code": "CLP",
+    "name": "Peso chileno",
+    "symbol": "$",
+    "decimals": 0
+  },
+  "tax": {
+    "code": "IVA",
+    "name": "IVA",
+    "rate": 19.0
+  },
+  "branch": {
+    "code": "SUC-001",
+    "name": "Principal"
+  },
+  "warehouse": {
+    "code": "BOD-001",
+    "name": "Bodega Principal"
+  },
+  "cash_register": {
+    "code": "CAJA-01",
+    "name": "Caja Principal"
+  }
+}
