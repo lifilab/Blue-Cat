@@ -9,7 +9,7 @@ $lock = is_file($lockFile) ? json_decode((string)file_get_contents($lockFile), t
 if (!is_array($lock) || ($lock['schema'] ?? 0) !== 1 || ($lock['platform'] ?? '') !== 'windows-x64') {
     $errors[] = 'runtime-lock.json inválido.';
 } else {
-    $required = ['caddy','php','mariadb','winsw','vc-redist-x64'];
+    $required = ['caddy','php','mariadb','winsw','vc-redist-x64','webview2-sdk','webview2-runtime-installer'];
     $found = [];
     foreach (($lock['components'] ?? []) as $component) {
         $id = (string)($component['id'] ?? '');
@@ -36,9 +36,13 @@ $requiredFiles = [
     'scripts/Test-Initialize-BlueCatServer.ps1'=>['reparación idempotente','bluecat-server-test-'],
     'scripts/New-InstallerStage.ps1'=>['artifact-manifest.json','Get-FileHash'],
     'scripts/Build-Installer.ps1'=>['RequireSignature','BlueCat-Server.spdx.json','SHA256SUMS.txt','signtool.exe'],
-    'scripts/Install-Prerequisites.ps1'=>['Get-AuthenticodeSignature','Microsoft Corporation','3010'],
+    'scripts/Build-DesktopLauncher.ps1'=>['BlueCatDesktop.exe','Microsoft.Web.WebView2.Wpf.dll','win32icon','Drawing.Color]::Transparent','256'],
+    'scripts/Install-Prerequisites.ps1'=>['Get-AuthenticodeSignature','Microsoft Corporation','webview2-runtime-installer','3010'],
+    'scripts/Invoke-BlueCatInstallation.ps1'=>['installer.log','Initialize-BlueCatServer.ps1','RedirectStandardError'],
+    'scripts/Stop-BlueCatServices.ps1'=>['BlueCatWeb','Stop-Service','Dispose'],
     'scripts/Uninstall-BlueCatServices.ps1'=>['Datos conservados','BlueCatDatabase'],
-    'installer/BlueCatServer.iss'=>['bluecat-installation.json','PrivilegesRequired=admin','SignedUninstaller','Install-Prerequisites.ps1'],
+    'desktop/BlueCatDesktop.cs'=>['CoreWebView2Environment','--fullscreen','EnsureServicesAsync','WaitForBackendAsync','SecurityProtocolType.Tls12','desktop.log'],
+    'installer/BlueCatServer.iss'=>['bluecat-installation.json','PrivilegesRequired=admin','SignedUninstaller','Invoke-BlueCatInstallation.ps1','{autodesktop}\\Blue-Cat','BlueCatDesktop.exe','SetupIconFile'],
 ];
 foreach ($requiredFiles as $relative=>$needles) {
     $contents = @file_get_contents($package . '/' . $relative);

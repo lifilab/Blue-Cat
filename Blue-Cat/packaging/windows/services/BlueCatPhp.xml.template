@@ -7,7 +7,7 @@
   <depend>BlueCatDatabase</depend>
   <startmode>Automatic</startmode>
   <delayedAutoStart>true</delayedAutoStart>
-  <serviceaccount><username>NT AUTHORITY\LocalService</username></serviceaccount>
+  <serviceaccount><domain>NT AUTHORITY</domain><user>LocalService</user></serviceaccount>
   <env name="BLUECAT_ENV_FILE" value="@@ENV_FILE@@" />
   <stoptimeout>30sec</stoptimeout>
   <onfailure action="restart" delay="5 sec" />

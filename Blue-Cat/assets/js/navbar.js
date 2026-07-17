@@ -129,6 +129,25 @@
       });
     }
 
+    function showSetupState(setup, requestFailed) {
+      var current = document.querySelector('.bc-setup-alert');
+      if (current) current.remove();
+      if (!requestFailed && setup && setup.complete) return;
+      var host = document.querySelector('main') || document.querySelector('.container') || document.body;
+      var alert = document.createElement('section');
+      alert.className = 'bc-setup-alert';
+      var title = document.createElement('strong');
+      title.textContent = requestFailed ? 'No fue posible cargar los módulos' : 'Configuración inicial incompleta';
+      var detail = document.createElement('p');
+      var labels = { catalogo_modulos: 'catálogo de módulos', suscripcion: 'plan o suscripción', permisos_modulos: 'permisos del usuario' };
+      var missing = setup && Array.isArray(setup.missing) ? setup.missing.map(function (item) { return labels[item] || item; }) : [];
+      detail.textContent = requestFailed
+        ? 'El servidor no entregó la navegación. Abra Diagnóstico Blue-Cat desde el menú Inicio o ejecute Reparar.'
+        : 'Falta completar: ' + missing.join(', ') + '. Ejecute Reparar para finalizar la instalación.';
+      alert.appendChild(title); alert.appendChild(detail);
+      host.insertBefore(alert, host.firstChild);
+    }
+
     fetch('../assets/api/core.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -143,8 +162,10 @@
       };
       document.dispatchEvent(new CustomEvent('bluecat:permissions-ready', { detail: window.BlueCatPermissions }));
       render(data.modulos || []);
+      showSetupState(data.setup || null, false);
     }).catch(function () {
       render([{ codigo: 'inicio', nombre: 'Inicio', icono: 'fa-home', ruta: 'Inicio.html' }]);
+      showSetupState(null, true);
     });
   });
 }());

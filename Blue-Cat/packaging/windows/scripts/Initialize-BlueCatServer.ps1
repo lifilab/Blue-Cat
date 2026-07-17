@@ -54,6 +54,16 @@ function Unprotect-MachineSecret([string]$Source) {
 function Assert-Executable([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Falta el ejecutable $Path." }
 }
+function Wait-ServiceAbsent([string]$Name, [int]$TimeoutSeconds = 30) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        $service = Get-Service -Name $Name -ErrorAction SilentlyContinue
+        if (-not $service) { return }
+        $service.Dispose()
+        Start-Sleep -Milliseconds 500
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "El servicio anterior $Name quedó pendiente de eliminación. Reinicie Windows y ejecute Reparar."
+}
 
 $packageRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $app = [IO.Path]::GetFullPath($AppRoot)
@@ -81,6 +91,19 @@ $mariaClientExe = Join-Path $mariaBin 'mariadb.exe'
 $mariaAdminExe = Join-Path $mariaBin 'mariadb-admin.exe'
 $winswExe = Join-Path $runtime 'winsw\WinSW-x64.exe'
 foreach ($executable in @($caddyExe,$phpExe,$phpCgiExe,$mariadbdExe,$installDbExe,$mariaClientExe,$mariaAdminExe,$winswExe)) { Assert-Executable $executable }
+
+if (-not $SkipServices) {
+    $conflicts = @()
+    Get-NetTCPConnection -State Listen -LocalPort 443 -ErrorAction SilentlyContinue | ForEach-Object {
+        $process = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
+        if ($process -and $process.ProcessName -ne 'caddy') {
+            $conflicts += "$($process.ProcessName) (PID $($process.Id))"
+        }
+    }
+    if ($conflicts.Count -gt 0) {
+        throw "El puerto HTTPS 443 esta ocupado por $($conflicts -join ', '). Cierre Laragon/Apache u otro servidor y ejecute Reparar."
+    }
+}
 
 if ($SiteAddresses.Count -eq 0) {
     $SiteAddresses = @('localhost', [Net.Dns]::GetHostName())
@@ -157,7 +180,12 @@ DB_PASSWORD=$appPassword
     Protect-MachineSecret $rootPassword (Join-Path $paths.Config 'database-admin.secret')
     Remove-Item -LiteralPath $sqlFile -Force
 }
-elseif ($SkipServices) {
+else {
+    $databaseService = Get-Service -Name 'BlueCatDatabase' -ErrorAction SilentlyContinue
+    $mustStartTemporaryDatabase = $SkipServices -or -not $databaseService -or $databaseService.Status -ne 'Running'
+    if ($databaseService) { $databaseService.Dispose() }
+}
+if ($databaseInitialized -and $mustStartTemporaryDatabase) {
     $rootPassword = Unprotect-MachineSecret (Join-Path $paths.Config 'database-admin.secret')
     Write-Utf8NoBom $rootClientConfig "[client]`nhost=127.0.0.1`nport=3307`nuser=root`npassword=$rootPassword`n"
     $temporaryDatabase = Start-Process -FilePath $mariadbdExe -ArgumentList @("--defaults-file=$mariaIni",'--console') -WindowStyle Hidden -PassThru
@@ -191,10 +219,31 @@ if (-not $SkipServices) {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent(); $principal = [Security.Principal.WindowsPrincipal]::new($identity)
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'La instalación de servicios requiere elevación de administrador.' }
     & icacls.exe $data '/inheritance:r' '/grant:r' '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-19:(OI)(CI)M' | Out-Null
-    foreach ($serviceName in @('BlueCatDatabase','BlueCatPhp','BlueCatWeb')) {
-        if (-not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) { & (Join-Path $paths.Services ($serviceName + '.exe')) install }
+    $serviceNames = @('BlueCatDatabase','BlueCatPhp','BlueCatWeb')
+    foreach ($serviceName in @('BlueCatWeb','BlueCatPhp','BlueCatDatabase')) {
+        $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+        if ($service -and $service.Status -ne 'Stopped') {
+            Stop-Service -Name $serviceName -Force
+            $service.WaitForStatus([ServiceProcess.ServiceControllerStatus]::Stopped,[TimeSpan]::FromSeconds(30))
+        }
+        if ($service) { $service.Dispose() }
     }
-    foreach ($serviceName in @('BlueCatDatabase','BlueCatPhp','BlueCatWeb')) { Start-Service -Name $serviceName }
+    foreach ($serviceName in $serviceNames) {
+        $wrapper = Join-Path $paths.Services ($serviceName + '.exe')
+        $existingService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+        if ($existingService) {
+            $existingService.Dispose()
+            & $wrapper uninstall
+            if ($LASTEXITCODE -ne 0) { throw "No fue posible retirar el servicio anterior $serviceName." }
+            Wait-ServiceAbsent $serviceName 30
+        }
+        & $wrapper install
+        if ($LASTEXITCODE -ne 0) { throw "No fue posible registrar el servicio $serviceName." }
+    }
+    foreach ($serviceName in $serviceNames) {
+        Start-Service -Name $serviceName
+        (Get-Service -Name $serviceName).WaitForStatus([ServiceProcess.ServiceControllerStatus]::Running,[TimeSpan]::FromSeconds(45))
+    }
     $rootCertificate = Join-Path $paths.Caddy 'pki\authorities\local\root.crt'
     $certificateDeadline = [DateTime]::UtcNow.AddSeconds(45)
     while (-not (Test-Path -LiteralPath $rootCertificate) -and [DateTime]::UtcNow -lt $certificateDeadline) { Start-Sleep -Milliseconds 500 }
@@ -204,6 +253,15 @@ if (-not $SkipServices) {
     if (-not (Get-NetFirewallRule -DisplayName 'Blue-Cat Server HTTPS' -ErrorAction SilentlyContinue)) {
         New-NetFirewallRule -DisplayName 'Blue-Cat Server HTTPS' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 443 -Profile Private | Out-Null
     }
+    $healthDeadline = [DateTime]::UtcNow.AddSeconds(45)
+    $healthy = $false
+    do {
+        try {
+            $health = Invoke-RestMethod -UseBasicParsing -Uri 'https://localhost/assets/api/health.php' -TimeoutSec 5
+            $healthy = $health.status -eq 'ok' -and $health.database -eq $true -and $health.setup -eq $true
+        } catch { Start-Sleep -Milliseconds 750 }
+    } while (-not $healthy -and [DateTime]::UtcNow -lt $healthDeadline)
+    if (-not $healthy) { throw 'Los servicios iniciaron, pero el health check de Blue-Cat no quedo operativo.' }
 }
 
 $state = [ordered]@{schema=1;configured_at=[DateTime]::UtcNow.ToString('o');app_root=$app;data_root=$data;site_addresses=$SiteAddresses;services_installed=(-not $SkipServices)}

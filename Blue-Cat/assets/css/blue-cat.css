@@ -7,6 +7,19 @@ body {
   min-height: 100vh;
 }
 
+.bc-setup-alert {
+  margin: 1rem auto;
+  max-width: 1100px;
+  padding: 1rem 1.25rem;
+  border: 1px solid #f3c46b;
+  border-radius: 12px;
+  background: #fff8e8;
+  color: #5f430d;
+  box-shadow: 0 6px 20px rgba(95, 67, 13, .08);
+}
+.bc-setup-alert strong { display: block; margin-bottom: .35rem; }
+.bc-setup-alert p { margin: 0; }
+
 /* Navbar */
 .navbar {
   background: linear-gradient(120deg, #0f172a 0%, #172554 100%);

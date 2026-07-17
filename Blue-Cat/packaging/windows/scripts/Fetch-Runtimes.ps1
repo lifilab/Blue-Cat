@@ -40,7 +40,14 @@ foreach ($component in $lock.components) {
 
     $destination = Join-Path $OutputPath $component.id
     New-Item -ItemType Directory -Path $destination -Force | Out-Null
-    if ($component.file.EndsWith('.zip', [StringComparison]::OrdinalIgnoreCase)) {
+    if ($component.file.EndsWith('.nupkg', [StringComparison]::OrdinalIgnoreCase)) {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $extractRoot = Join-Path $OutputPath ('.extract-' + [Guid]::NewGuid().ToString('N'))
+        [IO.Compression.ZipFile]::ExtractToDirectory($archive, $extractRoot)
+        Copy-Item -Path (Join-Path $extractRoot '*') -Destination $destination -Recurse -Force
+        if (-not ([IO.Path]::GetFullPath($extractRoot)).StartsWith([IO.Path]::GetFullPath($OutputPath), [StringComparison]::OrdinalIgnoreCase)) { throw 'Ruta temporal fuera del build.' }
+        Remove-Item -LiteralPath $extractRoot -Recurse -Force
+    } elseif ($component.file.EndsWith('.zip', [StringComparison]::OrdinalIgnoreCase)) {
         if ($component.id -eq 'mariadb') {
             $extractRoot = Join-Path $OutputPath ('.extract-' + [Guid]::NewGuid().ToString('N'))
             New-Item -ItemType Directory -Path $extractRoot | Out-Null

@@ -7,7 +7,7 @@
   <depend>BlueCatPhp</depend>
   <startmode>Automatic</startmode>
   <delayedAutoStart>true</delayedAutoStart>
-  <serviceaccount><username>NT AUTHORITY\LocalService</username></serviceaccount>
+  <serviceaccount><domain>NT AUTHORITY</domain><user>LocalService</user></serviceaccount>
   <stoptimeout>30sec</stoptimeout>
   <onfailure action="restart" delay="5 sec" />
   <onfailure action="restart" delay="15 sec" />

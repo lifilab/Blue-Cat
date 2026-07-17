@@ -521,6 +521,13 @@ case 'plan_modulo_toggle':
 
 // ═══ SIDEBAR ═══
 case 'sidebar':
+    $setupMissing = [];
+    $catalogCount = (int)$conn->query("SELECT COUNT(*) total FROM modulo WHERE activo=1")->fetch_assoc()['total'];
+    if ($catalogCount === 0) $setupMissing[] = 'catalogo_modulos';
+    $stmtSetup = $conn->prepare("SELECT COUNT(*) total FROM suscripcion s JOIN empresa e ON e.id_empresa=s.id_empresa WHERE e.id_cuenta=? AND e.activo=1 AND s.estado='activa' AND (s.fecha_fin IS NULL OR s.fecha_fin>=CURDATE())");
+    $stmtSetup->bind_param('i', $accountId); $stmtSetup->execute();
+    if ((int)$stmtSetup->get_result()->fetch_assoc()['total'] === 0) $setupMissing[] = 'suscripcion';
+    $stmtSetup->close();
     $modulos = [[
         'codigo' => 'inicio',
         'nombre' => 'Inicio',
@@ -574,7 +581,10 @@ case 'sidebar':
     while ($f = $r->fetch_assoc()) {
         $permisos[$f['modulo']][] = $f['accion'];
     }
-    json(['modulos' => $modulos, 'permisos' => $permisos, 'usuario' => $uid]);
+    if (count($modulos) === 1 && !in_array('catalogo_modulos', $setupMissing, true) && !in_array('suscripcion', $setupMissing, true)) {
+        $setupMissing[] = 'permisos_modulos';
+    }
+    json(['modulos' => $modulos, 'permisos' => $permisos, 'usuario' => $uid, 'setup'=>['complete'=>count($setupMissing)===0,'missing'=>$setupMissing]]);
     break;
 
 // ═══ LICENCIA ═══
