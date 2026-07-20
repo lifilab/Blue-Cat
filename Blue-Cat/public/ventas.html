@@ -83,17 +83,6 @@
 
     .export-bar { display:flex; justify-content:flex-end; margin-bottom:12px; }
 
-    /* Edit modal specific */
-    .edit-items-table { width:100%; border-collapse:collapse; margin-bottom:12px; }
-    .edit-items-table th { font-size:11px; padding:6px; background:#f8fafc; }
-    .edit-items-table td { padding:4px; }
-    .edit-items-table input { width:60px; padding:4px; border:1px solid #e2e8f0; border-radius:4px; font-size:12px; text-align:center; }
-    .edit-section { margin-bottom:16px; }
-    .edit-section h4 { font-size:13px; font-weight:600; color:#475569; margin-bottom:8px; display:flex; align-items:center; gap:6px; }
-    .pago-row { display:flex; gap:8px; align-items:center; margin-bottom:6px; }
-    .pago-row select, .pago-row input { padding:6px 8px; border:1px solid #e2e8f0; border-radius:4px; font-size:12px; }
-    .pago-row input { width:90px; }
-
     @media(max-width:768px) {
       .kpi-grid { grid-template-columns:repeat(2, 1fr); }
       .detail-inner { flex-direction:column; }
@@ -293,50 +282,6 @@
     <div id="view-tarjetas" class="cards-view"></div>
   </div>
 
-  <!-- Edit Modal -->
-  <div class="popup" id="edit-modal">
-    <div class="popup-content" style="max-width:700px;">
-      <span class="close-btn" onclick="closeEditModal()">&times;</span>
-      <h2><i class="fas fa-edit"></i> Editar Venta <span id="edit-id-label"></span></h2>
-      <div id="edit-body" class="modal-body">
-        <div class="edit-section">
-          <h4><i class="fas fa-box"></i> Productos</h4>
-          <table class="edit-items-table">
-            <thead><tr><th>Producto</th><th>Cantidad</th><th>Precio Unitario</th><th>Total</th></tr></thead>
-            <tbody id="edit-items-tbody"></tbody>
-          </table>
-        </div>
-        <div class="edit-section">
-          <h4><i class="fas fa-credit-card"></i> Pagos</h4>
-          <div id="edit-pagos"></div>
-        </div>
-        <div class="edit-section">
-          <h4><i class="fas fa-comment"></i> Motivo de Edición</h4>
-          <textarea id="edit-motivo" rows="2" placeholder="Motivo de la modificación..."></textarea>
-        </div>
-        <div style="display:flex;gap:8px;justify-content:flex-end;">
-          <button class="btn btn-outline btn-sm" onclick="closeEditModal()">Cancelar</button>
-          <button class="btn btn-primary btn-sm" onclick="saveEdit()"><i class="fas fa-save"></i> Guardar Cambios</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Delete / Anular Modal -->
-  <div class="popup" id="delete-modal">
-    <div class="popup-content">
-      <span class="close-btn" onclick="closeDeleteModal()">&times;</span>
-      <h2><i class="fas fa-ban" style="color:#dc2626;"></i> Anular Venta</h2>
-      <p id="delete-msg" style="color:#475569;margin-bottom:14px;font-size:14px;">¿Está seguro de que desea anular esta venta?</p>
-      <label>Motivo de Anulación</label>
-      <textarea id="delete-motivo" rows="2" placeholder="Motivo de la anulación..." style="min-height:60px;"></textarea>
-      <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;">
-        <button class="btn btn-outline btn-sm" onclick="closeDeleteModal()">Cancelar</button>
-        <button class="btn btn-danger btn-sm" onclick="confirmDelete()" id="confirm-delete-btn"><i class="fas fa-trash"></i> Confirmar Anulación</button>
-      </div>
-    </div>
-  </div>
-
   <!-- Cerrar sesión -->
   <div id="cerrar-sesion-popup" class="popup">
     <div class="popup-content">
@@ -348,7 +293,8 @@
   </div>
 
   <script src="../assets/js/security.js?v=1"></script>
-  <script src="../assets/js/ventas.js"></script>
+  <script src="../assets/js/supervisor-approval.js?v=1"></script>
+  <script src="../assets/js/ventas.js?v=2"></script>
   <script src="../assets/js/login_pvt.js?v=5"></script>
   <script src="../assets/js/navbar.js?v=3"></script>
 </body>

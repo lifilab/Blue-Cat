@@ -1083,7 +1083,14 @@ function reimprimirVenta(idPedido) {
 }
 
 function anularVenta(id) {
-  apiPost({ accion: 'venta_anular', id_pedido: id }, function () {
+  var motivo = window.prompt('Motivo real de la anulación:');
+  if (motivo === null) return;
+  motivo = motivo.trim();
+  if (motivo.length < 3) {
+    toast('El motivo debe tener al menos 3 caracteres', 'err');
+    return;
+  }
+  apiPost({ accion: 'venta_anular', id_pedido: id, motivo: motivo }, function () {
     toast('Venta anulada');
     closeModal();
     loadDashboard();

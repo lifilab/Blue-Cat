@@ -32,6 +32,31 @@ function posPaymentValue($payment, string $key, $default = null) {
 }
 
 /**
+ * Convierte la cantidad comercial en la cantidad exacta que mueve stock.
+ * Los productos por unidad nunca pueden fraccionarse; peso y volumen usan el
+ * contrato comun DECIMAL(18,3).
+ */
+function posNormalizeStockQuantity(float $quantity, string $saleType, string $productName = 'El producto'): float {
+    if (!is_finite($quantity) || $quantity <= 0) {
+        throw new InvalidArgumentException("{$productName} requiere una cantidad mayor a cero.");
+    }
+
+    if (strtoupper($saleType) === 'UNIDAD') {
+        $rounded = round($quantity);
+        if (abs($quantity - $rounded) > 0.000001) {
+            throw new InvalidArgumentException("{$productName} solo admite cantidades enteras.");
+        }
+        return (float) (int) $rounded;
+    }
+
+    $rounded = round($quantity, 3);
+    if (abs($quantity - $rounded) > 0.000001) {
+        throw new InvalidArgumentException("{$productName} admite como maximo 3 decimales.");
+    }
+    return $rounded;
+}
+
+/**
  * metodo_de_pago.monto represents the amount applied to the sale. Money handed
  * over by the customer and change are stored separately on pedido.
  */

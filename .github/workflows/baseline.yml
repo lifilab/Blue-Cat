@@ -11,15 +11,25 @@ permissions:
 jobs:
   baseline:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mysqli, curl
       - name: Runtime versions
         run: |
           php --version
           node --version
       - name: Repository baseline
         run: php Blue-Cat/scripts/verify-baseline.php
+      - name: Confirmed sales are immutable
+        run: php Blue-Cat/scripts/test-sales-immutability-ui.php
+      - name: Inventory UI preserves decimal quantities
+        run: php Blue-Cat/scripts/test-inventory-ui-contract.php
       - name: Secret patterns
         shell: bash
         run: |

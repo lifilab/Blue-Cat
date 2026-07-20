@@ -7,7 +7,7 @@ function POST_devolucion_crear_v2($data): void {
     $reason=trim((string)($data->motivo??''));
     $requested=(array)($data->items??[]);
     if ($orderId<=0 || !$requested) json(['error'=>true,'message'=>'Pedido e ítems son requeridos.'],400);
-    if (strlen($reason)<3) json(['error'=>true,'message'=>'Debe indicar el motivo de la devolución.'],400);
+    if (strlen($reason)<3 || strlen($reason)>500) json(['error'=>true,'message'=>'El motivo de la devolución debe tener entre 3 y 500 caracteres.'],400);
 
     $contextItems=[];
     foreach ($requested as $item) {
@@ -17,7 +17,7 @@ function POST_devolucion_crear_v2($data): void {
             'cantidad'=>(float)posPaymentValue($item,'cantidad',0),
         ];
     }
-    $ctx=['entidad_tipo'=>'pedido','entidad_id'=>(string)$orderId,'items'=>$contextItems];
+    $ctx=['entidad_tipo'=>'pedido','entidad_id'=>(string)$orderId,'items'=>$contextItems,'motivo'=>$reason];
     supervisorRequire('pos.devolucion',$ctx,$data->supervisor_token??null);
 
     $conn->begin_transaction();
@@ -45,31 +45,29 @@ function POST_devolucion_crear_v2($data): void {
             $productId=(int)posPaymentValue($item,'id_producto',0);
             $quantity=(float)posPaymentValue($item,'cantidad',0);
             if ($quantity<=0) throw new Exception('La cantidad a devolver debe ser mayor a cero.');
+            $quantity=normalizarCantidadDecimal($quantity);
             $candidates=$detailId>0?[$detailId]:($byProduct[$productId]??[]);
             if (!$candidates) throw new Exception('Un producto solicitado no pertenece al pedido.');
             foreach ($candidates as $candidate) {
                 if ($quantity<=0.000001) break;
                 if (!isset($byDetail[$candidate])) continue;
                 $line=$byDetail[$candidate];
-                $already=(float)$line['cantidad_devuelta']+(float)($quantities[$candidate]??0);
-                $available=(float)$line['cantidad_pedida']-$already;
+                $already=round((float)$line['cantidad_devuelta']+(float)($quantities[$candidate]??0),3);
+                $available=round((float)$line['cantidad_pedida']-$already,3);
                 if ($available<=0.000001) continue;
-                $take=min($quantity,$available);$quantities[$candidate]=($quantities[$candidate]??0)+$take;$quantity-=$take;
+                $take=min($quantity,$available);
+                $quantities[$candidate]=round((float)($quantities[$candidate]??0)+$take,3);
+                $quantity=round($quantity-$take,3);
             }
             if ($quantity>0.000001) throw new Exception('La cantidad supera lo vendido menos devoluciones anteriores.');
         }
 
         $lines=[];$refundTotal=0;$fullyReturned=true;
         foreach ($byDetail as $detailId=>$line) {
-            $quantity=(float)($quantities[$detailId]??0);
-            $sold=(float)$line['cantidad_pedida'];$previousQty=(float)$line['cantidad_devuelta'];
-            if ($line['tipo_venta']==='UNIDAD' && abs($quantity-round($quantity))>0.000001) {
-                throw new Exception("{$line['nombre_producto']} solo admite unidades enteras.");
-            }
-            if ($line['tipo_venta']!=='UNIDAD' && abs($quantity-round($quantity,3))>0.000001) {
-                throw new Exception("{$line['nombre_producto']} admite como máximo 3 decimales.");
-            }
+            $quantity=round((float)($quantities[$detailId]??0),3);
+            $sold=round((float)$line['cantidad_pedida'],3);$previousQty=round((float)$line['cantidad_devuelta'],3);
             if ($quantity>0) {
+                $quantity=posNormalizeStockQuantity($quantity,(string)$line['tipo_venta'],(string)$line['nombre_producto']);
                 $remainingBefore=$sold-$previousQty;
                 $remainingAmount=(int)$line['precio_total']-(int)$line['monto_devuelto'];
                 $subtotal=abs($quantity-$remainingBefore)<0.000001
@@ -94,10 +92,11 @@ function POST_devolucion_crear_v2($data): void {
         $stmt->bind_param('iissi',$uid,$orderId,$returnType,$reason,$refundTotal);$stmt->execute();$returnId=(int)$conn->insert_id;$stmt->close();
         $warehouseId=(int)$order['id_bodega'];
         foreach ($lines as $line) {
+            $stockQuantity=posNormalizeStockQuantity($line['quantity'],$line['sale_type']);
             $stmt=$conn->prepare('INSERT INTO pos_devolucion_detalle(id_devolucion,id_detalle_pedido,id_producto,cantidad,precio_unitario,subtotal) VALUES(?,?,?,?,?,?)');
-            $stmt->bind_param('iiidii',$returnId,$line['detail_id'],$line['product_id'],$line['quantity'],$line['unit_price'],$line['subtotal']);$stmt->execute();$stmt->close();
-            actualizarStock($conn,$line['product_id'],$warehouseId,'disponible',$line['quantity']);
-            actualizarKardex($conn,$uid,$line['product_id'],$warehouseId,'DEVOLUCION',$returnId,'DEVOLUCION',$line['quantity'],0,$line['cost'],"Devolución #{$returnId}, Pedido #{$orderId}");
+            $stmt->bind_param('iiidii',$returnId,$line['detail_id'],$line['product_id'],$stockQuantity,$line['unit_price'],$line['subtotal']);$stmt->execute();$stmt->close();
+            reponerStock($conn,$line['product_id'],$warehouseId,$stockQuantity);
+            actualizarKardex($conn,$uid,$line['product_id'],$warehouseId,'DEVOLUCION',$returnId,'DEVOLUCION',$stockQuantity,0,$line['cost'],"Devolución #{$returnId}, Pedido #{$orderId}");
         }
 
         $cash=getOpenCaja($conn,$uid);

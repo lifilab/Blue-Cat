@@ -1359,12 +1359,12 @@ function POST_venta_crear($data) {
             }
 
             $tipoVenta = $producto['tipo_venta'] ?? 'UNIDAD';
-            if ($tipoVenta === 'UNIDAD' && abs($cantidad - round($cantidad)) > 0.000001) {
-                throw new Exception("El producto \"{$producto['nombre_producto']}\" solo admite cantidades enteras.");
-            }
-            if ($tipoVenta !== 'UNIDAD' && abs($cantidad - round($cantidad, 3)) > 0.000001) {
-                throw new Exception("El producto \"{$producto['nombre_producto']}\" admite como máximo 3 decimales.");
-            }
+            $cantidadStock = posNormalizeStockQuantity(
+                $cantidad,
+                $tipoVenta,
+                "El producto \"{$producto['nombre_producto']}\""
+            );
+            $cantidad = $cantidadStock;
             $costoUnit = (int) round(((float) ($producto['costo_promedio'] ?? 0)) * 100);
             $linePromotion=$promotionLineMap[$idProducto]??[];
             $receiptItems[]=['id_producto'=>$idProducto,'codigo'=>$producto['codigo_de_barras'],'sku'=>$producto['sku'],'nombre'=>$producto['nombre_producto'],'cantidad'=>$cantidad,
@@ -1381,24 +1381,11 @@ function POST_venta_crear($data) {
             $stmt->execute();
             $stmt->close();
 
-            // Descontar stock
-            if ($tipoVenta === 'UNIDAD') {
-                $cantidadInt = (int) ceil($cantidad);
-                $affected = descontarStock($conn, $idProducto, $idBodega, $cantidadInt);
-                if ($affected === 0) {
-                    throw new Exception("Stock insuficiente para el producto \"{$producto['nombre_producto']}\".");
-                }
-            } else {
-                // Peso/volumen: stock centralizado
-                $affected = actualizarStock($conn, $idProducto, $idBodega, 'disponible', -$cantidad);
-                if ($affected === 0) {
-                    throw new Exception("Stock insuficiente para el producto \"{$producto['nombre_producto']}\".");
-                }
-            }
+            // Stock y kardex deben mover exactamente la misma cantidad decimal.
+            descontarStock($conn, $idProducto, $idBodega, $cantidadStock);
 
             // Kardex
-            $salidaReal = ($tipoVenta === 'UNIDAD') ? (int) round($cantidad) : $cantidad;
-            actualizarKardex($conn, $uid, $idProducto, $idBodega, 'VENTA', $idPedido, 'PEDIDO', 0, $salidaReal, $costoUnit, "Venta #{$idPedido}");
+            actualizarKardex($conn, $uid, $idProducto, $idBodega, 'VENTA', $idPedido, 'PEDIDO', 0, $cantidadStock, $costoUnit, "Venta #{$idPedido}");
         }
 
         // INSERT pagos
@@ -1520,7 +1507,12 @@ function POST_venta_anular($data) {
         json(['error' => true, 'message' => 'ID de pedido requerido'], 400);
     }
 
-    $ctx=['entidad_tipo'=>'pedido','entidad_id'=>(string)$pedidoId];
+    $motivo = trim((string) ($data->motivo ?? ''));
+    if (mb_strlen($motivo) < 3 || mb_strlen($motivo) > 500) {
+        json(['error' => true, 'message' => 'Ingrese un motivo de anulación entre 3 y 500 caracteres'], 400);
+    }
+
+    $ctx=['entidad_tipo'=>'pedido','entidad_id'=>(string)$pedidoId,'motivo'=>$motivo];
     supervisorRequire('pos.anular_venta',$ctx,$data->supervisor_token ?? null);
 
     try {
@@ -1529,10 +1521,10 @@ function POST_venta_anular($data) {
         $sql = "SELECT p.*, s.id_user AS sesion_user
                 FROM pedido p
                 JOIN sesion s ON p.id_sesion = s.id_sesion
-                WHERE p.id_pedido = ?
+                WHERE p.id_pedido = ? AND p.id_cuenta = ?
                 FOR UPDATE";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param('i', $pedidoId);
+        $stmt->bind_param('ii', $pedidoId, $tenant->accountId);
         $stmt->execute();
         $result = $stmt->get_result();
         $pedido = $result->fetch_assoc();
@@ -1543,6 +1535,14 @@ function POST_venta_anular($data) {
         }
         if ((int) $pedido['anulado'] === 1) {
             throw new Exception('El pedido ya está anulado.');
+        }
+        $stmt = $conn->prepare('SELECT id_devolucion FROM pos_devolucion WHERE id_pedido=? LIMIT 1 FOR UPDATE');
+        $stmt->bind_param('i', $pedidoId);
+        $stmt->execute();
+        $hasReturn = (bool) $stmt->get_result()->fetch_row();
+        $stmt->close();
+        if ($hasReturn) {
+            throw new Exception('El pedido tiene devoluciones y no puede anularse completo.');
         }
 
         // Verify ownership (via cuenta)
@@ -1592,28 +1592,22 @@ function POST_venta_anular($data) {
             $cantidad   = (float) $det['cantidad_pedida'];
 
             // Get product tipo_venta
-            $sql = "SELECT tipo_venta, costo_promedio FROM producto WHERE id_producto = ?";
+            $sql = "SELECT tipo_venta, costo_promedio, nombre_producto FROM producto WHERE id_producto = ? AND id_cuenta = ?";
             $stmt = $conn->prepare($sql);
-            $stmt->bind_param('i', $idProducto);
+            $stmt->bind_param('ii', $idProducto, $tenant->accountId);
             $stmt->execute();
             $res = $stmt->get_result();
-            $prod = $res->fetch_assoc() ?: ['tipo_venta' => 'UNIDAD', 'costo_promedio' => 0];
+            $prod = $res->fetch_assoc();
             $stmt->close();
+            if (!$prod) {
+                throw new Exception('Producto del pedido no encontrado en la cuenta.');
+            }
 
             $tipoVenta = $prod['tipo_venta'];
             $costoUnit = (int) round(((float) $prod['costo_promedio']) * 100);
-
-            if ($tipoVenta === 'UNIDAD') {
-                reponerStock($conn, $idProducto, $idBodega, (int) ceil($cantidad));
-            } else {
-                $affected = actualizarStock($conn, $idProducto, $idBodega, 'disponible', $cantidad);
-                if ($affected === 0) {
-                    throw new Exception('No se pudo reponer el stock para la anulacion del pedido.');
-                }
-            }
-
-            $entradaKardex = ($tipoVenta === 'UNIDAD') ? (int) ceil($cantidad) : 0;
-            actualizarKardex($conn, $uid, $idProducto, $idBodega, 'ANULACION', $pedidoId, 'PEDIDO', $entradaKardex, 0, $costoUnit, "Anulación pedido #{$pedidoId}");
+            $cantidadStock = posNormalizeStockQuantity($cantidad, $tipoVenta, (string) $prod['nombre_producto']);
+            reponerStock($conn, $idProducto, $idBodega, $cantidadStock);
+            actualizarKardex($conn, $uid, $idProducto, $idBodega, 'ANULACION', $pedidoId, 'PEDIDO', $cantidadStock, 0, $costoUnit, "Anulación pedido #{$pedidoId}: {$motivo}");
         }
 
         // UPDATE pedido anulado=1
@@ -1643,10 +1637,14 @@ function POST_venta_anular($data) {
                 $metodoPago = posCanonicalPaymentMethod($pago['nombre_metodo_pago'] ?? 'EFECTIVO');
 
                 if ($metodoPago === 'EFECTIVO') {
-                    $sql = "UPDATE pos_caja SET monto_actual = monto_actual - ? WHERE id_caja = ?";
+                    $sql = "UPDATE pos_caja SET monto_actual = monto_actual - ? WHERE id_caja = ? AND id_cuenta = ? AND monto_actual >= ?";
                     $stmt = $conn->prepare($sql);
-                    $stmt->bind_param('ii', $montoPago, $idCaja);
+                    $stmt->bind_param('iiii', $montoPago, $idCaja, $tenant->accountId, $montoPago);
                     $stmt->execute();
+                    if ($stmt->affected_rows !== 1) {
+                        $stmt->close();
+                        throw new Exception('La caja no tiene efectivo suficiente para anular esta venta. Procese una devolución desde una caja con saldo disponible.');
+                    }
                     $stmt->close();
                 }
 
@@ -1659,7 +1657,14 @@ function POST_venta_anular($data) {
             }
         }
 
-        insertAuditoria($conn, $uid, 'venta_anular', "Pedido #{$pedidoId} anulado", $pedidoId, 'pedido');
+        insertAuditoria(
+            $conn,
+            $uid,
+            'venta_anular',
+            (string) json_encode(['pedido_id'=>$pedidoId,'motivo'=>$motivo], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            $pedidoId,
+            'pedido'
+        );
 
         $conn->commit();
 
@@ -2031,6 +2036,8 @@ function POST_cotizacion_convertir($data) {
                 if ($prod) {
                     $tipoVenta = $prod['tipo_venta'] ?? 'UNIDAD';
                     $costoUnit = (int) round(((float) $prod['costo_promedio']) * 100);
+                    $cantidadStock = posNormalizeStockQuantity($cantidad, $tipoVenta);
+                    $cantidad = $cantidadStock;
 
                     // INSERT detalle
                     $sql = "INSERT INTO detalle_pedido (id_pedido, id_producto, cantidad_pedida, precio_total)
@@ -2040,18 +2047,8 @@ function POST_cotizacion_convertir($data) {
                     $stmt->execute();
                     $stmt->close();
 
-                    // Descontar stock
-                    if ($tipoVenta === 'UNIDAD') {
-                        descontarStock($conn, $idProducto, $idBodega, (int) ceil($cantidad));
-                    } else {
-                        $affected = actualizarStock($conn, $idProducto, $idBodega, 'disponible', -$cantidad);
-                        if ($affected === 0) {
-                            throw new Exception('No se pudo descontar el stock para la venta desde cotizacion.');
-                        }
-                    }
-
-                    $salidaKardex = ($tipoVenta === 'UNIDAD') ? (int) ceil($cantidad) : 0;
-                    actualizarKardex($conn, $uid, $idProducto, $idBodega, 'VENTA', $idPedido, 'PEDIDO', 0, $salidaKardex, $costoUnit, "Venta desde cotización #{$idCotizacion}");
+                    descontarStock($conn, $idProducto, $idBodega, $cantidadStock);
+                    actualizarKardex($conn, $uid, $idProducto, $idBodega, 'VENTA', $idPedido, 'PEDIDO', 0, $cantidadStock, $costoUnit, "Venta desde cotización #{$idCotizacion}");
                 }
             }
         }
@@ -2290,20 +2287,13 @@ function POST_devolucion_crear($data) {
 
             $tipoVenta = $prod['tipo_venta'];
             $costoUnit = (int) round(((float) $prod['costo_promedio']) * 100);
+            $cantidadStock = posNormalizeStockQuantity($cantidad, $tipoVenta);
 
             // Reponer stock
-            if ($tipoVenta === 'UNIDAD') {
-                reponerStock($conn, $idProducto, $idBodega, (int) ceil($cantidad));
-            } else {
-                $affected = actualizarStock($conn, $idProducto, $idBodega, 'disponible', $cantidad);
-                if ($affected === 0) {
-                    throw new Exception('No se pudo reponer el stock para la devolucion.');
-                }
-            }
+            reponerStock($conn, $idProducto, $idBodega, $cantidadStock);
 
             // Kardex
-            $entradaKardex = ($tipoVenta === 'UNIDAD') ? (int) ceil($cantidad) : 0;
-            actualizarKardex($conn, $uid, $idProducto, $idBodega, 'DEVOLUCION', $idDevolucion, 'DEVOLUCION', $entradaKardex, 0, $costoUnit, "Devolución #{$idDevolucion}, Pedido #{$pedidoId}");
+            actualizarKardex($conn, $uid, $idProducto, $idBodega, 'DEVOLUCION', $idDevolucion, 'DEVOLUCION', $cantidadStock, 0, $costoUnit, "Devolución #{$idDevolucion}, Pedido #{$pedidoId}");
         }
 
         // Revertir el pago en caja. Para devoluciones parciales se distribuye

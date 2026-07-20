@@ -33,7 +33,10 @@ function toast(msg, type) {
 
 function esc(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
-function num(n) { return parseInt(n) || 0; }
+function num(n) {
+  var value = Number.parseFloat(n);
+  return Number.isFinite(value) ? value : 0;
+}
 
 function fmt(n) { return (num(n)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.'); }
 
@@ -458,7 +461,7 @@ function showQuickStock() {
     '<p style="font-size:12px;color:#64748b;margin:4px 0 12px;">Código de barras → Enter busca → Enter cantidad → Enter costo → ¡listo!</p>' +
     '<input type="text" id="qs-barcode" class="input" placeholder="Pistoleá el código..." style="font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin-bottom:8px;">' +
     '<div style="display:flex;gap:8px;margin-bottom:8px;">' +
-      '<div style="flex:1;"><label style="font-size:11px;font-weight:600;color:#475569;">Cantidad</label><input type="number" id="qs-cant" class="input" value="1" min="1" style="padding:10px;width:100%;box-sizing:border-box;"></div>' +
+      '<div style="flex:1;"><label style="font-size:11px;font-weight:600;color:#475569;">Cantidad</label><input type="number" id="qs-cant" class="input" value="1" min="0.001" step="0.001" style="padding:10px;width:100%;box-sizing:border-box;"></div>' +
       '<div style="flex:1;"><label style="font-size:11px;font-weight:600;color:#475569;">Costo $</label><input type="number" id="qs-costo" class="input" value="0" style="padding:10px;width:100%;box-sizing:border-box;"></div>' +
     '</div>' +
     '<div id="qs-info" style="min-height:44px;padding:8px 0;font-size:13px;color:#64748b;border-bottom:1px solid #e2e8f0;margin-bottom:8px;">' +
@@ -557,7 +560,7 @@ function showTransferenciaForm() {
   openModal('<div class="modal-body"><h3><i class="fas fa-plus"></i> Nueva Transferencia</h3><form onsubmit="saveTransferencia(event)"><div class="form-grid">' +
     '<div><label>Origen *</label><select id="trf-origen"></select></div><div><label>Destino *</label><select id="trf-destino"></select></div>' +
     '<div class="full"><label>Productos (seleccione y agregue)</label></div>' +
-    '<div class="full"><div id="trf-items"><div class="trf-row" style="display:flex;gap:8px;margin-bottom:6px;"><select class="trf-prod" style="flex:2;padding:7px;border:1px solid #e2e8f0;border-radius:6px;"></select><input type="number" class="trf-cant" placeholder="Cant" style="flex:1;padding:7px;border:1px solid #e2e8f0;border-radius:6px;"></div></div>' +
+    '<div class="full"><div id="trf-items"><div class="trf-row" style="display:flex;gap:8px;margin-bottom:6px;"><select class="trf-prod" style="flex:2;padding:7px;border:1px solid #e2e8f0;border-radius:6px;"></select><input type="number" class="trf-cant" min="0.001" step="0.001" placeholder="Cant" style="flex:1;padding:7px;border:1px solid #e2e8f0;border-radius:6px;"></div></div>' +
     '<button type="button" class="btn btn-outline btn-sm full" onclick="addTrfRow()"><i class="fas fa-plus"></i> Agregar producto</button></div>' +
     '<div class="full"><label>Observaciones</label><textarea id="trf-obs" rows="2"></textarea></div>' +
   '</div><button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:12px;"><i class="fas fa-save"></i> Crear Transferencia</button></form></div>');
@@ -572,7 +575,7 @@ function addTrfRow() {
   var div = document.createElement('div');
   div.className = 'trf-row';
   div.style.cssText = 'display:flex;gap:8px;margin-bottom:6px;';
-  div.innerHTML = '<select class="trf-prod" style="flex:2;padding:7px;border:1px solid #e2e8f0;border-radius:6px;"></select><input type="number" class="trf-cant" placeholder="Cant" style="flex:1;padding:7px;border:1px solid #e2e8f0;border-radius:6px;"><button type="button" class="btn btn-danger btn-xs" onclick="this.parentElement.remove()"><i class="fas fa-times"></i></button>';
+  div.innerHTML = '<select class="trf-prod" style="flex:2;padding:7px;border:1px solid #e2e8f0;border-radius:6px;"></select><input type="number" class="trf-cant" min="0.001" step="0.001" placeholder="Cant" style="flex:1;padding:7px;border:1px solid #e2e8f0;border-radius:6px;"><button type="button" class="btn btn-danger btn-xs" onclick="this.parentElement.remove()"><i class="fas fa-times"></i></button>';
   items.appendChild(div);
   loadProductosSelectMulti();
 }
@@ -630,7 +633,7 @@ function showAjusteForm() {
     '<div><label>Tipo *</label><select id="aj-tipo"><option value="AUMENTO">Aumento</option><option value="DISMINUCION">Disminución</option><option value="REGULARIZACION">Regularización</option><option value="CORRECCION">Corrección</option></select></div>' +
     '<div><label>Producto *</label><select id="aj-producto"></select></div>' +
     '<div><label>Bodega *</label><select id="aj-bodega"></select></div>' +
-    '<div><label>Nuevo Stock *</label><input type="number" id="aj-cantidad" required></div>' +
+    '<div><label>Nuevo Stock *</label><input type="number" id="aj-cantidad" min="0" step="0.001" required></div>' +
     '<div><label>Autorizado por</label><input type="text" id="aj-autorizado"></div>' +
     '<div><label>Documento</label><input type="text" id="aj-documento"></div>' +
     '<div class="full"><label>Motivo *</label><textarea id="aj-motivo" required></textarea></div>' +
@@ -668,7 +671,7 @@ function loadFisicos() {
 function showFisicoForm() {
   loadBodegasSelect('fis-bodega');
   openModal('<div class="modal-body"><h3><i class="fas fa-plus"></i> Nuevo Inventario Físico</h3><form onsubmit="saveFisico(event)"><div class="form-grid">' +
-    '<div><label>Tipo</label><select id="fis-tipo"><option value="GENERAL">General</option><option value="BODEGA">Por Bodega</option><option value="CATEGORIA">Por Categoría</option></select></div>' +
+    '<div><label>Tipo</label><select id="fis-tipo"><option value="GENERAL">General</option><option value="BODEGA">Por Bodega</option></select></div>' +
     '<div><label>Bodega (opcional)</label><select id="fis-bodega"><option value="">Todas</option></select></div>' +
     '<div class="full"><label>Observaciones</label><textarea id="fis-obs" rows="2"></textarea></div>' +
   '</div><button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:12px;"><i class="fas fa-save"></i> Iniciar</button></form></div>');
@@ -730,7 +733,7 @@ function showLoteForm() {
   loadProductosSelect('lote-producto');
   openModal('<div class="modal-body"><h3><i class="fas fa-plus"></i> Nuevo Lote</h3><form onsubmit="saveLote(event)"><div class="form-grid">' +
     '<div><label>Producto *</label><select id="lote-producto"></select></div><div><label>N° Lote *</label><input type="text" id="lote-numero" required></div>' +
-    '<div><label>Cantidad</label><input type="number" id="lote-cantidad"></div><div><label>Proveedor</label><select id="lote-proveedor"><option value="">Seleccionar...</option></select></div>' +
+    '<div><label>Cantidad</label><input type="number" id="lote-cantidad" min="0.001" step="0.001"></div><div><label>Proveedor</label><select id="lote-proveedor"><option value="">Seleccionar...</option></select></div>' +
     '<div><label>Fabricación</label><input type="date" id="lote-fabricacion"></div><div><label>Vencimiento</label><input type="date" id="lote-vencimiento"></div>' +
   '</div><button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:12px;"><i class="fas fa-save"></i> Crear</button></form></div>');
   // Load proveedores

@@ -311,30 +311,29 @@ Blue-Cat ERP es un sistema integral de gestión empresarial que incluye:
    - Totales
    - Auditoría
 
-### Editar Venta
+### Corregir una Venta Confirmada
 
-1. Buscar venta
-2. Click en el ícono de editar (✏️)
-3. Modificar:
-   - Cantidades de productos
-   - Precios
-   - Métodos de pago
-4. Ingresar motivo de edición
-5. Click en **"Guardar"**
+Una venta confirmada no se edita ni se elimina: su detalle, pagos y total se
+mantienen como evidencia. Toda corrección se realiza mediante anulación o
+devolución autorizada para revertir conjuntamente caja, stock y auditoría.
 
 ### Anular Venta
 
 1. Buscar venta
-2. Click en el ícono de anular (🚫)
-3. Ingresar motivo de anulación
-4. Click en **"Confirmar Anulación"**
+2. Click en **"Anular"**
+3. Ingresar el motivo real
+4. El supervisor ingresa su PIN o escanea su tarjeta cuando el sistema lo solicita
+5. Confirmar la anulación
+
+Si la caja original ya está cerrada, se debe procesar una devolución desde la
+caja actual. Para una devolución parcial use el flujo de devoluciones del POS.
 
 ### Exportar Ventas
 
 1. Navegar a **Ventas**
 2. Aplicar filtros deseados
-3. Click en **"Exportar CSV"**
-4. Se descarga archivo CSV con las ventas filtradas
+3. Click en **"Exportar XLS"**
+4. Se descarga el archivo XLS con las ventas filtradas
 
 ### Cuadre de Ventas
 

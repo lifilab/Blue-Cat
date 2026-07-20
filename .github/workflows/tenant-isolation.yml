@@ -11,6 +11,7 @@ permissions:
 jobs:
   mysql-isolation:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       mysql:
         image: mysql:8.4
@@ -26,6 +27,11 @@ jobs:
           --health-retries=20
     steps:
       - uses: actions/checkout@v4
+      - name: PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mysqli, curl
       - name: PHP runtime
         run: php --version
       - name: Configure isolated database
@@ -40,14 +46,22 @@ jobs:
             'DB_PASSWORD=' > Blue-Cat/.env.ci
       - name: Apply all migrations
         run: php Blue-Cat/scripts/migrate.php --env=.env.ci
+      - name: Verify legacy inventory upgrade
+        run: php Blue-Cat/scripts/test-migration-026-legacy-upgrade.php --env=.env.ci
       - name: Verify tenant isolation
         run: php Blue-Cat/scripts/test-tenant-isolation.php --env=.env.ci
       - name: Verify API tenant isolation
         run: php Blue-Cat/scripts/test-api-tenant-isolation.php --env=.env.ci
       - name: Verify employee authorization
         run: php Blue-Cat/scripts/test-employees-authorization.php --env=.env.ci
+      - name: Verify supervisor authorization
+        run: php Blue-Cat/scripts/test-supervisor-authorization.php --env=.env.ci
       - name: Verify POS payment rules
         run: php Blue-Cat/scripts/test-pos-integrity.php
+      - name: Verify weighted POS quantities
+        run: php Blue-Cat/scripts/test-pos-weight-quantities.php --env=.env.ci
+      - name: Verify inventory transactions
+        run: php Blue-Cat/scripts/test-inventory-integrity.php --env=.env.ci
       - name: Verify promotion rule engine
         run: php Blue-Cat/scripts/test-promotion-engine.php --env=.env.ci
       - name: Verify concurrent POS sales
