@@ -1,0 +1,4 @@
+import type { Metadata } from "next";
+import { LegalPage } from "@/components/legal/legal-page";
+export const metadata:Metadata={title:"Términos",robots:{index:false,follow:true}};
+export default function TermsPage(){return <LegalPage title="Términos comerciales" description="Condiciones que deberán aprobarse antes de aceptar pagos reales."><h2>Solicitud y pago</h2><p>Enviar una solicitud no implica aprobación. La transferencia debe verificarse antes de emitir licencia o descarga.</p><h2>Entrega</h2><p>La versión, edición, alcance, instalación y periodo de actualizaciones se confirmarán en la propuesta aceptada.</p><h2>Pendientes</h2><p>Deben definirse devoluciones, impuestos, soporte, garantías, disponibilidad, responsabilidad, jurisdicción y procedimiento de controversias.</p></LegalPage>}

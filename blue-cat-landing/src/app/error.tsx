@@ -1,0 +1,2 @@
+"use client";
+export default function ErrorPage({reset}:{error:Error&{digest?:string};reset:()=>void}){return <section className="section"><div className="container prose"><span className="eyebrow">Error controlado</span><h1 className="headline">No pudimos mostrar esta página.</h1><p>Intenta nuevamente. Si el problema continúa, informa al equipo de soporte.</p><button className="button button-primary" type="button" onClick={reset}>Reintentar</button></div></section>}

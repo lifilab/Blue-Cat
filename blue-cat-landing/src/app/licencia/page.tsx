@@ -1,0 +1,4 @@
+import type { Metadata } from "next";
+import { LegalPage } from "@/components/legal/legal-page";
+export const metadata:Metadata={title:"Términos de licencia",robots:{index:false,follow:true}};
+export default function LicensePage(){return <LegalPage title="Licencia de uso" description="Marco provisional para la licencia perpetua de Blue Cat."><h2>Uso perpetuo</h2><p>La intención comercial es permitir el uso permanente de la última versión obtenida legítimamente, sujeto al alcance de la edición contratada.</p><h2>Actualizaciones</h2><p>Las nuevas versiones se incluyen durante 12 meses desde la fecha que determine el contrato. Su renovación es opcional.</p><h2>Activación</h2><p>La licencia podrá usar firma digital, activación online u offline controlada y límites acordados. Deben definirse reinstalación, transferencia y desactivación.</p></LegalPage>}
