@@ -1,0 +1,7 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import { PageHero } from "@/components/marketing/page-hero";
+import { PlanCards } from "@/components/pricing/plan-cards";
+import { cloudService } from "@/config/commercial";
+export const metadata:Metadata={title:"Licencias",description:"Licencias perpetuas PYME y Enterprise de Blue Cat."};
+export default function LicensesPage(){return <><PageHero eyebrow="Modelo comercial claro" title="Licencia perpetua no significa actualizaciones perpetuas.">El software se paga una vez y puedes seguir usando la última versión recibida. El periodo incluido para obtener nuevas versiones dura 12 meses.</PageHero><section className="section"><div className="container"><PlanCards/><div className="cloud-callout"><div><span className="plan-label" style={{color:"#7ee7f5"}}>No es una tercera licencia</span><h2>{cloudService.name}</h2><p>{cloudService.note}</p></div><Link className="button button-ghost" href="/cloud-sync">Revisar servicio mensual</Link></div></div></section><section className="section-tight"><div className="container grid-3"><div className="card"><h3>Qué permanece</h3><p>El derecho de uso de la última versión obtenida durante el periodo activo.</p></div><div className="card"><h3>Qué vence</h3><p>El acceso automático a versiones publicadas después de los primeros 12 meses.</p></div><div className="card"><h3>Qué puedes renovar</h3><p>Actualizaciones, soporte u otros servicios según la oferta comercial vigente.</p></div></div></section></>}
