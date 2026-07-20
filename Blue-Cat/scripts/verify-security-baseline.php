@@ -20,6 +20,9 @@ $requireText('.htaccess', 'Content-Security-Policy');
 $requireText('database/migrations/020_security_foundation.sql', 'core_sesion');
 $requireText('database/migrations/021_pos_action_permissions.sql', "'pos','asociar_cliente'");
 $requireText('assets/js/security.js', 'renderToast');
+$requireText('assets/api/empleados.php', "requirePermission('empleados', 'ver');");
+$requireText('assets/api/empleados.php', 'requireEmpleadoActionPermission($accion);');
+$requireText('database/migrations/025_employees_schema_alignment.sql', 'CREATE TABLE IF NOT EXISTS empleado_documento');
 
 $publicFiles = glob($root . DIRECTORY_SEPARATOR . 'public' . DIRECTORY_SEPARATOR . '*.html') ?: [];
 foreach ($publicFiles as $file) {
@@ -40,6 +43,16 @@ foreach (glob($root . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . 'js
             $errors[] = 'Toast dinámico inseguro en assets/js/' . basename($file);
             break;
         }
+    }
+}
+
+foreach (glob($root . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . 'api' . DIRECTORY_SEPARATOR . '*.php') ?: [] as $file) {
+    $contents = file_get_contents($file);
+    if ($contents !== false && preg_match('/\b(?:ALTER\s+TABLE|SHOW\s+COLUMNS)\b/i', $contents)) {
+        $errors[] = 'DDL ejecutado durante requests en assets/api/' . basename($file);
+    }
+    if ($contents !== false && str_contains($contents, 'PHP Fatal:')) {
+        $errors[] = 'Respuesta fatal expone detalles internos en assets/api/' . basename($file);
     }
 }
 

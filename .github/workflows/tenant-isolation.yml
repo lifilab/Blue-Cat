@@ -44,6 +44,8 @@ jobs:
         run: php Blue-Cat/scripts/test-tenant-isolation.php --env=.env.ci
       - name: Verify API tenant isolation
         run: php Blue-Cat/scripts/test-api-tenant-isolation.php --env=.env.ci
+      - name: Verify employee authorization
+        run: php Blue-Cat/scripts/test-employees-authorization.php --env=.env.ci
       - name: Verify POS payment rules
         run: php Blue-Cat/scripts/test-pos-integrity.php
       - name: Verify promotion rule engine
