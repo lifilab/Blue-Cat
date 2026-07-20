@@ -1,12 +1,11 @@
 var API_VENTAS = '../assets/api/ventas.php';
 var API_CORE = '../assets/api/core.php';
+var API_POS = '../assets/api/pos.php';
 var _currentPage = 1;
 var _currentPeriodo = 'hoy';
 var _currentView = 'lista';
 var _searchTimer = null;
-var _editingId = null;
-var _deletingId = null;
-var _permisos = { editar: false, eliminar: false, exportar: false };
+var _permisos = { exportar: false, solicitarCorreccion: false };
 var _ventasData = [];
 
 document.addEventListener('DOMContentLoaded', function () {
@@ -42,26 +41,29 @@ function apiVentasGet(accion, params, cb) {
   xhr.send();
 }
 
-function apiVentasPost(accion, data, cb) {
+function apiPosPost(data, cb) {
+  var payload = Object.assign({}, data || {});
   var xhr = new XMLHttpRequest();
-  xhr.open('POST', API_VENTAS, true);
+  xhr.open('POST', API_POS, true);
   xhr.setRequestHeader('Content-Type', 'application/json');
   xhr.onload = function () {
-    try {
-      var d = JSON.parse(xhr.responseText);
-      if (xhr.status >= 200 && xhr.status < 300) {
-        if (typeof cb === 'function') cb(d);
-      } else {
-        toast(d.error || d.mensaje || 'Error del servidor', 'err');
-      }
-    } catch (e) {
+    var response = {};
+    try { response = JSON.parse(xhr.responseText); } catch (e) {
       toast('Error al procesar respuesta', 'err');
+      return;
     }
+    if (xhr.status >= 200 && xhr.status < 300) {
+      if (typeof cb === 'function') cb(response);
+      return;
+    }
+    if (window.SupervisorApproval && window.SupervisorApproval.handle(response, function (token) {
+      payload.supervisor_token = token;
+      apiPosPost(payload, cb);
+    })) return;
+    toast(response.message || response.error || response.mensaje || 'Error del servidor', 'err');
   };
   xhr.onerror = function () { toast('Error de conexión', 'err'); };
-  data = data || {};
-  data.accion = accion;
-  xhr.send(JSON.stringify(data));
+  xhr.send(JSON.stringify(payload));
 }
 
 function toast(msg, type) {
@@ -87,9 +89,11 @@ function loadPermisos() {
     try {
       var d = JSON.parse(xhr.responseText);
       var ventasPermisos = (d.permisos && d.permisos.ventas) ? d.permisos.ventas : [];
-      _permisos.editar = ventasPermisos.indexOf('editar') !== -1;
-      _permisos.eliminar = ventasPermisos.indexOf('eliminar') !== -1;
+      var posPermisos = (d.permisos && d.permisos.pos) ? d.permisos.pos : [];
       _permisos.exportar = ventasPermisos.indexOf('exportar') !== -1;
+      // El backend POS exige pos.ver antes de iniciar cualquier corrección.
+      // Quien no tenga ese acceso conserva esta pantalla estrictamente de lectura.
+      _permisos.solicitarCorreccion = posPermisos.indexOf('ver') !== -1;
       applyPermisos();
     } catch (e) { applyPermisos(); }
   };
@@ -98,8 +102,11 @@ function loadPermisos() {
 }
 
 function applyPermisos() {
-  if (!$('export-bar')) return;
-  $('export-bar').style.display = _permisos.exportar ? 'flex' : 'none';
+  var exportBar = $('export-bar');
+  if (exportBar) exportBar.style.display = _permisos.exportar ? 'flex' : 'none';
+  // Permisos y listado se cargan en paralelo. Si las ventas llegaron primero,
+  // vuelve a pintar las acciones sin exigir una recarga manual.
+  if (_ventasData.length) renderTable(_ventasData);
 }
 
 function setPeriodo(periodo) {
@@ -261,8 +268,8 @@ function renderTable(items) {
       } catch (e) { fechaHora = v.fecha; }
     }
 
-    var showEdit = _permisos.editar && !isAnulada;
-    var showDelete = _permisos.eliminar && !isAnulada;
+    var puedeCorregir = _permisos.solicitarCorreccion && !isAnulada;
+    var totalmenteDevuelta = v.devuelto === 1 || v.devuelto === '1';
 
     var tr = document.createElement('tr');
     tr.className = rowClass;
@@ -282,8 +289,8 @@ function renderTable(items) {
       '<td class="' + strikeClass + '">' + pagosPreview + '</td>' +
       '<td>' + estadoBadge + '</td>' +
       '<td style="white-space:nowrap;">' +
-        (showEdit ? '<button class="btn-icon" title="Editar" onclick="event.stopPropagation();openEdit(\'' + esc(String(id)) + '\')"><i class="fas fa-pen"></i></button>' : '') +
-        (showDelete ? '<button class="btn-icon danger" title="Anular" onclick="event.stopPropagation();openDelete(\'' + esc(String(id)) + '\')"><i class="fas fa-ban"></i></button>' : '') +
+        (puedeCorregir ? '<button class="btn-icon danger" title="Anular con autorización" aria-label="Anular venta con autorización" onclick="event.stopPropagation();solicitarAnulacion(\'' + esc(String(id)) + '\')"><i class="fas fa-user-shield"></i></button>' : '') +
+        (puedeCorregir && !totalmenteDevuelta ? '<button class="btn-icon" title="Devolver con autorización" aria-label="Devolver venta con autorización" onclick="event.stopPropagation();solicitarDevolucionTotal(\'' + esc(String(id)) + '\')"><i class="fas fa-undo"></i></button>' : '') +
         '<button class="btn-icon" title="Ver detalle" onclick="event.stopPropagation();toggleDetail(\'' + esc(String(id)) + '\')"><i class="fas fa-chevron-down"></i></button>' +
       '</td>';
 
@@ -392,151 +399,70 @@ function renderPagination(total, page, pages) {
   pg.innerHTML += '<span style="margin-left:4px;">Pág ' + page + '/' + pages + '</span>';
 }
 
-function openEdit(id) {
-  if (!_permisos.editar) { toast('No tiene permiso para editar', 'err'); return; }
-  _editingId = parseInt(id) || 0;
-  $('edit-id-label').textContent = '#' + _editingId;
-  var modal = $('edit-modal');
-  modal.style.display = 'block';
-  modal.onclick = function (e) { if (e.target === modal) closeEditModal(); };
-  $('edit-motivo').value = '';
-  $('edit-items-tbody').innerHTML = '<tr><td colspan="4"><i class="fas fa-spinner fa-spin"></i> Cargando...</td></tr>';
-  $('edit-pagos').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Cargando...';
-
-  apiVentasGet('detalle', { id: _editingId }, function (v) {
-    var itemsList = v.items || [];
-    var tbody = $('edit-items-tbody');
-    tbody.innerHTML = '';
-    for (var i = 0; i < itemsList.length; i++) {
-      var it = itemsList[i];
-      var cant = num(it.cantidad_pedida || it.cantidad || 1);
-      var subtotal = num(it.precio_total || it.total || 0);
-      var unitario = num(it.precio_unitario || it.precio || (cant > 0 ? Math.round(subtotal / cant) : 0));
-      tbody.innerHTML += '<tr data-id-producto="' + esc(it.id_producto) + '" data-precio-total-orig="' + subtotal + '">' +
-        '<td>' + esc(it.nombre_producto || it.nombre || it.producto || it.descripcion) + '</td>' +
-        '<td><input type="number" min="1" value="' + cant + '" data-index="' + i + '" data-field="cantidad" onchange="recalcEditItem(' + i + ')"></td>' +
-        '<td><input type="number" min="0" step="1" value="' + unitario + '" data-index="' + i + '" data-field="precio" onchange="recalcEditItem(' + i + ')"></td>' +
-        '<td><strong id="edit-item-total-' + i + '">' + fmt(subtotal) + '</strong></td>' +
-      '</tr>';
-    }
-
-    var pagosList = v.pagos || [];
-    var pagosDiv = $('edit-pagos');
-    pagosDiv.innerHTML = '';
-    for (var j = 0; j < pagosList.length; j++) {
-      var pg = pagosList[j];
-      var metodoRaw = (pg.nombre_metodo_pago || pg.metodo || pg.metodo_pago || 'Efectivo').toUpperCase();
-      var selEf = (metodoRaw.indexOf('EFECTIVO') !== -1) ? ' selected' : '';
-      var selTj = (metodoRaw.indexOf('TARJETA') !== -1 || metodoRaw.indexOf('CRÉDITO') !== -1 || metodoRaw.indexOf('CREDITO') !== -1 || metodoRaw.indexOf('DÉBITO') !== -1 || metodoRaw.indexOf('DEBITO') !== -1) ? ' selected' : '';
-      var selTr = (metodoRaw.indexOf('TRANSFERENCIA') !== -1) ? ' selected' : '';
-      pagosDiv.innerHTML += '<div class="pago-row">' +
-        '<select data-pago-index="' + j + '" data-field="metodo">' +
-          '<option value="EFECTIVO"' + selEf + '>Efectivo</option>' +
-          '<option value="TARJETA"' + selTj + '>Tarjeta</option>' +
-          '<option value="TRANSFERENCIA"' + selTr + '>Transferencia</option>' +
-        '</select>' +
-        '<input type="number" min="0" value="' + (pg.monto || 0) + '" data-pago-index="' + j + '" data-field="monto" placeholder="Monto">' +
-      '</div>';
-    }
-    if (pagosList.length === 0) {
-      pagosDiv.innerHTML = '<p style="color:#94a3b8;font-size:13px;">Sin pagos registrados</p>';
-    }
-  });
+function findSale(id) {
+  for (var i = 0; i < _ventasData.length; i++) {
+    if (Number(_ventasData[i].id_pedido) === Number(id)) return _ventasData[i];
+  }
+  return null;
 }
 
-function recalcEditItem(index) {
-  var cantidadEl = document.querySelector('input[data-index="' + index + '"][data-field="cantidad"]');
-  var precioEl = document.querySelector('input[data-index="' + index + '"][data-field="precio"]');
-  var totalEl = $('edit-item-total-' + index);
-  if (cantidadEl && precioEl && totalEl) {
-    var cant = num(cantidadEl.value) || 1;
-    var prec = num(precioEl.value) || 0;
-    totalEl.textContent = fmt(cant * prec);
+function solicitarMotivoCorreccion(etiqueta) {
+  var motivo = window.prompt(etiqueta);
+  if (motivo === null) return null;
+  motivo = motivo.trim();
+  if (motivo.length < 3) {
+    toast('El motivo debe tener al menos 3 caracteres', 'err');
+    return null;
   }
+  return motivo;
 }
 
-function saveEdit() {
-  if (!_editingId) return;
-
-  var itemsKeep = [];
-  var itemRows = $('edit-items-tbody').querySelectorAll('tr');
-  for (var i = 0; i < itemRows.length; i++) {
-    var row = itemRows[i];
-    var idProducto = num(row.getAttribute('data-id-producto'));
-    var cantEl = row.querySelector('input[data-field="cantidad"]');
-    var precEl = row.querySelector('input[data-field="precio"]');
-    if (idProducto && cantEl && precEl) {
-      var cantidad = num(cantEl.value) || 1;
-      var precioUnitario = num(precEl.value) || 0;
-      itemsKeep.push({
-        id_producto: idProducto,
-        cantidad: cantidad,
-        precio_total: cantidad * precioUnitario
-      });
-    }
+function solicitarAnulacion(id) {
+  if (!_permisos.solicitarCorreccion) {
+    toast('Esta cuenta solo puede consultar ventas', 'err');
+    return;
   }
-
-  var pagosList = [];
-  var pagoRows = $('edit-pagos').querySelectorAll('.pago-row');
-  for (var j = 0; j < pagoRows.length; j++) {
-    var metodoEl = pagoRows[j].querySelector('select');
-    var montoEl = pagoRows[j].querySelector('input[data-field="monto"]');
-    if (metodoEl && montoEl) {
-      pagosList.push({
-        metodo: metodoEl.value,
-        monto: num(montoEl.value)
-      });
-    }
-  }
-
-  var motivo = ($('edit-motivo').value || '').trim();
-  if (!motivo) { toast('Debe ingresar un motivo de edición', 'err'); return; }
-
-  var payload = {
-    id_pedido: _editingId,
-    items_keep: itemsKeep,
-    items_remove: [],
-    pagos: pagosList,
-    motivo: motivo
-  };
-
-  apiVentasPost('editar', payload, function (r) {
-    toast(r.mensaje || (r.success ? 'Venta actualizada correctamente' : 'Error'), 'ok');
-    closeEditModal();
+  var motivo = solicitarMotivoCorreccion('Motivo real de la anulación:');
+  if (motivo === null) return;
+  if (!confirm('¿Anular completamente la venta #' + id + '?\n\nLa operación requiere autorización y quedará auditada.')) return;
+  apiPosPost({ accion: 'venta_anular', id_pedido: Number(id), motivo: motivo }, function (response) {
+    toast(response.message || 'Venta anulada correctamente', 'ok');
     loadVentas();
   });
 }
 
-function closeEditModal() {
-  $('edit-modal').style.display = 'none';
-  _editingId = null;
-}
-
-function openDelete(id) {
-  if (!_permisos.eliminar) { toast('No tiene permiso para eliminar', 'err'); return; }
-  _deletingId = parseInt(id) || 0;
-  $('delete-msg').textContent = '¿Está seguro de que desea anular la venta #' + _deletingId + '?';
-  $('delete-motivo').value = '';
-  var modal = $('delete-modal');
-  modal.style.display = 'block';
-  modal.onclick = function (e) { if (e.target === modal) closeDeleteModal(); };
-}
-
-function confirmDelete() {
-  if (!_deletingId) return;
-  var motivo = ($('delete-motivo').value || '').trim();
-  if (!motivo) { toast('Debe ingresar un motivo de anulación', 'err'); return; }
-
-  apiVentasPost('eliminar', { id_pedido: _deletingId, motivo: motivo }, function (r) {
-    toast(r.mensaje || (r.success ? 'Venta anulada correctamente' : 'Error'), 'ok');
-    closeDeleteModal();
+function solicitarDevolucionTotal(id) {
+  if (!_permisos.solicitarCorreccion) {
+    toast('Esta cuenta solo puede consultar ventas', 'err');
+    return;
+  }
+  var sale = findSale(id);
+  if (!sale) { toast('Venta no encontrada', 'err'); return; }
+  var items = (sale.items || []).map(function (item) {
+    var available = parseFloat(item.cantidad_disponible_devolucion !== undefined
+      ? item.cantidad_disponible_devolucion
+      : (item.cantidad_pedida || item.cantidad || 0)) || 0;
+    if (available <= 0) return null;
+    return {
+      id_detalle_pedido: parseInt(item.id_detalle_pedido || 0),
+      id_producto: parseInt(item.id_producto || 0),
+      cantidad: available
+    };
+  }).filter(Boolean);
+  if (!items.length) { toast('La venta no tiene productos pendientes de devolución', 'err'); return; }
+  var motivo = solicitarMotivoCorreccion('Motivo real de la devolución:');
+  if (motivo === null) return;
+  if (!confirm('¿Procesar la devolución total pendiente de la venta #' + id + '?\n\nLa operación requiere autorización y quedará auditada.')) return;
+  apiPosPost({
+    accion: 'devolucion_crear',
+    id_pedido: Number(id),
+    tipo: 'TOTAL',
+    motivo: motivo,
+    items: items
+  }, function (response) {
+    toast('Devolución procesada: ' + fmt(response.monto_devuelto || 0), 'ok');
     loadVentas();
   });
-}
-
-function closeDeleteModal() {
-  $('delete-modal').style.display = 'none';
-  _deletingId = null;
 }
 
 function exportCSV() {

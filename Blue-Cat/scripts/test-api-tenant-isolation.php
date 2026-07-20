@@ -127,7 +127,8 @@ try {
     $storedDocument=invokeApi($root,$envPath,'pos.php',$userA,'GET',['accion'=>'documento','id'=>$orderA]);
     assertApi((int)($storedDocument['documento']['total']??0)===2000&&count($storedDocument['documento']['items']??[])===1,'la boleta queda persistida para reimpresión');
     $forbiddenEdit=invokeApi($root,$envPath,'ventas.php',$userA,'POST',[],['accion'=>'editar','id_pedido'=>$orderA]);
-    assertApi(isset($forbiddenEdit['error']),'una venta confirmada no puede editarse ni borrar su trazabilidad');
+    $forbiddenDelete=invokeApi($root,$envPath,'ventas.php',$userA,'POST',[],['accion'=>'eliminar','id_pedido'=>$orderA]);
+    assertApi(isset($forbiddenEdit['error'])&&isset($forbiddenDelete['error']),'una venta confirmada no puede editarse ni eliminar su trazabilidad');
     $stockAfterReplay=(float)$db->query("SELECT disponible FROM stock WHERE id_producto={$productA} AND id_bodega={$warehouseA}")->fetch_row()[0];
     assertApi(abs($stockAfterReplay-8.0)<0.0001,'el reintento no descuenta stock dos veces');
     $conflictingPayload=$salePayload;$conflictingPayload['pagos']=[['metodo'=>'EFECTIVO','monto'=>1000]];

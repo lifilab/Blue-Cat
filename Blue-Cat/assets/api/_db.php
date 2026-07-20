@@ -228,8 +228,17 @@ function sincronizarCantidadProducto(mysqli $conn, int $id_producto): void {
         throw new RuntimeException('No se pudo preparar la sincronizacion de stock: ' . $conn->error);
     }
     $stmt->bind_param('i', $id_producto);
-    $stmt->execute();
+    if (!$stmt->execute()) {
+        $error = $stmt->error;
+        $stmt->close();
+        throw new RuntimeException('No se pudo consultar la cantidad del producto: ' . $error);
+    }
     $r = $stmt->get_result();
+    if (!$r) {
+        $error = $stmt->error;
+        $stmt->close();
+        throw new RuntimeException('No se pudo leer la cantidad del producto: ' . $error);
+    }
     $total = 0.0;
     if ($r && ($row = $r->fetch_assoc())) {
         $total = (float) ($row['total'] ?? 0);
@@ -241,8 +250,34 @@ function sincronizarCantidadProducto(mysqli $conn, int $id_producto): void {
         throw new RuntimeException('No se pudo actualizar la cantidad del producto: ' . $conn->error);
     }
     $stmt->bind_param('di', $total, $id_producto);
-    $stmt->execute();
+    if (!$stmt->execute()) {
+        $error = $stmt->error;
+        $stmt->close();
+        throw new RuntimeException('No se pudo guardar la cantidad del producto: ' . $error);
+    }
     $stmt->close();
+}
+
+/**
+ * Normaliza cantidades operativas al contrato DECIMAL(18,3).
+ *
+ * PHP representa los decimales como float, por lo que se tolera solamente el
+ * ruido binario de la operacion; una cuarta cifra decimal real se rechaza.
+ */
+function normalizarCantidadDecimal(float $cantidad, bool $permitirCero = false): float {
+    if (!is_finite($cantidad)) {
+        throw new InvalidArgumentException('La cantidad debe ser un numero finito');
+    }
+
+    $normalizada = round($cantidad, 3);
+    if (abs($cantidad - $normalizada) > 0.000001) {
+        throw new InvalidArgumentException('La cantidad admite como maximo 3 decimales');
+    }
+    if ($normalizada < 0 || (!$permitirCero && $normalizada === 0.0)) {
+        throw new InvalidArgumentException('La cantidad debe ser mayor a cero');
+    }
+
+    return $normalizada;
 }
 
 function actualizarStock(mysqli $conn, int $id_producto, int $id_bodega, string $campo, float $delta): int {
@@ -251,8 +286,15 @@ function actualizarStock(mysqli $conn, int $id_producto, int $id_bodega, string 
         throw new InvalidArgumentException('Campo de stock invalido');
     }
 
-    $delta = (float) $delta;
-    if (abs($delta) < 0.000001) {
+    if (!is_finite($delta)) {
+        throw new InvalidArgumentException('La variacion de stock debe ser un numero finito');
+    }
+    $deltaNormalizado = round($delta, 3);
+    if (abs($delta - $deltaNormalizado) > 0.000001) {
+        throw new InvalidArgumentException('La variacion de stock admite como maximo 3 decimales');
+    }
+    $delta = $deltaNormalizado;
+    if ($delta === 0.0) {
         return 0;
     }
 
@@ -307,20 +349,14 @@ function actualizarStock(mysqli $conn, int $id_producto, int $id_bodega, string 
     return $affected;
 }
 
-function descontarStock(mysqli $conn, int $id_producto, int $id_bodega, int $cantidad): int {
-    try {
-        return actualizarStock($conn, $id_producto, $id_bodega, 'disponible', -1 * $cantidad);
-    } catch (Throwable $e) {
-        return 0;
-    }
+function descontarStock(mysqli $conn, int $id_producto, int $id_bodega, float $cantidad): int {
+    $cantidad = normalizarCantidadDecimal($cantidad);
+    return actualizarStock($conn, $id_producto, $id_bodega, 'disponible', -$cantidad);
 }
 
-function reponerStock(mysqli $conn, int $id_producto, int $id_bodega, int $cantidad): int {
-    try {
-        return actualizarStock($conn, $id_producto, $id_bodega, 'disponible', $cantidad);
-    } catch (Throwable $e) {
-        return 0;
-    }
+function reponerStock(mysqli $conn, int $id_producto, int $id_bodega, float $cantidad): int {
+    $cantidad = normalizarCantidadDecimal($cantidad);
+    return actualizarStock($conn, $id_producto, $id_bodega, 'disponible', $cantidad);
 }
 
 function actualizarKardex(
@@ -336,6 +372,9 @@ function actualizarKardex(
     float  $costo_unitario,
     string $obs = ''
 ): void {
+    $entrada = normalizarCantidadDecimal($entrada, true);
+    $salida = normalizarCantidadDecimal($salida, true);
+
     // Determine running saldo = last saldo + entrada - salida.
     // The SQL schema uses tipo_movimiento/id_documento/documento_tipo/saldo/observaciones.
     $sql  = "SELECT saldo
@@ -343,31 +382,45 @@ function actualizarKardex(
              WHERE id_producto = ?
                AND id_bodega   = ?
              ORDER BY id_kardex DESC
-             LIMIT 1";
+             LIMIT 1
+             FOR UPDATE";
     $stmt = $conn->prepare($sql);
     if (!$stmt) {
-        return;
+        throw new RuntimeException('No se pudo preparar la consulta de kardex: ' . $conn->error);
     }
     $stmt->bind_param('ii', $id_producto, $id_bodega);
-    $stmt->execute();
+    if (!$stmt->execute()) {
+        $error = $stmt->error;
+        $stmt->close();
+        throw new RuntimeException('No se pudo consultar el saldo de kardex: ' . $error);
+    }
     $result = $stmt->get_result();
-    $lastSaldo = 0;
+    if (!$result) {
+        $error = $stmt->error;
+        $stmt->close();
+        throw new RuntimeException('No se pudo leer el saldo de kardex: ' . $error);
+    }
+    $lastSaldo = 0.0;
     if ($row = $result->fetch_assoc()) {
         $lastSaldo = (float) $row['saldo'];
     }
     $stmt->close();
 
-    $nuevoSaldo = $lastSaldo + $entrada - $salida;
+    $nuevoSaldo = round($lastSaldo + $entrada - $salida, 3);
     $costoTotal = ($entrada > 0 ? $entrada : $salida) * $costo_unitario;
 
     $sql  = "INSERT INTO kardex (id_producto, id_bodega, tipo_movimiento, id_documento, documento_tipo, entrada, salida, saldo, costo_unitario, costo_total, id_user, observaciones, fecha)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
     $stmt = $conn->prepare($sql);
     if (!$stmt) {
-        return;
+        throw new RuntimeException('No se pudo preparar el asiento de kardex: ' . $conn->error);
     }
     $stmt->bind_param('iisissddddis', $id_producto, $id_bodega, $tipo, $id_doc, $doc_tipo, $entrada, $salida, $nuevoSaldo, $costo_unitario, $costoTotal, $uid, $obs);
-    $stmt->execute();
+    if (!$stmt->execute() || $stmt->affected_rows !== 1) {
+        $error = $stmt->error ?: 'no se inserto el asiento';
+        $stmt->close();
+        throw new RuntimeException('No se pudo registrar el kardex: ' . $error);
+    }
     $stmt->close();
 }
 

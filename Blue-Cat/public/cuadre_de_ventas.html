@@ -97,106 +97,13 @@
       transition: all .15s ease;
       font-family: inherit;
     }
-    .btn-sm-edit { background: #eef2ff; color: #4f46e5; }
     .btn-sm-return { background:#ecfdf5;color:#047857; }
-    .btn-sm-edit:hover { background: #e0e7ff; }
     .btn-sm-delete { background: #fef2f2; color: #dc2626; }
     .btn-sm-return:hover { background:#d1fae5; }
     .btn-sm-delete:hover { background: #fee2e2; }
     .btn-sm:disabled { opacity: .4; cursor: not-allowed; }
     .no-sales { text-align: center; padding: 32px; color: #94a3b8; font-size: 14px; }
     .no-sales i { font-size: 32px; display: block; margin-bottom: 8px; }
-    .edit-input {
-      width: 100px;
-      padding: 6px 8px;
-      border: 1.5px solid #e2e8f0;
-      border-radius: 6px;
-      font-size: 13px;
-      font-weight: 600;
-      text-align: center;
-      outline: none;
-      font-family: inherit;
-      transition: border-color .15s ease;
-    }
-    .edit-input:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,.1); }
-    .edit-row { background: #fffbeb !important; }
-
-    .edit-item-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 12px;
-      background: #f8fafc;
-      border-radius: 12px;
-      margin-bottom: 6px;
-      border: 1.5px solid #e2e8f0;
-      transition: all .2s ease;
-    }
-    .edit-item-row:hover { border-color: #c7d2fe; background: #f1f5f9; }
-    .edit-item-name {
-      flex: 1;
-      font-size: 13px;
-      font-weight: 500;
-      color: #1e293b;
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      padding: 0 4px;
-    }
-    .edit-item-qty { width: 64px; text-align: center !important; }
-    .edit-item-price { width: 110px; text-align: center !important; }
-    .edit-item-qty-label, .edit-item-price-label {
-      font-size: 10px;
-      font-weight: 500;
-      color: #94a3b8;
-      text-transform: uppercase;
-      letter-spacing: .3px;
-      display: block;
-      margin-bottom: 2px;
-    }
-    .edit-item-qty-wrap, .edit-item-price-wrap {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-    .edit-item-remove {
-      width: 32px;
-      height: 32px;
-      border: none;
-      border-radius: 8px;
-      background: #f1f5f9;
-      color: #94a3b8;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 14px;
-      transition: all .15s ease;
-      flex-shrink: 0;
-    }
-    .edit-item-remove:hover { background: #fef2f2; color: #dc2626; }
-    .edit-item-removed {
-      opacity: .55;
-      background: #fef2f2 !important;
-      border-color: #fecaca !important;
-    }
-    .edit-item-removed .edit-item-name { text-decoration: line-through; color: #dc2626; }
-    .edit-item-removed .edit-item-remove { background: #fee2e2; color: #dc2626; }
-    .edit-total-row {
-      display: flex;
-      justify-content: flex-end;
-      align-items: center;
-      gap: 12px;
-      padding: 10px 10px 0;
-      font-size: 14px;
-      font-weight: 600;
-      color: #1e293b;
-      border-top: 1px solid #e2e8f0;
-      margin-top: 6px;
-    }
-    .edit-total-row .total-value { color: #4f46e5; font-size: 18px; }
-
     /* Toast (reuse from POS) */
     .pos-toast {
       position: fixed;
@@ -443,47 +350,6 @@
     </button>
   </div>
 
-  <!-- Edit modal -->
-  <div id="edit-venta-modal" class="pos-modal">
-    <div class="pos-modal-box" style="width:560px;max-width:94%;padding:28px 32px;">
-      <div class="pos-modal-icon input-icon"><i class="fas fa-exchange-alt"></i></div>
-      <p style="font-weight:700;color:#1e293b;font-size:17px;margin-bottom:2px;">Editar Venta #<span id="edit-venta-id"></span></p>
-      <p style="font-size:13px;color:#64748b;margin-bottom:14px;">Modifica productos, cantidades, precios o métodos de pago</p>
-      <div id="edit-modal-body" style="text-align:left;max-height:55vh;overflow-y:auto;scrollbar-width:thin;">
-        <div style="margin-bottom:14px;">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-            <span style="font-size:13px;font-weight:600;color:#1e293b;display:flex;align-items:center;gap:6px;"><i class="fas fa-box" style="color:#4f46e5;"></i> Productos</span>
-            <span style="font-size:11px;color:#94a3b8;">(marca <span style="color:#dc2626;">🗑️</span> para devolver)</span>
-          </div>
-          <div id="edit-items-list"></div>
-        </div>
-        <div style="padding-top:12px;border-top:2px solid #e2e8f0;">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-            <span style="font-size:13px;font-weight:600;color:#1e293b;display:flex;align-items:center;gap:6px;"><i class="fas fa-coins" style="color:#4f46e5;"></i> Métodos de Pago</span>
-          </div>
-          <div id="edit-pagos-list"></div>
-        </div>
-      </div>
-      <div class="modal-actions" style="margin-top:18px;">
-        <button class="modal-btn modal-btn-ghost" onclick="document.getElementById('edit-venta-modal').style.display='none'">Cancelar</button>
-        <button class="modal-btn modal-btn-primary" id="edit-save-btn"><i class="fas fa-save"></i> Guardar Cambios</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Delete confirm modal -->
-  <div id="delete-venta-modal" class="pos-modal">
-    <div class="pos-modal-box" style="width:380px;">
-      <div class="pos-modal-icon warn"><i class="fas fa-trash-alt"></i></div>
-      <p style="font-weight:600;color:#1e293b;font-size:16px;">Eliminar Venta #<span id="delete-venta-id"></span></p>
-      <p style="font-size:14px;color:#64748b;margin-top:4px;">¿Estás seguro? Se restaurará el stock de los productos.</p>
-      <div class="modal-actions">
-        <button class="modal-btn modal-btn-ghost" onclick="document.getElementById('delete-venta-modal').style.display='none'">Cancelar</button>
-        <button class="modal-btn modal-btn-danger" id="delete-confirm-btn">Eliminar</button>
-      </div>
-    </div>
-  </div>
-
   <div id="cerrar-sesion-popup" class="popup">
     <div class="popup-content">
       <span class="close-btn" onclick="CloseSesionPopUp()">&times;</span>
@@ -495,7 +361,7 @@
 
   <script src="../assets/js/security.js?v=1"></script>
   <script src="../assets/js/supervisor-approval.js?v=1"></script>
-  <script src="../assets/js/cuadre_de_ventas.js?v=7"></script>
+  <script src="../assets/js/cuadre_de_ventas.js?v=8"></script>
   <script src="../assets/js/navbar.js?v=3"></script>
 </body>
 </html>

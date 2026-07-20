@@ -1,7 +1,7 @@
 var API_VENTAS = '../assets/api/ventas.php';
 var API_POS = '../assets/api/pos.php';
 var currentCuadreSessionId = 0;
-var cuadrePermissions = { editar: false, eliminar: false };
+var cuadrePermissions = { solicitarCorreccion: false };
 
 /* ── Init ── */
 document.addEventListener("DOMContentLoaded", function () {
@@ -18,13 +18,15 @@ function loadCuadrePermissions() {
   xhr.setRequestHeader('Content-Type', 'application/json');
   xhr.onload = function () {
     try {
-      var d = JSON.parse(xhr.responseText);
-      var permisos = d.permisos && d.permisos.ventas ? d.permisos.ventas : [];
-      cuadrePermissions.editar = permisos.indexOf('editar') !== -1;
-      cuadrePermissions.eliminar = permisos.indexOf('eliminar') !== -1;
-      renderSalesTable();
-    } catch (e) { cuadrePermissions = { editar: false, eliminar: false }; }
+      var response = JSON.parse(xhr.responseText);
+      var posPermissions = response.permisos && response.permisos.pos ? response.permisos.pos : [];
+      cuadrePermissions.solicitarCorreccion = posPermissions.indexOf('ver') !== -1;
+    } catch (e) {
+      cuadrePermissions.solicitarCorreccion = false;
+    }
+    if (salesData.length) renderSalesTable();
   };
+  xhr.onerror = function () { cuadrePermissions.solicitarCorreccion = false; };
   xhr.send(JSON.stringify({ accion: 'sidebar' }));
 }
 
@@ -35,7 +37,11 @@ function apiGet(url, cb) {
     if (xhr.status >= 200 && xhr.status < 300) {
       try { cb(JSON.parse(xhr.responseText)); } catch (e) { console.error('Parse error', xhr.responseText); }
     } else {
-      try { var err = JSON.parse(xhr.responseText); showToast('<i class="fas fa-exclamation-circle"></i> ' + (err.error || 'Error')); }
+      try {
+        var err = JSON.parse(xhr.responseText);
+        var message = err.message || (typeof err.error === 'string' ? err.error : 'Error del servidor');
+        showToast('<i class="fas fa-exclamation-circle"></i> ' + message);
+      }
       catch (e2) { showToast('<i class="fas fa-exclamation-circle"></i> Error ' + xhr.status); }
     }
   };
@@ -57,7 +63,8 @@ function apiPost(url, data, cb) {
           data.supervisor_token = token; apiPost(url, data, cb);
         })) return;
 
-        showToast('<i class="fas fa-exclamation-circle"></i> ' + (d.error || 'Error del servidor'));
+        var message = d.message || (typeof d.error === 'string' ? d.error : 'Error del servidor');
+        showToast('<i class="fas fa-exclamation-circle"></i> ' + message);
       }
     } catch (e) { showToast('<i class="fas fa-exclamation-circle"></i> Error al procesar respuesta'); }
   };
@@ -193,10 +200,7 @@ function renderSalesTable() {
     var anulado = v.anulado === 1 || v.anulado === '1';
     var anuladoStyle = anulado ? ' style="text-decoration:line-through;color:#94a3b8;"' : '';
     var anuladoBadge = anulado ? ' <span style="background:#fef2f2;color:#dc2626;padding:1px 6px;border-radius:10px;font-size:10px;font-weight:600;">ANULADA</span>' : '';
-
-    // A confirmed sale is immutable. Corrections use anulation or return so
-    // stock, payments, cash and audit always move together.
-    var canEdit = false;
+    var puedeCorregir = cuadrePermissions.solicitarCorreccion && !anulado;
 
     tr.innerHTML =
       '<td' + anuladoStyle + '>' + Number(v.id_pedido || 0) + anuladoBadge + ' <span style="font-size:10px;color:#94a3b8;">' + escapeHtml(v.cliente_nombre || 'CF') + '</span></td>' +
@@ -205,9 +209,8 @@ function renderSalesTable() {
       '<td class="pagos-cell"' + anuladoStyle + '>' + pagosHtml + '</td>' +
       '<td style="font-size:12px;color:#64748b;">' + formatDateString(v.fecha) + '</td>' +
       '<td class="actions-cell">' +
-        (canEdit ? '<button class="btn-sm btn-sm-edit" onclick="openEditModal(' + v.id_pedido + ')" title="Editar venta"><i class="fas fa-pen"></i> Editar</button>' : '') +
-        (!anulado ? '<button class="btn-sm btn-sm-delete" onclick="solicitarAnulacion(' + v.id_pedido + ')" title="Requiere Supervisor"><i class="fas fa-user-shield"></i> Anular</button>' : '') +
-        (!anulado && !(v.devuelto === 1 || v.devuelto === '1') ? '<button class="btn-sm btn-sm-return" onclick="solicitarDevolucionTotal(' + v.id_pedido + ')" title="Requiere Supervisor"><i class="fas fa-undo"></i> Devolver</button>' : '') +
+        (puedeCorregir ? '<button class="btn-sm btn-sm-delete" onclick="solicitarAnulacion(' + v.id_pedido + ')" title="Anular con autorización"><i class="fas fa-user-shield"></i> Anular</button>' : '') +
+        (puedeCorregir && !(v.devuelto === 1 || v.devuelto === '1') ? '<button class="btn-sm btn-sm-return" onclick="solicitarDevolucionTotal(' + v.id_pedido + ')" title="Devolver con autorización"><i class="fas fa-undo"></i> Devolver</button>' : '') +
       '</td>';
 
     tbody.appendChild(tr);
@@ -234,184 +237,42 @@ function formatDateString(dateStr) {
   } catch (e) { return dateStr; }
 }
 
-/* ── Edit Sale ── */
-var editingId = null;
-var editItems = [];
-
-function openEditModal(id) {
-  if (!cuadrePermissions.editar) { showToast('<i class="fas fa-lock"></i> No tiene permiso para editar ventas'); return; }
-  editingId = id;
-  document.getElementById("edit-venta-id").textContent = id;
-
-  var v = null;
-  for (var i = 0; i < salesData.length; i++) {
-    if (salesData[i].id_pedido === id) { v = salesData[i]; break; }
-  }
-  if (!v) return;
-
-  editItems = [];
-  var items = v.items || [];
-  for (var j = 0; j < items.length; j++) {
-    editItems.push({
-      id_producto: items[j].id_producto,
-      nombre: items[j].nombre_producto || items[j].nombre || 'Producto',
-      cantidad: items[j].cantidad_pedida || items[j].cantidad || 1,
-      precio_total: items[j].precio_total || 0,
-      _removed: false
-    });
-  }
-
-  renderEditItems();
-  renderEditPagos(v.pagos || []);
-
-  document.getElementById("edit-venta-modal").style.display = "flex";
-  requestAnimationFrame(function () {
-    var box = document.querySelector("#edit-venta-modal .pos-modal-box");
-    if (box) box.classList.add("show");
-  });
-  document.getElementById("edit-venta-modal").addEventListener("click", function closeOut(e) {
-    if (e.target === this) {
-      this.style.display = "none";
-      this.removeEventListener("click", closeOut);
-    }
-  });
-}
-
-function renderEditItems() {
-  var list = document.getElementById("edit-items-list");
-  list.innerHTML = "";
-  var total = 0;
-
-  for (var i = 0; i < editItems.length; i++) {
-    var item = editItems[i];
-    if (!item._removed) total += item.precio_total;
-
-    var div = document.createElement("div");
-    div.className = "edit-item-row" + (item._removed ? " edit-item-removed" : "");
-    div.setAttribute("data-idx", i);
-
-    div.innerHTML =
-      '<span class="edit-item-name" title="' + escapeHtml(item.nombre) + '">' + escapeHtml(item.nombre) + '</span>' +
-      '<div class="edit-item-qty-wrap"><span class="edit-item-qty-label">Cant</span><input type="number" class="edit-input edit-item-qty" value="' + item.cantidad + '" min="0" ' + (item._removed ? 'disabled' : '') + ' onchange="onEditItemChange(' + i + ')"></div>' +
-      '<div class="edit-item-price-wrap"><span class="edit-item-price-label">Total $</span><input type="number" class="edit-input edit-item-price" value="' + item.precio_total + '" min="0" ' + (item._removed ? 'disabled' : '') + ' onchange="onEditItemChange(' + i + ')"></div>' +
-      '<button class="edit-item-remove" onclick="toggleRemoveItem(' + i + ')" title="' + (item._removed ? 'Restaurar' : 'Devolver/Eliminar') + '"><i class="fas fa-' + (item._removed ? 'undo' : 'times') + '"></i></button>';
-
-    list.appendChild(div);
-  }
-
-  var totalDiv = document.createElement("div");
-  totalDiv.className = "edit-total-row";
-  totalDiv.innerHTML = 'Total: <span class="total-value" id="edit-items-total">$' + total + '</span>';
-  list.appendChild(totalDiv);
-}
-
-function onEditItemChange(idx) {
-  var rows = document.querySelectorAll("#edit-items-list .edit-item-row");
-  var row = rows[idx];
-  if (!row || editItems[idx]._removed) return;
-
-  var qty = parseInt(row.querySelector(".edit-item-qty").value) || 0;
-  var price = parseInt(row.querySelector(".edit-item-price").value) || 0;
-
-  editItems[idx].cantidad = qty;
-  editItems[idx].precio_total = price;
-
-  var total = 0;
-  for (var i = 0; i < editItems.length; i++) {
-    if (!editItems[i]._removed) total += editItems[i].precio_total;
-  }
-  document.getElementById("edit-items-total").textContent = '$' + total;
-}
-
-function toggleRemoveItem(idx) {
-  editItems[idx]._removed = !editItems[idx]._removed;
-  renderEditItems();
-  onEditItemChange(idx);
-}
-
-function renderEditPagos(originalPagos) {
-  var list = document.getElementById("edit-pagos-list");
-  list.innerHTML = "";
-  var metodos = ["Efectivo", "Tarjeta", "Transferencia"];
-
-  for (var m = 0; m < metodos.length; m++) {
-    var nombre = metodos[m];
-    var existing = 0;
-    for (var p = 0; p < originalPagos.length; p++) {
-      var met = (originalPagos[p].nombre_metodo_pago || originalPagos[p].metodo || '').toLowerCase();
-      if (met === nombre.toLowerCase()) { existing = originalPagos[p].monto; break; }
-    }
-    var div = document.createElement("div");
-    div.style.cssText = "display:flex;align-items:center;gap:8px;margin-bottom:6px;";
-    div.innerHTML =
-      '<span style="min-width:100px;font-size:13px;font-weight:500;color:#475569;">' + nombre + '</span>' +
-      '<input type="number" class="edit-input pago-input" data-metodo="' + nombre + '" value="' + existing + '" style="flex:1;" min="0">';
-    list.appendChild(div);
-  }
-}
-
-document.getElementById("edit-save-btn").addEventListener("click", function () {
-  var itemsToKeep = [];
-  var itemsToRemove = [];
-  for (var i = 0; i < editItems.length; i++) {
-    var it = editItems[i];
-    if (it._removed) {
-      itemsToRemove.push({ id_producto: it.id_producto, cantidad: it.cantidad });
-    } else {
-      itemsToKeep.push({ id_producto: it.id_producto, cantidad: it.cantidad, precio_total: it.precio_total });
-    }
-  }
-
-  if (itemsToKeep.length === 0) {
-    showToast('<i class="fas fa-exclamation-circle"></i> Debe quedar al menos un producto');
-    return;
-  }
-
-  var pagoInputs = document.querySelectorAll(".pago-input");
-  var pagos = [];
-  for (var j = 0; j < pagoInputs.length; j++) {
-    var inp = pagoInputs[j];
-    var monto = parseInt(inp.value) || 0;
-    if (monto > 0) {
-      pagos.push({ metodo: inp.getAttribute("data-metodo"), monto: monto });
-    }
-  }
-
-  if (pagos.length === 0) {
-    showToast('<i class="fas fa-exclamation-circle"></i> Debe haber al menos un método de pago');
-    return;
-  }
-
-  apiPost(API_VENTAS, {
-    accion: 'editar',
-    id_pedido: editingId,
-    items_keep: itemsToKeep,
-    items_remove: itemsToRemove,
-    pagos: pagos,
-    motivo: 'Edición desde cuadre'
-  }, function () {
-    document.getElementById("edit-venta-modal").style.display = "none";
-    showToast('<i class="fas fa-check-circle"></i> Venta #' + editingId + ' actualizada');
-    refreshSales();
-    loadCuadre();
-  });
-});
-
 /* ── Excepciones auditables con Supervisor ── */
 function findSale(id) {
   for (var i=0;i<salesData.length;i++) if (Number(salesData[i].id_pedido)===Number(id)) return salesData[i];
   return null;
 }
 
+function solicitarMotivoCorreccion(etiqueta) {
+  var motivo=window.prompt(etiqueta);
+  if (motivo===null) return null;
+  motivo=motivo.trim();
+  if (motivo.length<3) {
+    showToast('<i class="fas fa-exclamation-circle"></i> El motivo debe tener al menos 3 caracteres');
+    return null;
+  }
+  return motivo;
+}
+
 function solicitarAnulacion(id) {
+  if (!cuadrePermissions.solicitarCorreccion) {
+    showToast('<i class="fas fa-lock"></i> Esta cuenta solo puede consultar ventas');
+    return;
+  }
+  var motivo=solicitarMotivoCorreccion('Motivo real de la anulación:');
+  if (motivo===null) return;
   if (!confirm('¿Solicitar la anulación completa de la venta #' + id + '?\n\nEl Supervisor deberá ingresar su PIN o escanear su tarjeta.')) return;
-  apiPost(API_POS, { accion:'venta_anular', id_pedido:id }, function () {
+  apiPost(API_POS, { accion:'venta_anular', id_pedido:id, motivo:motivo }, function () {
     showToast('<i class="fas fa-check-circle"></i> Venta #' + id + ' anulada con autorización de Supervisor');
     refreshSales(); loadCuadre();
   });
 }
 
 function solicitarDevolucionTotal(id) {
+  if (!cuadrePermissions.solicitarCorreccion) {
+    showToast('<i class="fas fa-lock"></i> Esta cuenta solo puede consultar ventas');
+    return;
+  }
   var sale=findSale(id);
   if (!sale) { showToast('<i class="fas fa-exclamation-circle"></i> Venta no encontrada'); return; }
   if (!confirm('¿Solicitar la devolución total de la venta #' + id + '?\n\nUse Anular cuando fue un error de caja. Use Devolver cuando el cliente devuelve productos.')) return;
@@ -420,38 +281,13 @@ function solicitarDevolucionTotal(id) {
     return qty>0 ? {id_detalle_pedido:parseInt(it.id_detalle_pedido||0),id_producto:parseInt(it.id_producto),cantidad:qty} : null;
   }).filter(Boolean);
   if (!items.length) { showToast('<i class="fas fa-exclamation-circle"></i> La venta no tiene productos'); return; }
-  apiPost(API_POS, { accion:'devolucion_crear', id_pedido:id, tipo:'TOTAL', motivo:'Devolución total autorizada desde cuadre', items:items }, function (d) {
+  var motivo=solicitarMotivoCorreccion('Motivo real de la devolución:');
+  if (motivo===null) return;
+  apiPost(API_POS, { accion:'devolucion_crear', id_pedido:id, tipo:'TOTAL', motivo:motivo, items:items }, function (d) {
     showToast('<i class="fas fa-check-circle"></i> Devolución procesada: $' + (d.monto_devuelto||0));
     refreshSales(); loadCuadre();
   });
 }
-
-/* ── Delete Sale ── */
-var deletingId = null;
-
-function openDeleteModal(id) {
-  if (!cuadrePermissions.eliminar) { showToast('<i class="fas fa-lock"></i> No tiene permiso para eliminar ventas'); return; }
-  deletingId = id;
-  document.getElementById("delete-venta-id").textContent = id;
-  document.getElementById("delete-venta-modal").style.display = "flex";
-  requestAnimationFrame(function () {
-    var box = document.querySelector("#delete-venta-modal .pos-modal-box");
-    if (box) box.classList.add("show");
-  });
-}
-
-document.getElementById("delete-confirm-btn").addEventListener("click", function () {
-  apiPost(API_VENTAS, {
-    accion: 'eliminar',
-    id_pedido: deletingId,
-    motivo: 'Eliminación desde cuadre'
-  }, function () {
-    document.getElementById("delete-venta-modal").style.display = "none";
-    showToast('<i class="fas fa-check-circle"></i> Venta #' + deletingId + ' eliminada. Stock restaurado.');
-    refreshSales();
-    loadCuadre();
-  });
-});
 
 /* ── CERRAR CAJA ── */
 function cerrarCajaFinal() {
