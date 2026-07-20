@@ -1,9 +1,62 @@
 <?php
 require_once __DIR__ . '/_db.php';
+ini_set('display_errors', '0');
+ini_set('log_errors', '1');
 $uid = requireUser();
 
-function requierePermiso($modulo, $accion) {
-    requirePermission($modulo, $accion);
+function requireEmpleadoActionPermission(string $accion): void {
+    $permissions = [
+        'crear' => [['empleados', 'crear']],
+        'editar' => [['empleados', 'editar']],
+        'cambiar_estado' => [['empleados', 'editar']],
+        'contrato_crear' => [['empleados', 'editar']],
+        'contrato_eliminar' => [['empleados', 'editar']],
+        'documento_crear' => [['empleados', 'editar']],
+        'documento_eliminar' => [['empleados', 'editar']],
+        'asistencia_crear' => [['empleados', 'editar']],
+        'asistencia_editar' => [['empleados', 'editar']],
+        'asistencia_eliminar' => [['empleados', 'editar']],
+        'turno_crear' => [['empleados', 'editar']],
+        'turno_editar' => [['empleados', 'editar']],
+        'vacacion_crear' => [['empleados', 'editar']],
+        'vacacion_aprobar' => [['empleados', 'editar']],
+        'vacacion_eliminar' => [['empleados', 'editar']],
+        'permiso_crear' => [['empleados', 'editar']],
+        'permiso_aprobar' => [['empleados', 'editar']],
+        'permiso_eliminar' => [['empleados', 'editar']],
+        'licencia_crear' => [['empleados', 'editar']],
+        'licencia_eliminar' => [['empleados', 'editar']],
+        'hora_extra_crear' => [['empleados', 'editar']],
+        'hora_extra_aprobar' => [['empleados', 'editar']],
+        'hora_extra_eliminar' => [['empleados', 'editar']],
+        'remuneracion_crear' => [['empleados', 'editar']],
+        'remuneracion_eliminar' => [['empleados', 'editar']],
+        'beneficio_crear' => [['empleados', 'editar']],
+        'beneficio_eliminar' => [['empleados', 'editar']],
+        'capacitacion_crear' => [['empleados', 'editar']],
+        'capacitacion_editar' => [['empleados', 'editar']],
+        'capacitacion_eliminar' => [['empleados', 'editar']],
+        'evaluacion_crear' => [['empleados', 'editar']],
+        'evaluacion_eliminar' => [['empleados', 'editar']],
+        'activo_crear' => [['empleados', 'editar']],
+        'activo_devolver' => [['empleados', 'editar']],
+        'activo_eliminar' => [['empleados', 'editar']],
+        'historial_crear' => [['empleados', 'editar']],
+        'vincular_usuario' => [['empleados', 'editar'], ['usuarios', 'editar_cuentas']],
+        'crear_credenciales' => [['empleados', 'crear'], ['usuarios', 'editar_cuentas']],
+        'editar_credenciales' => [['empleados', 'editar'], ['usuarios', 'editar_cuentas']],
+        'eliminar_credenciales' => [['empleados', 'eliminar'], ['usuarios', 'editar_cuentas']],
+        'guardar_supervisor_credencial' => [['supervisor', 'configurar_credencial']],
+        'eliminar_supervisor_credencial' => [['supervisor', 'configurar_credencial']],
+        'empleado_eliminar' => [['empleados', 'eliminar']],
+    ];
+
+    if (!isset($permissions[$accion])) {
+        json(['error' => true, 'message' => 'Acción no válida'], 400);
+    }
+    foreach ($permissions[$accion] as [$module, $action]) {
+        requirePermission($module, $action);
+    }
 }
 
 function requireEmpleadoActionScope(mysqli $conn, int $uid, string $accion, ArrayObject $input): void {
@@ -48,80 +101,89 @@ function requireEmpleadoActionScope(mysqli $conn, int $uid, string $accion, Arra
 }
 
 $conn = getDB();
-
-// Debug: catch fatal errors
-register_shutdown_function(function() use ($conn) {
+$requestId = bin2hex(random_bytes(8));
+header('X-Request-Id: ' . $requestId);
+register_shutdown_function(function() use ($requestId) {
     $err = error_get_last();
     if ($err && in_array($err['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+        error_log(sprintf(
+            'empleados.php fatal [%s]: %s in %s:%d',
+            $requestId,
+            $err['message'],
+            $err['file'],
+            $err['line']
+        ));
         while (ob_get_level()) ob_end_clean();
         http_response_code(500);
-        header('Content-Type: application/json');
-        echo json_encode(['error' => 'PHP Fatal: ' . $err['message'] . ' in ' . $err['file'] . ':' . $err['line']], JSON_UNESCAPED_UNICODE);
+        if (!headers_sent()) header('Content-Type: application/json; charset=utf-8');
+        echo json_encode([
+            'error' => true,
+            'message' => 'Error interno del servidor',
+            'request_id' => $requestId,
+        ], JSON_UNESCAPED_UNICODE);
     }
 });
-
-// Ensure usuario.id_empleado column exists
-$r = $conn->query("SHOW COLUMNS FROM usuario LIKE 'id_empleado'");
-if (!$r->num_rows) {
-    $conn->query("ALTER TABLE usuario ADD COLUMN id_empleado INT DEFAULT NULL");
-}
 
 $method = $_SERVER['REQUEST_METHOD'];
 
 switch ($method) {
     case 'GET':
+        requirePermission('empleados', 'ver');
         $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
         if ($id) getEmpleado($conn, $uid, $id);
         else listEmpleados($conn, $uid);
         break;
     case 'POST':
         $input = getJsonInput();
-        $accion = $input['accion'] ?? 'crear';
+        if (!$input instanceof ArrayObject) {
+            json(['error' => true, 'message' => 'JSON inválido'], 400);
+        }
+        $accion = trim((string)($input['accion'] ?? 'crear'));
+        requireEmpleadoActionPermission($accion);
         requireEmpleadoActionScope($conn, $uid, $accion, $input);
-        if ($accion === 'crear') { requierePermiso('empleados','crear'); crearEmpleado($conn, $uid, $input); }
-        elseif ($accion === 'editar') { requierePermiso('empleados','editar'); editarEmpleado($conn, $uid, $input); }
-        elseif ($accion === 'cambiar_estado') { requierePermiso('empleados','editar'); cambiarEstado($conn, $uid, $input); }
-        elseif ($accion === 'contrato_crear') { requierePermiso('empleados','editar'); crearContrato($conn, $uid, $input); }
-        elseif ($accion === 'contrato_eliminar') { requierePermiso('empleados','editar'); eliminarContrato($conn, $uid, $input); }
-        elseif ($accion === 'documento_crear') { requierePermiso('empleados','editar'); crearDocumento($conn, $uid, $input); }
-        elseif ($accion === 'documento_eliminar') { requierePermiso('empleados','editar'); eliminarDocumento($conn, $uid, $input); }
-        elseif ($accion === 'asistencia_crear') { requierePermiso('empleados','editar'); crearAsistencia($conn, $uid, $input); }
+        if ($accion === 'crear') crearEmpleado($conn, $uid, $input);
+        elseif ($accion === 'editar') editarEmpleado($conn, $uid, $input);
+        elseif ($accion === 'cambiar_estado') cambiarEstado($conn, $uid, $input);
+        elseif ($accion === 'contrato_crear') crearContrato($conn, $uid, $input);
+        elseif ($accion === 'contrato_eliminar') eliminarContrato($conn, $uid, $input);
+        elseif ($accion === 'documento_crear') crearDocumento($conn, $uid, $input);
+        elseif ($accion === 'documento_eliminar') eliminarDocumento($conn, $uid, $input);
+        elseif ($accion === 'asistencia_crear') crearAsistencia($conn, $uid, $input);
         elseif ($accion === 'asistencia_editar') editarAsistencia($conn, $uid, $input);
-        elseif ($accion === 'asistencia_eliminar') { requierePermiso('empleados','editar'); eliminarAsistencia($conn, $uid, $input); }
-        elseif ($accion === 'turno_crear') { requierePermiso('empleados','editar'); crearTurno($conn, $uid, $input); }
+        elseif ($accion === 'asistencia_eliminar') eliminarAsistencia($conn, $uid, $input);
+        elseif ($accion === 'turno_crear') crearTurno($conn, $uid, $input);
         elseif ($accion === 'turno_editar') editarTurno($conn, $uid, $input);
-        elseif ($accion === 'vacacion_crear') { requierePermiso('empleados','editar'); crearVacacion($conn, $uid, $input); }
+        elseif ($accion === 'vacacion_crear') crearVacacion($conn, $uid, $input);
         elseif ($accion === 'vacacion_aprobar') aprobarVacacion($conn, $uid, $input);
-        elseif ($accion === 'vacacion_eliminar') { requierePermiso('empleados','editar'); eliminarVacacion($conn, $uid, $input); }
-        elseif ($accion === 'permiso_crear') { requierePermiso('empleados','editar'); crearPermiso($conn, $uid, $input); }
+        elseif ($accion === 'vacacion_eliminar') eliminarVacacion($conn, $uid, $input);
+        elseif ($accion === 'permiso_crear') crearPermiso($conn, $uid, $input);
         elseif ($accion === 'permiso_aprobar') aprobarPermiso($conn, $uid, $input);
-        elseif ($accion === 'permiso_eliminar') { requierePermiso('empleados','editar'); eliminarPermiso($conn, $uid, $input); }
-        elseif ($accion === 'licencia_crear') { requierePermiso('empleados','editar'); crearLicencia($conn, $uid, $input); }
-        elseif ($accion === 'licencia_eliminar') { requierePermiso('empleados','editar'); eliminarLicencia($conn, $uid, $input); }
-        elseif ($accion === 'hora_extra_crear') { requierePermiso('empleados','editar'); crearHoraExtra($conn, $uid, $input); }
+        elseif ($accion === 'permiso_eliminar') eliminarPermiso($conn, $uid, $input);
+        elseif ($accion === 'licencia_crear') crearLicencia($conn, $uid, $input);
+        elseif ($accion === 'licencia_eliminar') eliminarLicencia($conn, $uid, $input);
+        elseif ($accion === 'hora_extra_crear') crearHoraExtra($conn, $uid, $input);
         elseif ($accion === 'hora_extra_aprobar') aprobarHoraExtra($conn, $uid, $input);
-        elseif ($accion === 'hora_extra_eliminar') { requierePermiso('empleados','editar'); eliminarHoraExtra($conn, $uid, $input); }
-        elseif ($accion === 'remuneracion_crear') { requierePermiso('empleados','editar'); crearRemuneracion($conn, $uid, $input); }
-        elseif ($accion === 'remuneracion_eliminar') { requierePermiso('empleados','editar'); eliminarRemuneracion($conn, $uid, $input); }
-        elseif ($accion === 'beneficio_crear') { requierePermiso('empleados','editar'); crearBeneficio($conn, $uid, $input); }
-        elseif ($accion === 'beneficio_eliminar') { requierePermiso('empleados','editar'); eliminarBeneficio($conn, $uid, $input); }
-        elseif ($accion === 'capacitacion_crear') { requierePermiso('empleados','editar'); crearCapacitacion($conn, $uid, $input); }
+        elseif ($accion === 'hora_extra_eliminar') eliminarHoraExtra($conn, $uid, $input);
+        elseif ($accion === 'remuneracion_crear') crearRemuneracion($conn, $uid, $input);
+        elseif ($accion === 'remuneracion_eliminar') eliminarRemuneracion($conn, $uid, $input);
+        elseif ($accion === 'beneficio_crear') crearBeneficio($conn, $uid, $input);
+        elseif ($accion === 'beneficio_eliminar') eliminarBeneficio($conn, $uid, $input);
+        elseif ($accion === 'capacitacion_crear') crearCapacitacion($conn, $uid, $input);
         elseif ($accion === 'capacitacion_editar') editarCapacitacion($conn, $uid, $input);
-        elseif ($accion === 'capacitacion_eliminar') { requierePermiso('empleados','editar'); eliminarCapacitacion($conn, $uid, $input); }
-        elseif ($accion === 'evaluacion_crear') { requierePermiso('empleados','editar'); crearEvaluacion($conn, $uid, $input); }
-        elseif ($accion === 'evaluacion_eliminar') { requierePermiso('empleados','editar'); eliminarEvaluacion($conn, $uid, $input); }
-        elseif ($accion === 'activo_crear') { requierePermiso('empleados','editar'); crearActivo($conn, $uid, $input); }
+        elseif ($accion === 'capacitacion_eliminar') eliminarCapacitacion($conn, $uid, $input);
+        elseif ($accion === 'evaluacion_crear') crearEvaluacion($conn, $uid, $input);
+        elseif ($accion === 'evaluacion_eliminar') eliminarEvaluacion($conn, $uid, $input);
+        elseif ($accion === 'activo_crear') crearActivo($conn, $uid, $input);
         elseif ($accion === 'activo_devolver') devolverActivo($conn, $uid, $input);
-        elseif ($accion === 'activo_eliminar') { requierePermiso('empleados','editar'); eliminarActivo($conn, $uid, $input); }
+        elseif ($accion === 'activo_eliminar') eliminarActivo($conn, $uid, $input);
         elseif ($accion === 'historial_crear') crearHistorial($conn, $uid, $input);
         elseif ($accion === 'vincular_usuario') vincularUsuario($conn, $uid, $input);
-        elseif ($accion === 'crear_credenciales') { requierePermiso('empleados','crear'); crearCredenciales($conn, $uid, $input); }
-        elseif ($accion === 'editar_credenciales') { requierePermiso('empleados','editar'); editarCredenciales($conn, $uid, $input); }
-        elseif ($accion === 'eliminar_credenciales') { requierePermiso('empleados','eliminar'); eliminarCredenciales($conn, $uid, $input); }
-        elseif ($accion === 'guardar_supervisor_credencial') { requierePermiso('supervisor','configurar_credencial'); guardarSupervisorCredencial($conn,$uid,$input); }
-        elseif ($accion === 'eliminar_supervisor_credencial') { requierePermiso('supervisor','configurar_credencial'); eliminarSupervisorCredencial($conn,$uid,$input); }
-        elseif ($accion === 'empleado_eliminar') { requierePermiso('empleados','eliminar'); eliminarEmpleado($conn, $uid, $input); }
-        else json(['error' => 'Acción no válida'], 400);
+        elseif ($accion === 'crear_credenciales') crearCredenciales($conn, $uid, $input);
+        elseif ($accion === 'editar_credenciales') editarCredenciales($conn, $uid, $input);
+        elseif ($accion === 'eliminar_credenciales') eliminarCredenciales($conn, $uid, $input);
+        elseif ($accion === 'guardar_supervisor_credencial') guardarSupervisorCredencial($conn,$uid,$input);
+        elseif ($accion === 'eliminar_supervisor_credencial') eliminarSupervisorCredencial($conn,$uid,$input);
+        elseif ($accion === 'empleado_eliminar') eliminarEmpleado($conn, $uid, $input);
         break;
     default:
         json(['error' => 'Método no soportado'], 405);
@@ -232,7 +294,7 @@ function getEmpleado($conn, $uid, $id) {
     $stmt->bind_param("i", $id); $stmt->execute(); $e['contratos'] = $stmt->get_result()->fetch_all(MYSQLI_ASSOC); $stmt->close();
     $stmt = $conn->prepare("SELECT * FROM empleado_documento WHERE id_empleado = ? ORDER BY fecha_creacion DESC");
     $stmt->bind_param("i", $id); $stmt->execute(); $e['documentos'] = $stmt->get_result()->fetch_all(MYSQLI_ASSOC); $stmt->close();
-    $stmt = $conn->prepare("SELECT * FROM empleado_turno WHERE id_empleado = ? OR id_empleado IS NULL ORDER BY activo DESC, nombre ASC");
+    $stmt = $conn->prepare("SELECT * FROM empleado_turno WHERE id_empleado = ? ORDER BY activo DESC, nombre ASC");
     $stmt->bind_param("i", $id); $stmt->execute(); $e['turnos'] = $stmt->get_result()->fetch_all(MYSQLI_ASSOC); $stmt->close();
     $stmt = $conn->prepare("SELECT * FROM empleado_asistencia WHERE id_empleado = ? ORDER BY fecha DESC LIMIT 30");
     $stmt->bind_param("i", $id); $stmt->execute(); $e['asistencias'] = $stmt->get_result()->fetch_all(MYSQLI_ASSOC); $stmt->close();
@@ -414,7 +476,8 @@ function crearContrato($conn, $uid, $input) {
     $stmt->close();
     $tipo = $input['tipo'] ?? '';
     $inicio = $input['fecha_inicio'] ?? '';
-    $fin = $input['fecha_termino'] ?? '';
+    $fin = trim((string)($input['fecha_termino'] ?? ''));
+    $fin = $fin !== '' ? $fin : null;
     $sb = (int) ($input['sueldo_base'] ?? 0);
     $asig = (int) ($input['asignaciones'] ?? 0);
     $bonos = (int) ($input['bonos'] ?? 0);
@@ -433,7 +496,7 @@ function eliminarContrato($conn, $uid, $input) {
     $id = (int) ($input['id_contrato'] ?? 0);
     if (!$id)
         json(['error' => 'ID requerido'], 400);
-    $stmt = $conn->prepare("SELECT ec.id_contrato FROM empleado_contrato ec JOIN empleado e ON ec.id_empleado=e.id_empleado WHERE ec.id_contrato = ? AND e.id_user = ?");
+    $stmt = $conn->prepare("SELECT ec.id_contrato FROM empleado_contrato ec JOIN empleado e ON ec.id_empleado=e.id_empleado WHERE ec.id_contrato = ? AND e.id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user = ? LIMIT 1)");
     $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -463,8 +526,10 @@ function crearDocumento($conn, $uid, $input) {
     if (!$r->num_rows) { $stmt->close(); json(['error'=>'No autorizado'], 403); }
     $stmt->close();
     $archivo = $input['archivo'] ?? '';
-    $emision = $input['fecha_emision'] ?? '';
-    $venc = $input['fecha_vencimiento'] ?? '';
+    $emision = trim((string)($input['fecha_emision'] ?? ''));
+    $emision = $emision !== '' ? $emision : null;
+    $venc = trim((string)($input['fecha_vencimiento'] ?? ''));
+    $venc = $venc !== '' ? $venc : null;
     $notas = $input['notas'] ?? '';
     $stmt = $conn->prepare("INSERT INTO empleado_documento (id_empleado, tipo, nombre, archivo, fecha_emision, fecha_vencimiento, notas) VALUES (?,?,?,?,?,?,?)");
     $stmt->bind_param("issssss", $id_emp, $tipo, $nombre, $archivo, $emision, $venc, $notas);
@@ -478,7 +543,7 @@ function eliminarDocumento($conn, $uid, $input) {
     $id = (int) ($input['id_documento'] ?? 0);
     if (!$id)
         json(['error' => 'ID requerido'], 400);
-    $stmt = $conn->prepare("SELECT ed.id_documento FROM empleado_documento ed JOIN empleado e ON ed.id_empleado=e.id_empleado WHERE ed.id_documento = ? AND e.id_user = ?");
+    $stmt = $conn->prepare("SELECT ed.id_documento FROM empleado_documento ed JOIN empleado e ON ed.id_empleado=e.id_empleado WHERE ed.id_documento = ? AND e.id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user = ? LIMIT 1)");
     $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -496,13 +561,15 @@ function eliminarDocumento($conn, $uid, $input) {
    ═══════════════════════════════════════════ */
 function crearTurno($conn, $uid, $input) {
     $id_emp = (int) ($input['id_empleado'] ?? 0);
+    if ($id_emp <= 0)
+        json(['error' => 'Empleado requerido'], 400);
     $nombre = $input['nombre'] ?? 'Diurno';
     $hora_ini = $input['hora_inicio'] ?? '09:00';
     $hora_fin = $input['hora_fin'] ?? '18:00';
     $dias = $input['dias_semana'] ?? '1,2,3,4,5';
     $color = $input['color'] ?? '#4f46e5';
     $stmt = $conn->prepare("INSERT INTO empleado_turno (id_empleado, nombre, hora_inicio, hora_fin, dias_semana, color) VALUES (?,?,?,?,?,?)");
-    $stmt->bind_param("isssss", $id_emp ?: null, $nombre, $hora_ini, $hora_fin, $dias, $color);
+    $stmt->bind_param("isssss", $id_emp, $nombre, $hora_ini, $hora_fin, $dias, $color);
     $stmt->execute();
     $id_t = (int) $conn->insert_id;
     $stmt->close();
@@ -609,7 +676,7 @@ function eliminarAsistencia($conn, $uid, $input) {
     $id = (int) ($input['id_asistencia'] ?? 0);
     if (!$id)
         json(['error' => 'ID requerido'], 400);
-    $stmt = $conn->prepare("SELECT a.id_asistencia FROM empleado_asistencia a JOIN empleado e ON a.id_empleado=e.id_empleado WHERE a.id_asistencia = ? AND e.id_user = ?");
+    $stmt = $conn->prepare("SELECT a.id_asistencia FROM empleado_asistencia a JOIN empleado e ON a.id_empleado=e.id_empleado WHERE a.id_asistencia = ? AND e.id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user = ? LIMIT 1)");
     $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -648,7 +715,7 @@ function aprobarVacacion($conn, $uid, $input) {
     $estado = $input['estado'] ?? 'APROBADA';
     if (!$id)
         json(['error' => 'ID requerido'], 400);
-    $stmt = $conn->prepare("SELECT v.id_vacacion FROM empleado_vacacion v JOIN empleado e ON v.id_empleado=e.id_empleado WHERE v.id_vacacion = ? AND e.id_user = ?");
+    $stmt = $conn->prepare("SELECT v.id_vacacion FROM empleado_vacacion v JOIN empleado e ON v.id_empleado=e.id_empleado WHERE v.id_vacacion = ? AND e.id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user = ? LIMIT 1)");
     $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -666,7 +733,7 @@ function eliminarVacacion($conn, $uid, $input) {
     $id = (int) ($input['id_vacacion'] ?? 0);
     if (!$id)
         json(['error' => 'ID requerido'], 400);
-    $stmt = $conn->prepare("SELECT v.id_vacacion FROM empleado_vacacion v JOIN empleado e ON v.id_empleado=e.id_empleado WHERE v.id_vacacion = ? AND e.id_user = ?");
+    $stmt = $conn->prepare("SELECT v.id_vacacion FROM empleado_vacacion v JOIN empleado e ON v.id_empleado=e.id_empleado WHERE v.id_vacacion = ? AND e.id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user = ? LIMIT 1)");
     $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -705,7 +772,7 @@ function aprobarPermiso($conn, $uid, $input) {
     $estado = $input['estado'] ?? 'APROBADO';
     if (!$id)
         json(['error' => 'ID requerido'], 400);
-    $stmt = $conn->prepare("SELECT p.id_permiso FROM empleado_permiso p JOIN empleado e ON p.id_empleado=e.id_empleado WHERE p.id_permiso = ? AND e.id_user = ?");
+    $stmt = $conn->prepare("SELECT p.id_permiso FROM empleado_permiso p JOIN empleado e ON p.id_empleado=e.id_empleado WHERE p.id_permiso = ? AND e.id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user = ? LIMIT 1)");
     $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -722,7 +789,7 @@ function eliminarPermiso($conn, $uid, $input) {
     $id = (int) ($input['id_permiso'] ?? 0);
     if (!$id)
         json(['error' => 'ID requerido'], 400);
-    $stmt = $conn->prepare("SELECT p.id_permiso FROM empleado_permiso p JOIN empleado e ON p.id_empleado=e.id_empleado WHERE p.id_permiso = ? AND e.id_user = ?");
+    $stmt = $conn->prepare("SELECT p.id_permiso FROM empleado_permiso p JOIN empleado e ON p.id_empleado=e.id_empleado WHERE p.id_permiso = ? AND e.id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user = ? LIMIT 1)");
     $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -763,7 +830,7 @@ function eliminarLicencia($conn, $uid, $input) {
     $id = (int) ($input['id_licencia'] ?? 0);
     if (!$id)
         json(['error' => 'ID requerido'], 400);
-    $stmt = $conn->prepare("SELECT l.id_licencia FROM empleado_licencia l JOIN empleado e ON l.id_empleado=e.id_empleado WHERE l.id_licencia = ? AND e.id_user = ?");
+    $stmt = $conn->prepare("SELECT l.id_licencia FROM empleado_licencia l JOIN empleado e ON l.id_empleado=e.id_empleado WHERE l.id_licencia = ? AND e.id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user = ? LIMIT 1)");
     $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -799,7 +866,7 @@ function aprobarHoraExtra($conn, $uid, $input) {
     $estado = $input['estado'] ?? 'APROBADO';
     if (!$id)
         json(['error' => 'ID requerido'], 400);
-    $stmt = $conn->prepare("SELECT h.id_hora_extra FROM empleado_hora_extra h JOIN empleado e ON h.id_empleado=e.id_empleado WHERE h.id_hora_extra = ? AND e.id_user = ?");
+    $stmt = $conn->prepare("SELECT h.id_hora_extra FROM empleado_hora_extra h JOIN empleado e ON h.id_empleado=e.id_empleado WHERE h.id_hora_extra = ? AND e.id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user = ? LIMIT 1)");
     $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -818,7 +885,7 @@ function eliminarHoraExtra($conn, $uid, $input) {
     $id = (int) ($input['id_hora_extra'] ?? 0);
     if (!$id)
         json(['error' => 'ID requerido'], 400);
-    $stmt = $conn->prepare("SELECT h.id_hora_extra FROM empleado_hora_extra h JOIN empleado e ON h.id_empleado=e.id_empleado WHERE h.id_hora_extra = ? AND e.id_user = ?");
+    $stmt = $conn->prepare("SELECT h.id_hora_extra FROM empleado_hora_extra h JOIN empleado e ON h.id_empleado=e.id_empleado WHERE h.id_hora_extra = ? AND e.id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user = ? LIMIT 1)");
     $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -860,7 +927,7 @@ function eliminarRemuneracion($conn, $uid, $input) {
     $id = (int) ($input['id_remuneracion'] ?? 0);
     if (!$id)
         json(['error' => 'ID requerido'], 400);
-    $stmt = $conn->prepare("SELECT r.id_remuneracion FROM empleado_remuneracion r JOIN empleado e ON r.id_empleado=e.id_empleado WHERE r.id_remuneracion = ? AND e.id_user = ?");
+    $stmt = $conn->prepare("SELECT r.id_remuneracion FROM empleado_remuneracion r JOIN empleado e ON r.id_empleado=e.id_empleado WHERE r.id_remuneracion = ? AND e.id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user = ? LIMIT 1)");
     $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -896,7 +963,7 @@ function eliminarBeneficio($conn, $uid, $input) {
     $id = (int) ($input['id_beneficio'] ?? 0);
     if (!$id)
         json(['error' => 'ID requerido'], 400);
-    $stmt = $conn->prepare("SELECT b.id_beneficio FROM empleado_beneficio b JOIN empleado e ON b.id_empleado=e.id_empleado WHERE b.id_beneficio = ? AND e.id_user = ?");
+    $stmt = $conn->prepare("SELECT b.id_beneficio FROM empleado_beneficio b JOIN empleado e ON b.id_empleado=e.id_empleado WHERE b.id_beneficio = ? AND e.id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user = ? LIMIT 1)");
     $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -918,11 +985,13 @@ function crearCapacitacion($conn, $uid, $input) {
     if (!$id_emp || empty($curso))
         json(['error' => 'Datos inválidos'], 400);
     $prov = $input['proveedor'] ?? '';
-    $fecha = $input['fecha'] ?? '';
+    $fecha = trim((string)($input['fecha'] ?? ''));
+    $fecha = $fecha !== '' ? $fecha : null;
     $horas = (int) ($input['horas'] ?? 0);
     $costo = (int) ($input['costo'] ?? 0);
     $cert = $input['certificado'] ?? '';
-    $venc = $input['vencimiento'] ?? '';
+    $venc = trim((string)($input['vencimiento'] ?? ''));
+    $venc = $venc !== '' ? $venc : null;
     $renov = $input['renovacion'] ? 1 : 0;
     $stmt = $conn->prepare("INSERT INTO empleado_capacitacion (id_empleado, curso, proveedor, fecha, horas, costo, certificado, vencimiento, renovacion) VALUES (?,?,?,?,?,?,?,?,?)");
     $stmt->bind_param("isssiissi", $id_emp, $curso, $prov, $fecha, $horas, $costo, $cert, $venc, $renov);
@@ -975,7 +1044,7 @@ function eliminarCapacitacion($conn, $uid, $input) {
     $id = (int) ($input['id_capacitacion'] ?? 0);
     if (!$id)
         json(['error' => 'ID requerido'], 400);
-    $stmt = $conn->prepare("SELECT c.id_capacitacion FROM empleado_capacitacion c JOIN empleado e ON c.id_empleado=e.id_empleado WHERE c.id_capacitacion = ? AND e.id_user = ?");
+    $stmt = $conn->prepare("SELECT c.id_capacitacion FROM empleado_capacitacion c JOIN empleado e ON c.id_empleado=e.id_empleado WHERE c.id_capacitacion = ? AND e.id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user = ? LIMIT 1)");
     $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -1021,7 +1090,7 @@ function eliminarEvaluacion($conn, $uid, $input) {
     $id = (int) ($input['id_evaluacion'] ?? 0);
     if (!$id)
         json(['error' => 'ID requerido'], 400);
-    $stmt = $conn->prepare("SELECT ev.id_evaluacion FROM empleado_evaluacion ev JOIN empleado e ON ev.id_empleado=e.id_empleado WHERE ev.id_evaluacion = ? AND e.id_user = ?");
+    $stmt = $conn->prepare("SELECT ev.id_evaluacion FROM empleado_evaluacion ev JOIN empleado e ON ev.id_empleado=e.id_empleado WHERE ev.id_evaluacion = ? AND e.id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user = ? LIMIT 1)");
     $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -1061,7 +1130,7 @@ function devolverActivo($conn, $uid, $input) {
     $devolucion = $input['fecha_devolucion'] ?? date('Y-m-d');
     if (!$id)
         json(['error' => 'ID requerido'], 400);
-    $stmt = $conn->prepare("SELECT a.id_activo FROM empleado_activo a JOIN empleado e ON a.id_empleado=e.id_empleado WHERE a.id_activo = ? AND e.id_user = ?");
+    $stmt = $conn->prepare("SELECT a.id_activo FROM empleado_activo a JOIN empleado e ON a.id_empleado=e.id_empleado WHERE a.id_activo = ? AND e.id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user = ? LIMIT 1)");
     $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
@@ -1078,7 +1147,7 @@ function eliminarActivo($conn, $uid, $input) {
     $id = (int) ($input['id_activo'] ?? 0);
     if (!$id)
         json(['error' => 'ID requerido'], 400);
-    $stmt = $conn->prepare("SELECT a.id_activo FROM empleado_activo a JOIN empleado e ON a.id_empleado=e.id_empleado WHERE a.id_activo = ? AND e.id_user = ?");
+    $stmt = $conn->prepare("SELECT a.id_activo FROM empleado_activo a JOIN empleado e ON a.id_empleado=e.id_empleado WHERE a.id_activo = ? AND e.id_cuenta = (SELECT id_cuenta FROM usuario WHERE id_user = ? LIMIT 1)");
     $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
     $r = $stmt->get_result();
