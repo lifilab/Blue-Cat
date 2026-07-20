@@ -6,7 +6,7 @@
   <arguments>--defaults-file="@@MARIADB_INI@@" --console</arguments>
   <startmode>Automatic</startmode>
   <delayedAutoStart>true</delayedAutoStart>
-  <serviceaccount><username>NT AUTHORITY\LocalService</username></serviceaccount>
+  <serviceaccount><domain>NT AUTHORITY</domain><user>LocalService</user></serviceaccount>
   <stoptimeout>60sec</stoptimeout>
   <onfailure action="restart" delay="10 sec" />
   <onfailure action="restart" delay="30 sec" />

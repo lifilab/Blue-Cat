@@ -18,6 +18,7 @@ try {
 
     & (Join-Path $PSScriptRoot 'Initialize-BlueCatServer.ps1') -AppRoot $appRoot -RuntimeRoot $runtimeRoot -DataRoot (Join-Path $testRoot 'ProgramData') -InstallationConfig $configFile -SiteAddresses @('localhost') -SkipServices
     if ($LASTEXITCODE -ne 0) { throw 'La primera inicialización devolvió error.' }
+    [IO.File]::WriteAllText($configFile, '{}', [Text.UTF8Encoding]::new($false))
     & (Join-Path $PSScriptRoot 'Initialize-BlueCatServer.ps1') -AppRoot $appRoot -RuntimeRoot $runtimeRoot -DataRoot (Join-Path $testRoot 'ProgramData') -InstallationConfig $configFile -SiteAddresses @('localhost') -SkipServices
     if ($LASTEXITCODE -ne 0) { throw 'La reparación devolvió error.' }
 
@@ -30,7 +31,8 @@ try {
     & (Join-Path $runtimeRoot 'caddy\caddy.exe') validate --config (Join-Path $dataRoot 'config\Caddyfile') --adapter caddyfile
     if ($LASTEXITCODE -ne 0) { throw 'Caddy rechazó la configuración renderizada.' }
     foreach ($serviceName in @('BlueCatDatabase','BlueCatPhp','BlueCatWeb')) {
-        [xml](Get-Content -LiteralPath (Join-Path $dataRoot "install\services\$serviceName.xml") -Raw) | Out-Null
+        [xml]$serviceXml = Get-Content -LiteralPath (Join-Path $dataRoot "install\services\$serviceName.xml") -Raw
+        if ($serviceXml.service.serviceaccount.user -ne 'LocalService') { throw "$serviceName no usa la cuenta restringida LocalService." }
     }
     $state = Get-Content -LiteralPath (Join-Path $dataRoot 'install\state.json') -Raw | ConvertFrom-Json
     if ($state.services_installed -ne $false -or $state.site_addresses -notcontains 'localhost') { throw 'El estado de instalación es inválido.' }

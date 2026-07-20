@@ -7,6 +7,7 @@ Este directorio contiene el contrato reproducible del instalador. Los binarios e
 - `runtime-lock.json`: versiones, procedencia, checksum y licencia.
 - `templates/`: configuraciones que el bootstrap renderiza con rutas absolutas.
 - `services/`: definiciones WinSW con dependencias y recuperación.
+- `desktop/`: fuente del launcher WPF/WebView2 independiente del navegador.
 - `scripts/`: descarga, validación, bootstrap y construcción de Windows.
 - `installer/`: fuente Inno Setup.
 
@@ -26,6 +27,8 @@ En Windows, con Inno Setup 6.7.3 instalado:
 .\scripts\Build-Installer.ps1
 ```
 
-El comando descarga y verifica los runtimes si faltan, crea un staging limpio y produce en `output/` el EXE, `SHA256SUMS.txt`, un SBOM SPDX 2.3 y metadatos de construcción. Una compilación local puede quedar sin firma para pruebas aisladas; no es publicable.
+El comando descarga y verifica los runtimes si faltan, compila `BlueCatDesktop.exe`, crea un staging limpio y produce en `output/` el EXE, `SHA256SUMS.txt`, un SBOM SPDX 2.3 y metadatos de construcción. Una compilación local puede quedar sin firma para pruebas aisladas; no es publicable.
+
+El instalador crea accesos en Escritorio e Inicio. `Blue-Cat` y `Blue-Cat POS` abren una ventana WebView2 propia en pantalla completa; `F11` alterna ese modo, `Esc` permite salir y `--windowed` fuerza una ventana maximizada. Ningún acceso abre la URL en el navegador predeterminado.
 
 El pipeline de release usa `-RequireSignature` y el certificado Authenticode protegido por GitHub. Si el certificado falta, está vencido o la firma no resulta válida, la publicación falla antes de crear el release.

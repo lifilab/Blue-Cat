@@ -53,6 +53,27 @@
       "hash": "cc0ff0eb1dc3f5188ae6300faef32bf5beeba4bdd6e8e445a9184072096b713b",
       "license": "LicenseRef-Microsoft-Visual-Cpp-2022-Runtime",
       "license_url": "https://visualstudio.microsoft.com/license-terms/vs2022-cruntime/"
+    },
+    {
+      "id": "webview2-sdk",
+      "version": "1.0.4078.44",
+      "url": "https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/1.0.4078.44/microsoft.web.webview2.1.0.4078.44.nupkg",
+      "file": "microsoft.web.webview2.1.0.4078.44.nupkg",
+      "hash_algorithm": "SHA256",
+      "hash": "dc4d1d9168df26b830398303e50210b6e1729f6ce5a7ac69d2c766852f489962",
+      "license": "LicenseRef-Microsoft-WebView2-SDK",
+      "license_url": "https://www.nuget.org/packages/Microsoft.Web.WebView2/1.0.4078.44/license"
+    },
+    {
+      "id": "webview2-runtime-installer",
+      "version": "150.0.4078.65",
+      "url": "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/6c36e6de-67d8-470e-a071-894d02cd99eb/MicrosoftEdgeWebView2RuntimeInstallerX64.exe",
+      "file": "MicrosoftEdgeWebView2RuntimeInstallerX64.exe",
+      "target_file": "MicrosoftEdgeWebView2RuntimeInstallerX64.exe",
+      "hash_algorithm": "SHA256",
+      "hash": "3a08103bed8a3d9aefdfc9ac10a672ea69605163f2dcb08d76cfd3e0444511c9",
+      "license": "LicenseRef-Microsoft-Edge-WebView2-Runtime",
+      "license_url": "https://www.microsoft.com/en-us/legal/terms-of-use"
     }
   ],
   "build_tools": [

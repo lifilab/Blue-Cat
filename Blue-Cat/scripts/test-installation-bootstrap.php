@@ -58,6 +58,7 @@ try {
     $db = new mysqli($host, $user, $password, $database, $port);
     $checks = [
         'cuenta'=>1,'usuario'=>1,'empresa'=>1,'sucursal'=>1,'bodega'=>1,'pos_caja_fisica'=>1,'core_installation'=>1,
+        'modulo'=>8,'plan'=>1,'plan_modulo'=>8,'suscripcion'=>1,
     ];
     foreach ($checks as $table=>$expected) {
         $count = (int)$db->query("SELECT COUNT(*) total FROM `{$table}`")->fetch_assoc()['total'];
@@ -67,6 +68,8 @@ try {
     if (!$row || !password_verify('Bootstrap9Segura', $row['password'])) throw new RuntimeException('La contraseña inicial no quedó hasheada correctamente.');
     $adminRole = (int)$db->query("SELECT COUNT(*) total FROM usuario_rol ur JOIN rol r ON r.id_rol=ur.id_rol WHERE r.nombre='Administrador' AND r.id_cuenta IS NOT NULL")->fetch_assoc()['total'];
     if ($adminRole !== 1) throw new RuntimeException('El administrador no recibió su rol local.');
+    $permissionCounts = $db->query("SELECT COUNT(DISTINCT rp.id_permiso) assigned,(SELECT COUNT(*) FROM permiso) available FROM usuario_rol ur JOIN rol r ON r.id_rol=ur.id_rol JOIN rol_permiso rp ON rp.id_rol=r.id_rol WHERE ur.id_user=(SELECT id_user FROM usuario WHERE nombre='adminbeta') AND r.nombre='Administrador'")->fetch_assoc();
+    if ((int)$permissionCounts['assigned'] !== (int)$permissionCounts['available']) throw new RuntimeException('El superadministrador no recibió todos los permisos disponibles.');
     $db->close();
     $db = null;
 
@@ -75,6 +78,8 @@ try {
     if ($code !== 0 || ($result['status'] ?? '') !== 'already-configured') throw new RuntimeException("La reparación idempotente falló: {$err} {$out}");
     echo "PASS instalación inicial crea cuenta, administrador, empresa, sucursal, bodega y caja\n";
     echo "PASS contraseña elegida se almacena con hash fuerte\n";
+    echo "PASS catálogo, plan, suscripción y módulos quedan habilitados\n";
+    echo "PASS superadministrador recibe todos los permisos\n";
     echo "PASS segundo bootstrap es idempotente\n";
 } finally {
     if (isset($db) && $db instanceof mysqli) $db->close();

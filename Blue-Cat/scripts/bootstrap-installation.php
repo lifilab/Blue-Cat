@@ -42,6 +42,54 @@ function installCode(array $source, string $key, int $max): string
     return $value;
 }
 
+function provisionInstalledEdition(mysqli $db, int $accountId, int $adminId): void
+{
+    provisionTenantRoles($db, $accountId);
+
+    $role = 'Administrador';
+    $stmt = $db->prepare("INSERT IGNORE INTO usuario_rol(id_user,id_rol) SELECT ?,id_rol FROM rol WHERE id_cuenta=? AND nombre=? AND es_plantilla=0 AND activo=1 LIMIT 1");
+    $stmt->bind_param('iis', $adminId, $accountId, $role);
+    $stmt->execute();
+    $stmt->close();
+
+    $stmt = $db->prepare("INSERT IGNORE INTO rol_permiso(id_rol,id_permiso) SELECT r.id_rol,p.id_permiso FROM rol r CROSS JOIN permiso p WHERE r.id_cuenta=? AND r.nombre='Administrador' AND r.activo=1");
+    $stmt->bind_param('i', $accountId);
+    $stmt->execute();
+    $stmt->close();
+
+    $stmt = $db->prepare("INSERT IGNORE INTO plan_modulo(id_plan,id_modulo) SELECT p.id_plan,m.id_modulo FROM plan p CROSS JOIN modulo m WHERE p.nombre='Blue-Cat Beta Completa' AND p.activo=1 AND m.activo=1");
+    $stmt->execute();
+    $stmt->close();
+
+    $stmt = $db->prepare("INSERT INTO suscripcion(id_empresa,id_plan,fecha_inicio,estado) SELECT e.id_empresa,p.id_plan,CURDATE(),'activa' FROM empresa e JOIN plan p ON p.nombre='Blue-Cat Beta Completa' AND p.activo=1 WHERE e.id_cuenta=? AND e.activo=1 AND NOT EXISTS (SELECT 1 FROM suscripcion s WHERE s.id_empresa=e.id_empresa AND s.estado='activa')");
+    $stmt->bind_param('i', $accountId);
+    $stmt->execute();
+    $stmt->close();
+}
+
+// Una reparación no necesita volver a leer ni solicitar datos comerciales o
+// credenciales. Migra y recompone únicamente catálogos/autorizaciones.
+$db = getDB();
+try {
+    $migration = $db->prepare("SELECT 1 FROM schema_migration WHERE version='023_installed_module_catalog.sql' LIMIT 1");
+    $migration->execute();
+    $ready = (bool)$migration->get_result()->fetch_row();
+    $migration->close();
+    if (!$ready) throw new RuntimeException('Ejecute todas las migraciones antes del bootstrap.');
+    $existing = $db->query('SELECT installation_id,id_cuenta,id_user_admin,setup_completed FROM core_installation WHERE id_installation=1')->fetch_assoc();
+    if ($existing) {
+        $db->begin_transaction();
+        provisionInstalledEdition($db, (int)$existing['id_cuenta'], (int)$existing['id_user_admin']);
+        $db->commit();
+        echo json_encode(['ok'=>true,'status'=>'already-configured','installation_id'=>$existing['installation_id'],'id_cuenta'=>(int)$existing['id_cuenta']], JSON_UNESCAPED_UNICODE) . PHP_EOL;
+        exit(0);
+    }
+} catch (Throwable $error) {
+    try { $db->rollback(); } catch (Throwable) {}
+    fwrite(STDERR, 'Reparación cancelada: ' . $error->getMessage() . "\n");
+    exit(1);
+}
+
 $raw = file_get_contents($configFile);
 $config = $raw !== false ? json_decode($raw, true) : null;
 if (!is_array($config)) {
@@ -92,9 +140,8 @@ try {
     exit(2);
 }
 
-$db = getDB();
 try {
-    $migration = $db->prepare("SELECT 1 FROM schema_migration WHERE version='022_installation_state.sql' LIMIT 1");
+    $migration = $db->prepare("SELECT 1 FROM schema_migration WHERE version='023_installed_module_catalog.sql' LIMIT 1");
     $migration->execute();
     $ready = (bool)$migration->get_result()->fetch_row();
     $migration->close();
@@ -102,6 +149,9 @@ try {
 
     $existing = $db->query('SELECT installation_id,id_cuenta,id_user_admin,setup_completed FROM core_installation WHERE id_installation=1')->fetch_assoc();
     if ($existing) {
+        $db->begin_transaction();
+        provisionInstalledEdition($db, (int)$existing['id_cuenta'], (int)$existing['id_user_admin']);
+        $db->commit();
         echo json_encode(['ok'=>true,'status'=>'already-configured','installation_id'=>$existing['installation_id'],'id_cuenta'=>(int)$existing['id_cuenta']], JSON_UNESCAPED_UNICODE) . PHP_EOL;
         exit(0);
     }
@@ -119,11 +169,6 @@ try {
     $stmt->bind_param('ii', $adminId, $accountId); $stmt->execute(); $stmt->close();
 
     provisionTenantRoles($db, $accountId);
-    $role = 'Administrador';
-    $stmt = $db->prepare("INSERT INTO usuario_rol(id_user,id_rol) SELECT ?,id_rol FROM rol WHERE id_cuenta=? AND nombre=? AND es_plantilla=0 LIMIT 1");
-    $stmt->bind_param('iis', $adminId, $accountId, $role); $stmt->execute();
-    if ($stmt->affected_rows !== 1) throw new RuntimeException('No fue posible asignar el rol Administrador.');
-    $stmt->close();
 
     $stmt = $db->prepare("INSERT INTO empresa(id_cuenta,razon_social,nombre_comercial,rut,giro,direccion,ciudad,moneda_base,activo) VALUES (?,?,?,?,?,?,?,?,1)");
     $stmt->bind_param('isssssss', $accountId, $legalName, $tradeName, $taxId, $activity, $address, $city, $currencyCode); $stmt->execute(); $companyId = (int)$db->insert_id; $stmt->close();
@@ -146,6 +191,7 @@ try {
     $version = trim((string)@file_get_contents($root . DIRECTORY_SEPARATOR . 'VERSION')) ?: 'development';
     $stmt = $db->prepare('INSERT INTO core_installation(id_installation,id_cuenta,id_user_admin,installation_id,installed_version,setup_completed) VALUES (1,?,?,?,?,1)');
     $stmt->bind_param('iiss', $accountId, $adminId, $installationId, $version); $stmt->execute(); $stmt->close();
+    provisionInstalledEdition($db, $accountId, $adminId);
     $db->commit();
 
     echo json_encode(['ok'=>true,'status'=>'configured','installation_id'=>$installationId,'id_cuenta'=>$accountId,'id_empresa'=>$companyId,'id_sucursal'=>$branchId,'id_bodega'=>$warehouseId,'id_caja_fisica'=>$cashId], JSON_UNESCAPED_UNICODE) . PHP_EOL;

@@ -34,12 +34,15 @@ function Find-SignTool {
 
 $package = [IO.Path]::GetFullPath($PackageRoot)
 $runtime = Join-Path $package 'build\runtime'
+$desktop = Join-Path $package 'build\desktop'
 $stage = Join-Path $package 'build\stage'
 $output = Join-Path $package 'output'
 $lockPath = Join-Path $package 'runtime-lock.json'
 $requiredRuntime = @(
     (Join-Path $runtime 'php\php.exe'),
-    (Join-Path $runtime 'vc-redist-x64\vc_redist.x64.exe')
+    (Join-Path $runtime 'vc-redist-x64\vc_redist.x64.exe'),
+    (Join-Path $runtime 'webview2-sdk\lib\net462\Microsoft.Web.WebView2.Wpf.dll'),
+    (Join-Path $runtime 'webview2-runtime-installer\MicrosoftEdgeWebView2RuntimeInstallerX64.exe')
 )
 
 if (-not (Test-Path -LiteralPath $InnoCompiler)) { throw "No se encontro Inno Setup 6.7.3: $InnoCompiler" }
@@ -55,13 +58,13 @@ if (@($requiredRuntime | Where-Object { -not (Test-Path -LiteralPath $_) }).Coun
         -LockFile $lockPath `
         -CachePath (Join-Path $package 'cache') `
         -OutputPath $runtime
-    if ($LASTEXITCODE -ne 0) { throw 'No fue posible preparar los runtimes.' }
 }
+
+& (Join-Path $PSScriptRoot 'Build-DesktopLauncher.ps1') -PackageRoot $package -RuntimeRoot $runtime -OutputRoot $desktop
 
 Remove-PackageDirectory -Path $stage -Root $package
 Remove-PackageDirectory -Path $output -Root $package
-& (Join-Path $PSScriptRoot 'New-InstallerStage.ps1') -RuntimeRoot $runtime -StageRoot $stage
-if ($LASTEXITCODE -ne 0) { throw 'No fue posible preparar el staging.' }
+& (Join-Path $PSScriptRoot 'New-InstallerStage.ps1') -RuntimeRoot $runtime -DesktopRoot $desktop -StageRoot $stage
 
 & $InnoCompiler /Qp (Join-Path $package 'installer\BlueCatServer.iss')
 if ($LASTEXITCODE -ne 0) { throw 'La compilacion del instalador fallo.' }
