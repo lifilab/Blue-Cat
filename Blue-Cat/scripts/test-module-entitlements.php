@@ -6,6 +6,9 @@ $envFile = $root . DIRECTORY_SEPARATOR . '.env';
 foreach (array_slice($argv, 1) as $argument) {
     if (str_starts_with($argument, '--env=')) $envFile = substr($argument, 6);
 }
+if (!preg_match('~^(?:[A-Za-z]:[\\\\/]|/)~', $envFile)) {
+    $envFile = $root . DIRECTORY_SEPARATOR . $envFile;
+}
 putenv('BLUECAT_ENV_FILE='.$envFile);
 putenv('BLUECAT_ENFORCE_ENTITLEMENTS=1');
 require_once $root . '/assets/api/_db.php';
