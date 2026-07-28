@@ -168,6 +168,9 @@ function addLegacyPending(mysqli $db, array $tenant, int $note, string $state = 
 
 $root = dirname(__DIR__);
 $envPath = argument('--env') ?? 'C:/laragon/tmp/bluecat-sprint1-test.env';
+if (!preg_match('~^(?:[A-Za-z]:[\\\\/]|/)~', $envPath)) {
+    $envPath = $root . DIRECTORY_SEPARATOR . $envPath;
+}
 if (!is_file($envPath)) throw new RuntimeException("No existe el entorno aislado: {$envPath}");
 foreach (file($envPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
     if (str_starts_with(trim($line), '#') || !str_contains($line, '=')) continue;
