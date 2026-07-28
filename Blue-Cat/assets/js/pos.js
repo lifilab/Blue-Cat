@@ -6,6 +6,8 @@ var configBoleta = null; // Configuración de boletas
 var userPermissions = {}; // Permisos del usuario
 var _saleRequestKey = null;
 var _paymentSubmitting = false;
+var _returnRequestKey = null;
+var _returnSubmitting = false;
 var _pendingCotizacionId = 0;
 var _promoCoupons = [];
 var _promotionTimer = null;
@@ -15,7 +17,15 @@ document.addEventListener('DOMContentLoaded', init);
 
 function $(id) { return document.getElementById(id); }
 function esc(s) { if (!s) return ''; var d = document.createElement('div'); d.appendChild(document.createTextNode(s)); return d.innerHTML; }
-function fm(n) { if (n === null || n === undefined) return '$0'; return '$' + Math.round(Number(n)).toLocaleString('es-CL'); }
+function money(n) {
+  var value = Number(n);
+  if (!Number.isFinite(value)) return 0;
+  return Math.round(value);
+}
+function fm(n) {
+  var value = money(n);
+  return '$' + value.toLocaleString('es-CL');
+}
 function toast(msg, t, iconClass) {
   var el = document.createElement('div');
   el.className = 'toast toast-' + (t === 'err' ? 'err' : 'ok');
@@ -39,7 +49,6 @@ function init() {
   loadConfigBoleta(); // Cargar configuración de boletas
   loadDashboard();
   loadCajaState();
-  loadClientes();
   loadPromociones();
   // Product search with debounce
   $('search-input').addEventListener('input', function () {
@@ -59,12 +68,20 @@ function loadUserPermissions() {
     (d.permisos || []).forEach(function(p) {
       userPermissions[p.modulo] = (p.acciones || []).map(function(a) { return typeof a === 'string' ? a : a.accion; });
     });
+    applyPosPermissions();
+    if (hasPermission('pos', 'asociar_cliente')) loadClientes();
   });
 }
 
 function hasPermission(modulo, accion) {
   if (!userPermissions[modulo]) return false;
   return userPermissions[modulo].indexOf(accion) !== -1;
+}
+
+function applyPosPermissions() {
+  document.querySelectorAll('[data-pos-permission]').forEach(function(element) {
+    element.hidden = !hasPermission('pos', element.getAttribute('data-pos-permission'));
+  });
 }
 
 function loadConfigBoleta() {
@@ -120,14 +137,14 @@ function apiPost(data, cb, errCb) { api('POST', data, cb, errCb); }
 function loadDashboard() {
   apiGet({ accion: 'dashboard' }, function (d) {
     var setText = function(id, val) { var el = $(id); if (el) el.textContent = val; };
-    if (d.ventas_hoy) {
-      setText('db-ventas-hoy', fm(d.ventas_hoy.total));
-      setText('db-cant-hoy', d.ventas_hoy.cant + ' ventas');
-    }
-    if (d.ventas_mes) {
-      setText('db-ventas-mes', fm(d.ventas_mes.total));
-      setText('db-cant-mes', d.ventas_mes.cant + ' ventas');
-    }
+      if (d.ventas_hoy) {
+        setText('db-ventas-hoy', fm(d.ventas_hoy.total));
+        setText('db-cant-hoy', Number(d.ventas_hoy.cant ?? d.ventas_hoy.ventas ?? 0) + ' ventas');
+      }
+      if (d.ventas_mes) {
+        setText('db-ventas-mes', fm(d.ventas_mes.total));
+        setText('db-cant-mes', Number(d.ventas_mes.cant ?? d.ventas_mes.ventas ?? 0) + ' ventas');
+      }
     setText('db-cajas', d.cajas_abiertas + ' abierta(s)');
     setText('db-clientes', (d.total_clientes || 0) + '');
     setText('db-stock-bajo', (d.stock_bajo || 0) + ' bajo');
@@ -150,6 +167,7 @@ function loadCajaState() {
       $('caja-codigo').textContent = cajaState.codigo || cajaState.nombre || 'Caja';
       $('caja-action-btn').innerHTML = '<i class="fas fa-times"></i> Cerrar Caja';
       $('caja-action-btn').onclick = showCerrarCaja;
+      $('caja-action-btn').setAttribute('data-pos-permission', 'cerrar_caja');
       $('caja-mov-btn').style.display = 'block';
     } else {
       $('caja-status').innerHTML = '<span class="badge badge-CERRADA">Cerrada</span>';
@@ -157,39 +175,57 @@ function loadCajaState() {
       $('caja-codigo').textContent = 'Sin caja activa';
       $('caja-action-btn').innerHTML = '<i class="fas fa-plus"></i> Abrir Caja';
       $('caja-action-btn').onclick = showAbrirCaja;
+      $('caja-action-btn').setAttribute('data-pos-permission', 'abrir_caja');
       $('caja-mov-btn').style.display = 'none';
     }
+    applyPosPermissions();
   });
 }
 
 function showAbrirCaja() {
+  if (!hasPermission('pos', 'abrir_caja')) { toast('No tienes permiso para abrir caja', 'err'); return; }
   var nombreUsuario = sessionStorage.getItem('user_name') || 'Usuario';
   var codigoCaja = localStorage.getItem('bluecat_pos_caja_codigo') || 'CAJA-01';
   var m = showModal(`
     <h3 style="font-size:18px;font-weight:700;margin-bottom:16px;"><i class="fas fa-cash-register" style="color:#4f46e5;"></i> Abrir Caja</h3>
     <div class="gr2">
-      <div class="fld"><label>Monto Apertura *</label><input id="ac-monto" type="number" min="0" value="0"></div>
+      <div class="fld"><label>Monto Apertura *</label><input id="ac-monto" type="number" min="0" step="1" value="0"></div>
       <div class="fld"><label>Código caja física *</label><input id="ac-codigo" value="${esc(codigoCaja)}" maxlength="40"></div>
       <div class="fld"><label>Nombre Caja</label><input id="ac-nombre" value="Caja Principal"></div>
       <div class="fld"><label>Empleado</label><input id="ac-emp" value="${nombreUsuario}" readonly style="background:#f1f5f9;cursor:not-allowed;"></div>
+      <div class="fld"><label>Bodega de venta *</label><select id="ac-bodega"><option value="">Cargando bodegas...</option></select></div>
       <div class="fld"><label>Sucursal</label><input id="ac-suc" value="Principal"></div>
     </div>
     <div class="fld"><label>Nota</label><textarea id="ac-nota" rows="1"></textarea></div>
     <div class="mcb"><button class="btn-g" onclick="closeModal()">Cancelar</button><button class="btn-p" onclick="abrirCaja()"><i class="fas fa-check"></i> Abrir Caja</button></div>
   `);
+  apiGet({ accion: 'bodegas_caja' }, function (d) {
+    var select = $('ac-bodega');
+    if (!select) return;
+    var stored = localStorage.getItem('bluecat_pos_bodega_id') || '';
+    var bodegas = d.bodegas || [];
+    select.innerHTML = '<option value="">Seleccione una bodega</option>' + bodegas.map(function (b) {
+      return '<option value="' + Number(b.id_bodega) + '"' + (String(b.id_bodega) === stored ? ' selected' : '') + '>' + esc(b.nombre) + ' (' + esc(b.codigo || '') + ')</option>';
+    }).join('');
+    if (!stored && bodegas.length === 1) select.value = String(bodegas[0].id_bodega);
+    if (!bodegas.length) toast('Cree una bodega activa antes de abrir caja', 'err');
+  });
   setTimeout(function () { $('ac-monto').focus(); $('ac-monto').select(); }, 100);
 }
 
 function abrirCaja() {
-  var monto = parseInt($('ac-monto').value) || 0;
+  var monto = money($('ac-monto').value);
   var codigo = ($('ac-codigo').value || '').trim().toUpperCase();
+  var idBodega = Number($('ac-bodega').value || 0);
   if (!codigo) { toast('Indique el código de la caja física', 'err'); return; }
+  if (!idBodega) { toast('Seleccione la bodega que usará esta caja', 'err'); return; }
   apiPost({
     accion: 'caja_abrir', monto_apertura: monto, codigo: codigo,
     nombre_caja: $('ac-nombre').value, empleado: $('ac-emp').value,
-    sucursal: $('ac-suc').value, nota: $('ac-nota').value
+    sucursal: $('ac-suc').value, id_bodega: idBodega, nota: $('ac-nota').value
   }, function (d) {
     localStorage.setItem('bluecat_pos_caja_codigo', codigo);
+    localStorage.setItem('bluecat_pos_bodega_id', String(idBodega));
     toast('Caja abierta: ' + (d.caja ? d.caja.codigo : codigo), 'ok', 'fas fa-check-circle');
     closeModal();
     loadCajaState();
@@ -197,11 +233,12 @@ function abrirCaja() {
 }
 
 function showCerrarCaja() {
+  if (!hasPermission('pos', 'cerrar_caja')) { toast('No tienes permiso para cerrar caja', 'err'); return; }
   window.location.href = '../public/cuadre_de_ventas.html';
 }
 
 function cerrarCaja() {
-  var monto = parseInt($('cc-monto').value) || 0;
+  var monto = money($('cc-monto').value);
   apiPost({ accion: 'caja_cerrar', monto_real: monto, observaciones: $('cc-obs').value }, function (d) {
     var msg = 'Caja cerrada. Esperado: ' + fm(d.esperado) + ', Real: ' + fm(d.monto_real);
     if (d.diferencia !== 0) msg += ', Diferencia: <strong>' + fm(d.diferencia) + '</strong>';
@@ -213,10 +250,11 @@ function cerrarCaja() {
 }
 
 function showMovimiento(tipo) {
+  if (!hasPermission('pos', 'abrir_caja')) { toast('No tienes permiso para registrar movimientos de caja', 'err'); return; }
   var m = showModal(`
     <h3 style="font-size:18px;font-weight:700;margin-bottom:16px;"><i class="fas fa-${tipo === 'INGRESO' ? 'arrow-down' : 'arrow-up'}" style="color:#4f46e5;"></i> ${tipo === 'INGRESO' ? 'Ingreso' : 'Egreso'} de Caja</h3>
     <div class="gr2">
-      <div class="fld"><label>Monto *</label><input id="mv-monto" type="number" min="0"></div>
+      <div class="fld"><label>Monto *</label><input id="mv-monto" type="number" min="1" step="1"></div>
       <div class="fld"><label>Método</label><select id="mv-metodo" disabled><option value="EFECTIVO">Efectivo</option></select></div>
     </div>
     <div class="fld"><label>Concepto *</label><input id="mv-concepto"></div>
@@ -227,7 +265,7 @@ function showMovimiento(tipo) {
 }
 
 function guardarMovimiento(tipo) {
-  var monto = parseInt($('mv-monto').value) || 0;
+  var monto = money($('mv-monto').value);
   var concepto = $('mv-concepto').value;
   if (!monto || !concepto) { toast('Completa los campos requeridos', 'err'); return; }
   apiPost({
@@ -262,11 +300,15 @@ function loadProducts() {
 function renderCategories() {
   var cont = $('cat-filters');
   if (!cont) return;
-  var h = '<button class="cat-btn' + (!currentCat ? ' active' : '') + '" onclick="setCat(\'\')">Todas</button>';
-  for (var i = 0; i < categories.length; i++) {
-    h += '<button class="cat-btn' + (currentCat === categories[i] ? ' active' : '') + '" onclick="setCat(\'' + esc(categories[i]) + '\')">' + esc(categories[i]) + '</button>';
-  }
-  cont.innerHTML = h;
+  cont.replaceChildren();
+  [''].concat(categories).forEach(function (category) {
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'cat-btn' + (currentCat === category ? ' active' : '');
+    button.textContent = category || 'Todas';
+    button.addEventListener('click', function () { setCat(category); });
+    cont.appendChild(button);
+  });
 }
 
 function setCat(cat) {
@@ -278,7 +320,7 @@ function setCat(cat) {
 function renderProducts() {
   var grid = $('product-grid');
   if (!products.length) { grid.innerHTML = '<div class="loading"><i class="fas fa-box-open"></i>Sin productos</div>'; return; }
-  var h = '';
+  grid.replaceChildren();
   for (var i = 0; i < products.length; i++) {
     var p = products[i];
     var stk = parseFloat(p.cantidad) || 0;
@@ -287,31 +329,69 @@ function renderProducts() {
     var esPeso = p.tipo_venta === 'PESO' || p.tipo_venta === 'VOLUMEN';
     var unidad = p.unidad_abrev || 'u';
     var precioLabel = esPeso ? fm(p.precio_venta) + '/' + unidad : fm(p.precio_venta);
-    h += '<div class="prod-card" tabindex="0" role="button" aria-label="' + esc(p.nombre_producto) + ' ' + precioLabel + '" onclick="addToCart(' + p.id_producto + ',\'' + esc(p.nombre_producto) + '\',' + p.precio_venta + ',\'' + esc(p.codigo_de_barras) + '\',' + stk + ',\'' + (p.tipo_venta || 'UNIDAD') + '\',\'' + unidad + '\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();addToCart(' + p.id_producto + ',\'' + esc(p.nombre_producto) + '\',' + p.precio_venta + ',\'' + esc(p.codigo_de_barras) + '\',' + stk + ',\'' + (p.tipo_venta || 'UNIDAD') + '\',\'' + unidad + '\');}">' +
-      '<div class="name">' + esc(p.nombre_producto) + '</div>' +
-      '<div class="price">' + precioLabel + '</div>' +
-      '<div class="sku">' + esc(p.codigo_de_barras || '') + '</div>' +
-      '<div class="stock ' + stkCls + '">' + stkLbl + '</div>' +
-      '</div>';
+    var card = document.createElement('div');
+    card.className = 'prod-card';
+    card.tabIndex = 0;
+    card.setAttribute('role', 'button');
+    card.setAttribute('aria-label', String(p.nombre_producto || '') + ' ' + precioLabel);
+    var addProduct = (function (product, stock, unit) {
+      return function () {
+        addToCart(
+          Number(product.id_producto),
+          String(product.nombre_producto || ''),
+          Number(product.precio_venta),
+          String(product.codigo_de_barras || product.sku || ''),
+          stock,
+          String(product.tipo_venta || 'UNIDAD'),
+          unit
+        );
+      };
+    }(p, stk, unidad));
+    card.addEventListener('click', addProduct);
+    card.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        this.click();
+      }
+    });
+    var name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = p.nombre_producto || '';
+    var price = document.createElement('div');
+    price.className = 'price';
+    price.textContent = precioLabel;
+    var sku = document.createElement('div');
+    sku.className = 'sku';
+    sku.textContent = p.codigo_de_barras || p.sku || '';
+    var stockLabel = document.createElement('div');
+    stockLabel.className = 'stock ' + stkCls;
+    stockLabel.textContent = stkLbl;
+    card.append(name, price, sku, stockLabel);
+    grid.appendChild(card);
   }
-  grid.innerHTML = h;
 }
 
 function handleBarcode() {
   var q = $('search-input').value.trim();
   if (!q) return;
-  var savedCat = currentCat;
-  currentCat = '';
+  var agregarExacto = function (product) {
+    addToCart(product.id_producto, product.nombre_producto, product.precio_venta, product.codigo_de_barras || product.sku, product.cantidad, product.tipo_venta, product.unidad_abrev);
+    $('search-input').value = '';
+  };
   for (var i = 0; i < products.length; i++) {
-    if (products[i].codigo_de_barras === q) {
-      addToCart(products[i].id_producto, products[i].nombre_producto, products[i].precio_venta, products[i].codigo_de_barras, products[i].cantidad, products[i].tipo_venta, products[i].unidad_abrev);
-      $('search-input').value = '';
-      currentCat = savedCat;
+    if (products[i].codigo_de_barras === q || products[i].sku === q) {
+      agregarExacto(products[i]);
       return;
     }
   }
-  currentCat = savedCat;
-  loadProducts();
+  apiGet({ accion: 'productos', q: q, exact: 1, pagina: 1, por_pagina: 2 }, function (data) {
+    var exactos = (data.productos || []).filter(function (product) {
+      return product.codigo_de_barras === q || product.sku === q;
+    });
+    if (exactos.length === 1) agregarExacto(exactos[0]);
+    else if (exactos.length > 1) toast('Código o SKU ambiguo; corrige el catálogo', 'err');
+    else toast('Producto no encontrado', 'err');
+  });
 }
 
 /* ═══════════════════════════════════════════
@@ -323,7 +403,7 @@ function addToCart(id, name, price, sku, stock, tipoVenta, unidad) {
   if (!id) { toast('Producto inválido', 'err'); return; }
   tipoVenta = tipoVenta || 'UNIDAD';
   unidad = unidad || 'u';
-  if (tipoVenta === 'PESO' || tipoVenta === 'VOLUMEN') { showMeasureModal({id:id,name:name,price:parseFloat(price)||0,sku:sku||'',stock:stk,tipoVenta:tipoVenta,unidad:unidad}); return; }
+  if (tipoVenta === 'PESO' || tipoVenta === 'VOLUMEN') { showMeasureModal({id:id,name:name,price:money(price),sku:sku||'',stock:stk,tipoVenta:tipoVenta,unidad:unidad}); return; }
   for (var i = 0; i < cart.length; i++) {
     if (cart[i].id === id) {
       if (cart[i].cant >= stk) { toast('Stock máximo alcanzado', 'err'); return; }
@@ -332,7 +412,7 @@ function addToCart(id, name, price, sku, stock, tipoVenta, unidad) {
       return;
     }
   }
-  cart.push({ id:id, name:name, price:parseFloat(price)||0, sku:sku||'', cant:1, stock:stk, tipoVenta:'UNIDAD', unidad:unidad });
+  cart.push({ id:id, name:name, price:money(price), sku:sku||'', cant:1, stock:stk, tipoVenta:'UNIDAD', unidad:unidad });
   renderCart();
   toast(name, 'ok', 'fas fa-check');
 }
@@ -408,14 +488,14 @@ function editPrice(idx) {
   var old = cart[idx].price;
   var modal = showModal(`
     <h3 style="font-size:18px;font-weight:700;margin-bottom:16px;"><i class="fas fa-tag" style="color:#4f46e5;"></i> Modificar Precio</h3>
-    <div class="fld"><label>Nuevo precio para ${esc(cart[idx].name)}</label><input id="ep-price" type="number" min="0" value="${old}"></div>
+    <div class="fld"><label>Nuevo precio para ${esc(cart[idx].name)}</label><input id="ep-price" type="number" min="1" step="1" value="${old}"></div>
     <div class="mcb"><button class="btn-g" onclick="closeModal()">Cancelar</button><button class="btn-p" onclick="savePrice(${idx})"><i class="fas fa-save"></i> Aceptar</button></div>
   `);
   setTimeout(function () { $('ep-price').focus(); $('ep-price').select(); }, 100);
 }
 
 function savePrice(idx) {
-  var v = parseInt($('ep-price').value);
+  var v = money($('ep-price').value);
   if (v > 0) { cart[idx].price = v; renderCart(); }
   closeModal();
 }
@@ -428,9 +508,9 @@ function renderCart(skipPromotionRefresh) {
   
   for (var i = 0; i < cart.length; i++) {
     var c = cart[i];
-    var sub = c.price * c.cant;
-    var lineDiscount = c.promoDiscount || 0;
-    total += sub;
+    var sub = money(c.price * c.cant);
+    var lineDiscount = money(c.promoDiscount || 0);
+    total = money(total + sub);
     itemsCount += c.cant;
     var esPeso = c.tipoVenta === 'PESO' || c.tipoVenta === 'VOLUMEN';
     var unidad = c.unidad || 'u';
@@ -459,8 +539,8 @@ function renderCart(skipPromotionRefresh) {
   cont.innerHTML = h || '<div class="loading" style="padding:20px;"><i class="fas fa-shopping-cart"></i>Carrito vacío</div>';
   if (countEl) countEl.textContent = Math.round(itemsCount * 100) / 100;
 
-  var promoDcto = promoApplied ? promoApplied.descuento : 0;
-  var neto = total - promoDcto;
+  var promoDcto = money(promoApplied ? promoApplied.descuento : 0);
+  var neto = money(total - promoDcto);
   if (neto < 0) neto = 0;
 
   $('cart-subtotal').textContent = fm(total);
@@ -550,6 +630,7 @@ function loadClientes() {
 }
 
 function showClientSelector() {
+  if (!hasPermission('pos', 'asociar_cliente')) { toast('No tienes permiso para asociar clientes', 'err'); return; }
   var searchId = 'cl-s-' + Date.now();
   showModal(`
     <h3 style="font-size:18px;font-weight:700;margin-bottom:12px;"><i class="fas fa-user" style="color:#4f46e5;"></i> Seleccionar Cliente</h3>
@@ -657,10 +738,11 @@ function paymentMethodLabel(method) {
 }
 
 function showPayment(promotionsReady) {
+  if (!hasPermission('pos', 'realizar_venta')) { toast('No tienes permiso para cobrar', 'err'); return; }
   if (cart.length === 0) { toast('Carrito vacío', 'err'); return; }
   if (!cajaState || cajaState.estado !== 'ABIERTA') { toast('Debe abrir caja primero', 'err'); return; }
   if (!promotionsReady) { evaluatePromotions(false, function(){ showPayment(true); }); return; }
-  var total = parseInt($('cart-total-val').textContent) || 0;
+  var total = money($('cart-total-val').textContent);
   if (total <= 0) { toast('Total inválido', 'err'); return; }
 
   var m = showModal(`
@@ -703,7 +785,7 @@ function addPayment(metodo) {
   // Prompt for amount
   var m2 = showModal(`
     <h3 style="font-size:18px;font-weight:700;margin-bottom:12px;"><i class="fas fa-${metodo === 'EFECTIVO' ? 'money-bill-wave' : 'credit-card'}"></i> ${paymentMethodLabel(metodo)}</h3>
-    <div class="fld"><label>Monto</label><input id="pm-monto" type="number" min="1" value="${resto}"></div>
+    <div class="fld"><label>Monto</label><input id="pm-monto" type="number" min="1" step="1" value="${resto}"></div>
     <div class="fld"><label>Referencia / Aut. (opcional)</label><input id="pm-ref"></div>
     <div class="mcb">
       <button class="btn-g" onclick="closeModal()">Cancelar</button>
@@ -714,15 +796,15 @@ function addPayment(metodo) {
 }
 
 function confirmPaymentMethod(metodo) {
-  var monto = parseInt($('pm-monto').value) || 0;
-  var restante = window._payTarget - window._payTotal;
+  var monto = money($('pm-monto').value);
+  var restante = money(window._payTarget - window._payTotal);
   if (metodo !== 'EFECTIVO' && monto > restante) {
     toast('Solo el efectivo puede superar el saldo y generar vuelto', 'err'); return;
   }
   if (monto <= 0) { toast('Monto inválido', 'err'); return; }
   var ref = $('pm-ref').value || '';
   window._payments.push({ metodo: metodo, monto: monto, referencia: ref });
-  window._payTotal += monto;
+  window._payTotal = money(window._payTotal + monto);
   closeModal();
   updatePaymentUI();
 }
@@ -737,7 +819,7 @@ function updatePaymentUI() {
   if (list) list.innerHTML = ph;
   var totalEl = $('pay-total');
   if (totalEl) totalEl.textContent = fm(window._payTotal || 0);
-  var resto = (window._payTarget || 0) - (window._payTotal || 0);
+  var resto = money((window._payTarget || 0) - (window._payTotal || 0));
   var restEl = $('pay-restante');
   if (restEl) {
     restEl.textContent = resto > 0 ? fm(resto) : '$0';
@@ -746,7 +828,7 @@ function updatePaymentUI() {
   var btn = $('pay-confirm-btn');
   if (btn) {
     btn.disabled = window._payTotal < window._payTarget;
-    var cambio = window._payTotal - window._payTarget;
+    var cambio = money(window._payTotal - window._payTarget);
     btn.innerHTML = '<i class="fas fa-check-circle"></i> ' + (cambio > 0 ? 'Cobrar ' + fm(window._payTarget) + ' (Cambio: ' + fm(cambio) + ')' : 'Cobrar ' + fm(window._payTotal));
   }
 }
@@ -781,6 +863,7 @@ function confirmPayment() {
     clearCart();
     loadDashboard();
     loadCajaState();
+    loadProducts();
   }, function () {
     _paymentSubmitting = false;
     updatePaymentUI();
@@ -1103,27 +1186,34 @@ function anularVenta(id) {
    ═══════════════════════════════════════════ */
 function showDevolucion(idPedido) {
   apiGet({ accion: 'venta_detalle', id: idPedido }, function (v) {
+    _returnRequestKey = newSaleRequestKey();
+    _returnSubmitting = false;
     var items = (v.items || []).map(function (it, i) {
       var available = parseFloat(it.cantidad_disponible_devolucion || 0);
       if (available <= 0) return '';
-      var step = String(it.cantidad_pedida).indexOf('.') >= 0 ? '0.001' : '1';
+      var step = (it.tipo_venta === 'PESO' || it.tipo_venta === 'VOLUMEN') ? '0.001' : '1';
       return '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;"><input type="checkbox" class="dev-check" data-detail="' + it.id_detalle_pedido + '" data-id="' + it.id_producto + '"> ' + esc(it.nombre_producto) + ' <input type="number" class="dev-qty" min="' + step + '" max="' + available + '" step="' + step + '" value="' + available + '" style="width:80px;"> disponibles ' + available + ' (' + fm(it.precio_total) + ')</label>';
     }).join('');
+    var fiscalNotice = String(v.tipo_documento || '').toUpperCase() === 'FACTURA'
+      ? '<p style="font-size:12px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px;margin-bottom:8px;">Esta venta requiere una nota de crédito activa por los mismos productos, cantidades y monto. Emítala en Facturas antes de recibir la mercadería.</p>'
+      : '';
 
     showModal(`
       <h3 style="font-size:18px;font-weight:700;margin-bottom:12px;"><i class="fas fa-undo" style="color:#4f46e5;"></i> Devolución - Venta #${idPedido}</h3>
       <p style="font-size:12px;color:#64748b;margin-bottom:8px;">El sistema calculará si la devolución es parcial o total y el monto exacto.</p>
+      ${fiscalNotice}
       <div class="fld" style="margin:8px 0;">${items}</div>
       <div class="fld"><label>Motivo</label><textarea id="dev-motivo" rows="2"></textarea></div>
       <div class="mcb">
         <button class="btn-g" onclick="closeModal()">Cancelar</button>
-        <button class="btn-p" onclick="confirmDevolucion(${idPedido})"><i class="fas fa-undo"></i> Procesar Devolución</button>
+        <button class="btn-p" id="return-confirm-btn" onclick="confirmDevolucion(${idPedido})"><i class="fas fa-undo"></i> Procesar Devolución</button>
       </div>
     `);
   });
 }
 
 function confirmDevolucion(idPedido) {
+  if (_returnSubmitting) return;
   var checks = document.querySelectorAll('.dev-check:checked');
   if (!checks.length) { toast('Seleccione productos a devolver', 'err'); return; }
   var items = [];
@@ -1137,11 +1227,19 @@ function confirmDevolucion(idPedido) {
   var motivo = $('dev-motivo').value;
   if (!motivo || motivo.trim().length < 3) { toast('Indique el motivo de la devolución', 'err'); return; }
 
-  apiPost({ accion: 'devolucion_crear', id_pedido: idPedido, items: items, motivo: motivo }, function (d) {
+  _returnSubmitting = true;
+  var button = $('return-confirm-btn');
+  if (button) { button.disabled = true; button.textContent = 'Procesando...'; }
+  apiPost({ accion: 'devolucion_crear', id_pedido: idPedido, items: items, motivo: motivo, idempotency_key: _returnRequestKey }, function (d) {
+    _returnSubmitting = false;
+    _returnRequestKey = null;
     toast('Devolución procesada: ' + fm(d.monto_devuelto));
     closeModal();
     loadDashboard();
     loadCajaState();
+  }, function () {
+    _returnSubmitting = false;
+    if (button) { button.disabled = false; button.innerHTML = '<i class="fas fa-undo"></i> Procesar Devolución'; }
   });
 }
 
@@ -1153,6 +1251,7 @@ function loadPromociones() {
 }
 
 function showPromoManager() {
+  if (!hasPermission('pos', 'crear_promocion')) { toast('No tienes permiso para gestionar promociones', 'err'); return; }
   var promos = window._promos || [];
   var lista = promos.map(function (p) {
     var bc = p.activo ? 'badge-ACTIVO' : 'badge-INACTIVO';
@@ -1175,8 +1274,8 @@ function showNewPromo() {
       <div class="fld"><label>Código</label><input id="np-codigo" placeholder="Auto-gen si se deja vacío"></div>
       <div class="fld"><label>Tipo *</label><select id="np-tipo"><option value="2X1">2x1</option><option value="3X2">3x2</option><option value="CANTIDAD">NxM configurable</option><option value="DESCUENTO_PCT">% por producto</option><option value="DESCUENTO_MONTO">Monto fijo por producto</option><option value="PRECIO_ESPECIAL">Precio especial</option><option value="COMPRA_X_DESCUENTO_Y">Compra X y descuenta Y</option><option value="COMBO">Combo</option></select></div>
       <div class="fld"><label>Valor del beneficio</label><input id="np-valor" type="number" min="0" step="0.01"></div>
-      <div class="fld"><label>Monto Mínimo</label><input id="np-mm" type="number" min="0"></div>
-      <div class="fld"><label>Cant. Mínima</label><input id="np-mc" type="number" min="0"></div>
+      <div class="fld"><label>Monto Mínimo</label><input id="np-mm" type="number" min="0" step="1"></div>
+      <div class="fld"><label>Cant. Mínima</label><input id="np-mc" type="number" min="0" step="0.001"></div>
       <div class="fld"><label>Cantidad pagada (NxM)</label><input id="np-cp" type="number" min="0" step="0.001"></div>
       <div class="fld"><label>Cantidad beneficiada</label><input id="np-cb" type="number" min="0" step="0.001"></div>
       <div class="fld"><label>Fecha Inicio</label><input id="np-fi" type="date"></div>
@@ -1204,13 +1303,13 @@ function showNewPromo() {
 function savePromo() {
   var nombre = $('np-nombre').value;
   var tipo = $('np-tipo').value;
-  var valor = parseInt($('np-valor').value) || 0;
+  var valor = money($('np-valor').value);
   if (!nombre || !tipo) { toast('Nombre y tipo requeridos', 'err'); return; }
   var splitCodes=function(value){return value.split(/[\s,;]+/).map(function(v){return v.trim().toUpperCase();}).filter(Boolean);};
   apiPost({
     accion: 'promocion_crear',
     nombre: nombre, codigo: $('np-codigo').value, tipo: tipo, valor: valor,
-    monto_minimo: parseInt($('np-mm').value) || 0, cantidad_minima: parseInt($('np-mc').value) || 0,
+    monto_minimo: money($('np-mm').value), cantidad_minima: parseFloat($('np-mc').value) || 0,
     cantidad_pagada: parseFloat($('np-cp').value) || null, cantidad_beneficiada: parseFloat($('np-cb').value) || null,
     fecha_inicio: $('np-fi').value, fecha_fin: $('np-ff').value,
     hora_inicio: $('np-hi').value, hora_fin: $('np-hf').value,
@@ -1243,8 +1342,9 @@ function elimPromo(id) {
    COTIZACIONES
    ═══════════════════════════════════════════ */
 function showCotizacion() {
+  if (!hasPermission('pos', 'realizar_venta')) { toast('No tienes permiso para crear cotizaciones', 'err'); return; }
   if (cart.length === 0) { toast('Carrito vacío', 'err'); return; }
-  var total = parseInt($('cart-total-val').textContent) || 0;
+  var total = money($('cart-total-val').textContent);
   showModal(`
     <h3 style="font-size:18px;font-weight:700;margin-bottom:16px;"><i class="fas fa-file-invoice" style="color:#4f46e5;"></i> Nueva Cotización</h3>
     <div class="gr2">
@@ -1278,6 +1378,7 @@ function saveCotizacion() {
 }
 
 function showCotizacionesList() {
+  if (!hasPermission('pos', 'realizar_venta')) { toast('No tienes permiso para gestionar cotizaciones', 'err'); return; }
   apiGet({ accion: 'cotizaciones' }, function (d) {
     var quotes = d.cotizaciones || d || [];
     window._cotizaciones = quotes;
@@ -1301,7 +1402,7 @@ function convertirCot(id) {
     var it=quote.items[j],qty=parseFloat(it.cantidad)||0,stock=parseFloat(it.stock_actual)||0;
     if (!it.id_producto || !Number(it.producto_activo)) { toast('La cotización contiene un producto inactivo', 'err'); return; }
     if (qty<=0 || stock<qty) { toast('Stock insuficiente para ' + esc(it.producto||'producto'), 'err'); return; }
-    nextCart.push({id:parseInt(it.id_producto),name:it.producto||'Producto',price:parseInt(it.precio_unitario)||0,
+    nextCart.push({id:parseInt(it.id_producto),name:it.producto||'Producto',price:money(it.precio_unitario),
       sku:it.sku||'',cant:qty,stock:stock,tipoVenta:it.tipo_venta||'UNIDAD',unidad:it.unidad_abrev||'u'});
   }
   if (!nextCart.length) { toast('Cotización sin productos', 'err'); return; }

@@ -37,55 +37,6 @@ async function validateLogin() {
   }
 }
 
-async function createAccount() {
-  var nombre = document.getElementById('new-username').value.trim();
-  var correo = document.getElementById('e-mail').value.trim();
-  var password = document.getElementById('new-password').value;
-  var confirmPassword = document.getElementById('confirm-password').value;
-  var errorEl = document.getElementById('account-error');
-
-  if (!nombre || !correo || !password || !confirmPassword) {
-    showError(errorEl, 'Complete todos los campos');
-    return;
-  }
-
-  if (password !== confirmPassword) {
-    showError(errorEl, 'Las contraseñas no coinciden');
-    return;
-  }
-
-  if (password.length < 10 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password)) {
-    showError(errorEl, 'Use al menos 10 caracteres, una mayúscula, una minúscula y un número');
-    return;
-  }
-
-  hideError(errorEl);
-
-  var formData = new URLSearchParams();
-  formData.append('new-username', nombre);
-  formData.append('e-mail', correo);
-  formData.append('new-password', password);
-  formData.append('confirm-password', confirmPassword);
-
-  try {
-    var response = await fetch('assets/api/auth.php?accion=registrar', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: formData.toString()
-    });
-    var data = await safeJson(response);
-
-    if (!response.ok || !data.ok) {
-      showError(errorEl, data.mensaje || 'No se pudo crear la cuenta.');
-      return;
-    }
-
-    showAccountSuccess();
-  } catch (error) {
-    showError(errorEl, 'Error de conexión con el servidor.');
-  }
-}
-
 async function safeJson(response) {
   var text = await response.text();
   try {
@@ -109,36 +60,4 @@ function hideError(el) {
 function showLoader() {
   var overlay = document.getElementById('loader-overlay');
   if (overlay) overlay.style.display = 'flex';
-}
-
-function showAccountSuccess() {
-  var popup = document.getElementById('create-account-popup');
-  if (popup) popup.style.display = 'none';
-
-  var successEl = document.getElementById('account-success');
-  if (successEl) {
-    successEl.style.display = 'flex';
-    setTimeout(function() {
-      successEl.style.display = 'none';
-    }, 3000);
-  }
-
-  var username = document.getElementById('new-username');
-  var email = document.getElementById('e-mail');
-  var password = document.getElementById('new-password');
-  var confirm = document.getElementById('confirm-password');
-  if (username) username.value = '';
-  if (email) email.value = '';
-  if (password) password.value = '';
-  if (confirm) confirm.value = '';
-}
-
-function showCreateAccountPopup() {
-  var popup = document.getElementById('create-account-popup');
-  if (popup) popup.style.display = 'block';
-}
-
-function hideCreateAccountPopup() {
-  var popup = document.getElementById('create-account-popup');
-  if (popup) popup.style.display = 'none';
 }

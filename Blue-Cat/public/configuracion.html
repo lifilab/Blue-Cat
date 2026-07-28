@@ -85,7 +85,6 @@
         <li data-section="parametros" onclick="switchCfg('parametros')"><i class="fas fa-sliders-h"></i> Parámetros</li>
         <li data-section="planes" onclick="switchCfg('planes')"><i class="fas fa-layer-group"></i> Planes</li>
         <li data-section="suscripciones" onclick="switchCfg('suscripciones')"><i class="fas fa-id-card"></i> Suscripciones</li>
-        <li data-section="modulos" onclick="switchCfg('modulos')"><i class="fas fa-cubes"></i> Módulos</li>
         <li data-section="sesiones" onclick="switchCfg('sesiones')"><i class="fas fa-plug"></i> Sesiones</li>
         <li data-section="auditoria" onclick="switchCfg('auditoria')"><i class="fas fa-history"></i> Auditoría</li>
       </ul></div>
@@ -206,22 +205,14 @@
 
         <!-- PLANES -->
         <div id="cfg-planes" class="section-title">
-          <div class="card"><div class="card-header"><h2><i class="fas fa-layer-group"></i> Planes</h2><button class="btn btn-primary btn-sm" onclick="showCfgForm('plan')"><i class="fas fa-plus"></i> Nuevo</button></div>
+          <div class="card"><div class="card-header"><h2><i class="fas fa-layer-group"></i> Plan contratado</h2></div>
           <div class="card-body"><div class="table-container"><table><thead><tr><th>Nombre</th><th>Precio</th><th>Max Empresas</th><th>Max Sucursales</th><th>Max Usuarios</th><th>Estado</th></tr></thead><tbody id="t-planes"></tbody></table></div></div></div>
         </div>
 
         <!-- SUSCRIPCIONES -->
         <div id="cfg-suscripciones" class="section-title">
-          <div class="card"><div class="card-header"><h2><i class="fas fa-id-card"></i> Suscripciones</h2><button class="btn btn-primary btn-sm" onclick="showCfgForm('suscripcion')"><i class="fas fa-plus"></i> Nueva</button></div>
-          <div class="card-body"><div class="table-container"><table><thead><tr><th>Empresa</th><th>Plan</th><th>Inicio</th><th>Estado</th><th></th></tr></thead><tbody id="t-suscripciones"></tbody></table></div></div></div>
-        </div>
-
-        <!-- MÓDULOS -->
-        <div id="cfg-modulos" class="section-title">
-          <div class="card"><div class="card-header"><h2><i class="fas fa-cubes"></i> Módulos del Sistema</h2></div>
-          <div class="card-body"><p style="font-size:13px;color:#64748b;margin-bottom:12px;">Seleccione un plan para asignar módulos.</p>
-          <div class="toolbar"><select id="filter-plan-modulos" onchange="loadPlanModulos()"><option value="">Seleccionar plan...</option></select></div>
-          <div id="t-modulos-grid" class="perm-grid"></div></div></div>
+          <div class="card"><div class="card-header"><h2><i class="fas fa-id-card"></i> Estado de licencia</h2></div>
+          <div class="card-body"><div class="table-container"><table><thead><tr><th>Empresa</th><th>Plan</th><th>Inicio</th><th>Estado</th></tr></thead><tbody id="t-suscripciones"></tbody></table></div></div></div>
         </div>
 
         <!-- SESIONES -->
@@ -246,7 +237,7 @@
   <div id="cerrar-sesion-popup" class="popup"><div class="popup-content"><span class="close-btn" onclick="CloseSesionPopUp()">&times;</span><h2><i class="fas fa-sign-out-alt"></i> Cerrar Sesión</h2><p>¿Está seguro de que desea cerrar sesión?</p><button class="btn btn-danger" onclick="cerrarSesion()" style="width:100%;justify-content:center;">Cerrar Sesión</button></div></div>
 
   <script src="../assets/js/security.js?v=1"></script>
-  <script src="../assets/js/configuracion.js?v=3"></script>
+  <script src="../assets/js/configuracion.js?v=4"></script>
   <script src="../assets/js/login_pvt.js?v=5"></script>
   <script src="../assets/js/navbar.js?v=3"></script>
 </body>

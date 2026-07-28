@@ -78,14 +78,14 @@ try {
         $boxCode='CON-' . $suffix . '-' . bin2hex(random_bytes(2));
         $open = invoke(apiCommand($root, $envPath, $user, [
             'action' => 'caja_abrir', 'codigo' => $boxCode,
-            'nombre' => 'Caja ' . $suffix, 'monto_apertura' => 0,
+            'nombre' => 'Caja ' . $suffix, 'id_bodega' => $warehouse, 'monto_apertura' => 0,
         ]));
         expect(!empty($open['success']), "abre caja POS {$suffix}");
         $cashIds[$user] = (int) $open['caja']['id_caja'];
         $sessionIds[] = (int) $open['caja']['id_sesion'];
         if ($suffix==='A') {
             $occupied=invoke(apiCommand($root,$envPath,$userB,[
-                'action'=>'caja_abrir','codigo'=>$boxCode,'nombre'=>'Caja ocupada','monto_apertura'=>0
+                'action'=>'caja_abrir','codigo'=>$boxCode,'nombre'=>'Caja ocupada','id_bodega'=>$warehouse,'monto_apertura'=>0
             ]));
             expect(isset($occupied['error']),'otro cajero no puede abrir la misma caja física');
         }

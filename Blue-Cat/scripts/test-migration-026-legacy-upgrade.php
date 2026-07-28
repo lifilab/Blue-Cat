@@ -47,7 +47,7 @@ function legacyUpgradeRun(array $command, string $cwd): array
 
 $root = dirname(__DIR__);
 $env = legacyUpgradeOption('--env') ?? '.env.sprint1-test';
-$envPath = preg_match('~^(?:[A-Za-z]:[\\/]|/)~', $env) ? $env : $root . '/' . $env;
+$envPath = preg_match('~^(?:[A-Za-z]:[\\\\/]|/)~', $env) ? $env : $root . '/' . $env;
 if (!is_file($envPath)) {
     throw new RuntimeException("Falta el archivo de entorno {$envPath}.");
 }

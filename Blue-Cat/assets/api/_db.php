@@ -122,6 +122,61 @@ function getJsonInput(): ?ArrayObject {
 // ── Permission Checker ───────────────────────────────────────────────────────
 
 $_permisoCache = [];
+$_moduleEntitlementCache = [];
+
+function hasModuleEntitlement(string $module): bool {
+    global $_moduleEntitlementCache;
+    $uid = getSessionUserId();
+    if ($uid === 0) return false;
+
+    // Las suites de dominio crean tenants mínimos sin instalar una licencia.
+    // Las pruebas específicas de licenciamiento habilitan el control de forma
+    // explícita para cubrir la ruta real.
+    if (getenv('APP_ENV') === 'test' && getenv('BLUECAT_ENFORCE_ENTITLEMENTS') !== '1') {
+        return true;
+    }
+
+    $module = strtolower(trim($module));
+    if ($module === '') return false;
+    $key = "{$uid}:{$module}";
+    if (array_key_exists($key, $_moduleEntitlementCache)) {
+        return $_moduleEntitlementCache[$key];
+    }
+
+    $conn = getDB();
+    $sql = "SELECT 1
+        FROM usuario actor
+        JOIN empresa e ON e.id_cuenta=actor.id_cuenta AND e.activo=1
+        JOIN suscripcion s ON s.id_empresa=e.id_empresa
+          AND s.estado='activa'
+          AND (s.fecha_fin IS NULL OR s.fecha_fin>=CURDATE())
+        JOIN plan pplan ON pplan.id_plan=s.id_plan AND pplan.activo=1
+        JOIN plan_modulo pm ON pm.id_plan=pplan.id_plan
+        JOIN modulo m ON m.id_modulo=pm.id_modulo AND m.activo=1
+        WHERE actor.id_user=? AND actor.activo=1 AND m.codigo=?
+        LIMIT 1";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param('is', $uid, $module);
+    $stmt->execute();
+    $granted = (bool)$stmt->get_result()->fetch_row();
+    $stmt->close();
+    $_moduleEntitlementCache[$key] = $granted;
+    if (!$granted) {
+        logAccess($uid, "licencia:{$module}", 'DENEGADO', "Módulo '$module' fuera de la licencia activa");
+    }
+    return $granted;
+}
+
+function requireModuleEntitlement(string $module): void {
+    requireUser();
+    if (!hasModuleEntitlement($module)) {
+        json([
+            'error'=>true,
+            'code'=>'MODULE_NOT_LICENSED',
+            'message'=>"El módulo {$module} no está incluido en la licencia activa."
+        ], 403);
+    }
+}
 
 function verificarPermiso(string $modulo, string $accion): bool {
     global $_permisoCache;
@@ -223,7 +278,9 @@ function getDefaultBodega(mysqli $conn): int {
 }
 
 function sincronizarCantidadProducto(mysqli $conn, int $id_producto): void {
-    $stmt = $conn->prepare("SELECT COALESCE(SUM(disponible),0) AS total FROM stock WHERE id_producto=?");
+    // El llamador mantiene bloqueado el producto; este locking read evita que
+    // un snapshot REPEATABLE READ deje obsoleto el espejo producto.cantidad.
+    $stmt = $conn->prepare("SELECT disponible FROM stock WHERE id_producto=? ORDER BY id_stock FOR UPDATE");
     if (!$stmt) {
         throw new RuntimeException('No se pudo preparar la sincronizacion de stock: ' . $conn->error);
     }
@@ -240,8 +297,8 @@ function sincronizarCantidadProducto(mysqli $conn, int $id_producto): void {
         throw new RuntimeException('No se pudo leer la cantidad del producto: ' . $error);
     }
     $total = 0.0;
-    if ($r && ($row = $r->fetch_assoc())) {
-        $total = (float) ($row['total'] ?? 0);
+    while ($r && ($row = $r->fetch_assoc())) {
+        $total = round($total + (float)($row['disponible'] ?? 0), 3);
     }
     $stmt->close();
 
@@ -280,7 +337,7 @@ function normalizarCantidadDecimal(float $cantidad, bool $permitirCero = false):
     return $normalizada;
 }
 
-function actualizarStock(mysqli $conn, int $id_producto, int $id_bodega, string $campo, float $delta): int {
+function actualizarStock(mysqli $conn, int $id_producto, int $id_bodega, string $campo, float $delta, bool $respetarCompromisos = false, ?array &$asignaciones = null): int {
     $allowed = ['disponible', 'reservado', 'comprometido', 'en_transito', 'danado', 'bloqueado', 'devuelto', 'produccion'];
     if (!in_array($campo, $allowed, true)) {
         throw new InvalidArgumentException('Campo de stock invalido');
@@ -299,42 +356,147 @@ function actualizarStock(mysqli $conn, int $id_producto, int $id_bodega, string 
     }
 
     $idCuenta = tenantContext()->accountId;
-    $scope = $conn->prepare("SELECT 1 FROM producto p JOIN bodega b ON b.id_bodega=? AND b.id_cuenta=p.id_cuenta WHERE p.id_producto=? AND p.id_cuenta=? LIMIT 1");
-    $scope->bind_param('iii', $id_bodega, $id_producto, $idCuenta);
+    // Todas las mutaciones de un producto se serializan antes de bloquear
+    // stock. Así dos bodegas no pueden sobrescribir su cantidad agregada.
+    $scope = $conn->prepare('SELECT id_producto FROM producto WHERE id_producto=? AND id_cuenta=? FOR UPDATE');
+    $scope->bind_param('ii', $id_producto, $idCuenta);
     $scope->execute();
     $allowedScope = (bool)$scope->get_result()->fetch_row();
     $scope->close();
-    if (!$allowedScope) throw new RuntimeException('Producto o bodega fuera del contexto de cuenta');
+    if (!$allowedScope) throw new RuntimeException('Producto fuera del contexto de cuenta');
+    $scope = $conn->prepare('SELECT id_bodega FROM bodega WHERE id_bodega=? AND id_cuenta=? LIMIT 1');
+    $scope->bind_param('ii', $id_bodega, $idCuenta);
+    $scope->execute();
+    $allowedScope = (bool)$scope->get_result()->fetch_row();
+    $scope->close();
+    if (!$allowedScope) throw new RuntimeException('Bodega fuera del contexto de cuenta');
 
     $campoSql = "`{$campo}`";
-    $stmt = $conn->prepare("UPDATE stock SET {$campoSql} = {$campoSql} + ? WHERE id_producto=? AND id_bodega=? AND {$campoSql} + ? >= 0 ORDER BY id_stock ASC LIMIT 1");
+    $stmt = $conn->prepare("SELECT id_stock,{$campoSql} AS cantidad,disponible AS disponible_total,reservado,comprometido,bloqueado FROM stock WHERE id_producto=? AND id_bodega=? ORDER BY id_ubicacion IS NULL DESC,id_stock ASC FOR UPDATE");
     if (!$stmt) {
-        throw new RuntimeException('No se pudo preparar la actualizacion de stock: ' . $conn->error);
+        throw new RuntimeException('No se pudo preparar el bloqueo de stock: ' . $conn->error);
     }
-    $stmt->bind_param('diid', $delta, $id_producto, $id_bodega, $delta);
+    $stmt->bind_param('ii', $id_producto, $id_bodega);
     $stmt->execute();
-    $affected = $stmt->affected_rows;
+    $result = $stmt->get_result();
+    $filas = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
     $stmt->close();
 
-    if ($affected === 0) {
-        $stmt = $conn->prepare("SELECT id_stock FROM stock WHERE id_producto=? AND id_bodega=? ORDER BY id_stock ASC LIMIT 1");
-        if (!$stmt) {
-            throw new RuntimeException('No se pudo verificar la existencia del stock: ' . $conn->error);
+    $affected = 0;
+    if ($delta < 0) {
+        $pendiente = -$delta;
+        $total = 0.0;
+        foreach ($filas as $fila) {
+            $actual = max(0.0, (float)($fila['cantidad'] ?? 0));
+            if ($respetarCompromisos && $campo === 'disponible') {
+                $protegidoFila = round(
+                    max(0.0, (float)$fila['reservado'])
+                    + max(0.0, (float)$fila['comprometido'])
+                    + max(0.0, (float)$fila['bloqueado']), 3);
+                $actual = max(0.0, round($actual - $protegidoFila, 3));
+            }
+            $total = round($total + $actual, 3);
         }
-        $stmt->bind_param('ii', $id_producto, $id_bodega);
-        $stmt->execute();
-        $r = $stmt->get_result();
-        $existe = $r && $r->num_rows > 0;
-        $stmt->close();
-
-        if ($existe) {
+        if ($total + 0.000001 < $pendiente) {
             throw new RuntimeException('Stock insuficiente para completar la operacion');
         }
 
-        if ($delta < 0) {
-            throw new RuntimeException('No existe stock para descontar');
+        foreach ($filas as $fila) {
+            if ($pendiente <= 0.000001) break;
+            $actual = max(0.0, (float)($fila['cantidad'] ?? 0));
+            $protegidoFila = 0.0;
+            if ($respetarCompromisos && $campo === 'disponible') {
+                $protegidoFila = round(
+                    max(0.0, (float)$fila['reservado'])
+                    + max(0.0, (float)$fila['comprometido'])
+                    + max(0.0, (float)$fila['bloqueado']), 3);
+                $actual = max(0.0, round($actual - $protegidoFila, 3));
+            }
+            if ($actual <= 0.000001) continue;
+            $descuento = round(min($actual, $pendiente), 3);
+            $idStock = (int)$fila['id_stock'];
+            $protectRow = $respetarCompromisos && $campo === 'disponible';
+            if ($protectRow) {
+                $stmt = $conn->prepare("UPDATE stock
+                    SET {$campoSql}={$campoSql}-?
+                    WHERE id_stock=? AND {$campoSql}+0.000001>=?
+                      AND ({$campoSql}-?)+0.000001>=(reservado+comprometido+bloqueado)");
+            } else {
+                $stmt = $conn->prepare("UPDATE stock SET {$campoSql}={$campoSql}-? WHERE id_stock=? AND {$campoSql}+0.000001>=?");
+            }
+            if (!$stmt) throw new RuntimeException('No se pudo preparar el descuento de stock: ' . $conn->error);
+            if ($protectRow) {
+                $stmt->bind_param('didd', $descuento, $idStock, $descuento, $descuento);
+            } else {
+                $stmt->bind_param('did', $descuento, $idStock, $descuento);
+            }
+            $stmt->execute();
+            $updated = $stmt->affected_rows;
+            $stmt->close();
+            if ($updated !== 1) throw new RuntimeException('El stock cambio durante la operacion');
+            $asignaciones ??= [];
+            $asignaciones[] = ['id_stock'=>$idStock,'cantidad'=>$descuento];
+            $pendiente = round($pendiente - $descuento, 3);
+            $affected++;
         }
-
+        if ($pendiente > 0.000001) throw new RuntimeException('No se pudo distribuir completamente el descuento de stock');
+    } elseif ($filas && in_array($campo, ['reservado','comprometido','bloqueado'], true)) {
+        $pendiente = $delta;
+        $capacidadTotal = 0.0;
+        foreach ($filas as $fila) {
+            $capacidad = round(
+                max(0.0, (float)$fila['disponible_total'])
+                - max(0.0, (float)$fila['reservado'])
+                - max(0.0, (float)$fila['comprometido'])
+                - max(0.0, (float)$fila['bloqueado']),
+                3
+            );
+            $capacidadTotal = round($capacidadTotal + max(0.0, $capacidad), 3);
+        }
+        if ($capacidadTotal + 0.000001 < $pendiente) {
+            throw new RuntimeException('Stock libre insuficiente para completar la reserva');
+        }
+        foreach ($filas as $fila) {
+            if ($pendiente <= 0.000001) break;
+            $capacidad = round(
+                max(0.0, (float)$fila['disponible_total'])
+                - max(0.0, (float)$fila['reservado'])
+                - max(0.0, (float)$fila['comprometido'])
+                - max(0.0, (float)$fila['bloqueado']),
+                3
+            );
+            if ($capacidad <= 0.000001) continue;
+            $incremento = round(min($capacidad, $pendiente), 3);
+            $idStock = (int)$fila['id_stock'];
+            $stmt = $conn->prepare("UPDATE stock
+                SET {$campoSql}={$campoSql}+?
+                WHERE id_stock=?
+                  AND disponible+0.000001>=reservado+comprometido+bloqueado+?");
+            if (!$stmt) throw new RuntimeException('No se pudo preparar la reserva de stock: ' . $conn->error);
+            $stmt->bind_param('did', $incremento, $idStock, $incremento);
+            $stmt->execute();
+            $updated = $stmt->affected_rows;
+            $stmt->close();
+            if ($updated !== 1) throw new RuntimeException('El stock cambió durante la reserva');
+            $asignaciones ??= [];
+            $asignaciones[] = ['id_stock'=>$idStock,'cantidad'=>$incremento];
+            $pendiente = round($pendiente - $incremento, 3);
+            $affected++;
+        }
+        if ($pendiente > 0.000001) {
+            throw new RuntimeException('No se pudo distribuir completamente la reserva de stock');
+        }
+    } elseif ($filas) {
+        $idStock = (int)$filas[0]['id_stock'];
+        $stmt = $conn->prepare("UPDATE stock SET {$campoSql}={$campoSql}+? WHERE id_stock=?");
+        if (!$stmt) throw new RuntimeException('No se pudo preparar el incremento de stock: ' . $conn->error);
+        $stmt->bind_param('di', $delta, $idStock);
+        $stmt->execute();
+        $affected = $stmt->affected_rows;
+        $stmt->close();
+        if ($affected !== 1) throw new RuntimeException('No se pudo incrementar el stock');
+    } else {
+        if ($delta < 0) throw new RuntimeException('No existe stock para descontar');
         $stmt = $conn->prepare("INSERT INTO stock (id_producto,id_bodega,{$campoSql}) VALUES (?,?,?)");
         if (!$stmt) {
             throw new RuntimeException('No se pudo preparar el alta de stock: ' . $conn->error);
@@ -351,7 +513,9 @@ function actualizarStock(mysqli $conn, int $id_producto, int $id_bodega, string 
 
 function descontarStock(mysqli $conn, int $id_producto, int $id_bodega, float $cantidad): int {
     $cantidad = normalizarCantidadDecimal($cantidad);
-    return actualizarStock($conn, $id_producto, $id_bodega, 'disponible', -$cantidad);
+    // Una venta solo puede consumir unidades realmente libres; reservas,
+    // transferencias pendientes y bloqueos permanecen protegidos.
+    return actualizarStock($conn, $id_producto, $id_bodega, 'disponible', -$cantidad, true);
 }
 
 function reponerStock(mysqli $conn, int $id_producto, int $id_bodega, float $cantidad): int {

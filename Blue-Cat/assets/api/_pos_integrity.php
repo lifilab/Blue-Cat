@@ -1,5 +1,20 @@
 <?php
 
+function posRutValido(?string $rut): bool {
+    $normalizado = strtoupper(preg_replace('/[^0-9K]/i', '', (string)$rut) ?? '');
+    if (!preg_match('/^(\d{7,8})([0-9K])$/', $normalizado, $partes)) return false;
+    $cuerpo = $partes[1];
+    $suma = 0;
+    $multiplicador = 2;
+    for ($i = strlen($cuerpo) - 1; $i >= 0; $i--) {
+        $suma += ((int)$cuerpo[$i]) * $multiplicador;
+        $multiplicador = $multiplicador === 7 ? 2 : $multiplicador + 1;
+    }
+    $resultado = 11 - ($suma % 11);
+    $digito = $resultado === 11 ? '0' : ($resultado === 10 ? 'K' : (string)$resultado);
+    return hash_equals($digito, $partes[2]);
+}
+
 function posCanonicalPaymentMethod($value): string {
     $method = strtoupper(trim((string) $value));
     $method = strtr($method, [

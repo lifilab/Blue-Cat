@@ -62,7 +62,7 @@ function expectDecimalContract(mysqli $db, string $table, string $column): void 
 
 $root = dirname(__DIR__);
 $env = argValue('--env') ?? '.env.sprint1-test';
-$envPath = preg_match('~^(?:[A-Za-z]:[\\/]|/)~', $env) ? $env : $root . '/' . $env;
+$envPath = preg_match('~^(?:[A-Za-z]:[\\\\/]|/)~', $env) ? $env : $root . '/' . $env;
 putenv('BLUECAT_ENV_FILE=' . $envPath);
 require_once $root . '/assets/api/_db.php';
 if (getenv('APP_ENV') !== 'test' || DB_NAME === 'erp') {
@@ -138,9 +138,40 @@ try {
         'action' => 'caja_abrir',
         'codigo' => $cashCode,
         'nombre' => 'Caja decimal',
+        'id_bodega' => $warehouse,
         'monto_apertura' => 5000,
     ]);
     expect(!empty($open['success']), 'abre una caja para el flujo decimal');
+    expect((int)($open['caja']['id_bodega'] ?? 0) === $warehouse, 'la caja queda vinculada a su bodega de venta');
+    $excessiveWithdrawal = invokeApi($root, $envPath, $user, [
+        'action'=>'caja_movimiento','tipo'=>'EGRESO','concepto'=>'Retiro excesivo de prueba','monto'=>6000,'metodo'=>'EFECTIVO',
+    ]);
+    expect(isset($excessiveWithdrawal['error']), 'rechaza un retiro mayor al efectivo disponible');
+    expect((int)scalar($db, "SELECT monto_actual FROM pos_caja WHERE id_caja=".(int)$open['caja']['id_caja']) === 5000, 'el retiro rechazado no altera la caja');
+
+    $db->query("UPDATE stock SET comprometido=9.000 WHERE id_producto={$weightProduct} AND id_bodega={$warehouse}");
+    $saleAgainstCommitted = invokeApi($root, $envPath, $user, [
+        'action'=>'venta_crear',
+        'items'=>[['id_producto'=>$weightProduct,'cantidad'=>2.000,'precio_unitario'=>1000]],
+        'pagos'=>[['metodo'=>'EFECTIVO','monto'=>2000]],
+        'tipo_documento'=>'BOLETA',
+        'idempotency_key'=>'weight-committed-'.bin2hex(random_bytes(10)),
+    ]);
+    expect(isset($saleAgainstCommitted['error']), 'POS no vende unidades comprometidas por una transferencia');
+    expectQuantity(scalar($db, "SELECT disponible FROM stock WHERE id_producto={$weightProduct} AND id_bodega={$warehouse}"), '10.000', 'rechazar stock comprometido no altera existencias');
+    $db->query("UPDATE stock SET comprometido=0 WHERE id_producto={$weightProduct} AND id_bodega={$warehouse}");
+
+    $db->query("UPDATE bodega SET estado='INACTIVA' WHERE id_bodega={$warehouse}");
+    $saleInactiveWarehouse = invokeApi($root, $envPath, $user, [
+        'action'=>'venta_crear',
+        'items'=>[['id_producto'=>$weightProduct,'cantidad'=>0.500,'precio_unitario'=>1000]],
+        'pagos'=>[['metodo'=>'EFECTIVO','monto'=>500]],
+        'tipo_documento'=>'BOLETA',
+        'idempotency_key'=>'weight-inactive-'.bin2hex(random_bytes(10)),
+    ]);
+    expect(isset($saleInactiveWarehouse['error']), 'POS revalida que la bodega de la caja siga activa al cobrar');
+    expectQuantity(scalar($db, "SELECT disponible FROM stock WHERE id_producto={$weightProduct} AND id_bodega={$warehouse}"), '10.000', 'la bodega inactiva no mueve stock');
+    $db->query("UPDATE bodega SET estado='ACTIVA' WHERE id_bodega={$warehouse}");
 
     $saleKey = 'weight-sale-' . bin2hex(random_bytes(10));
     $salePayload = [
@@ -182,6 +213,7 @@ try {
         'id_pedido' => $orderA,
         'motivo' => 'Devolucion decimal parcial',
         'items' => [['id_detalle_pedido' => $detailA, 'id_producto' => $weightProduct, 'cantidad' => 0.500]],
+        'idempotency_key' => 'weight-return-partial-' . bin2hex(random_bytes(8)),
     ]);
     expect(!empty($partialReturn['success']) && ($partialReturn['tipo'] ?? '') === 'PARCIAL' && (int) $partialReturn['monto_devuelto'] === 500, 'devuelve 0.500 con monto calculado por servidor');
     $returnA = (int) $partialReturn['id_devolucion'];
@@ -204,6 +236,7 @@ try {
         'id_pedido' => $orderA,
         'motivo' => 'Completar devolucion decimal',
         'items' => [['id_detalle_pedido' => $detailA, 'id_producto' => $weightProduct, 'cantidad' => 0.775]],
+        'idempotency_key' => 'weight-return-complete-' . bin2hex(random_bytes(8)),
     ]);
     expect(!empty($finalReturn['success']) && ($finalReturn['tipo'] ?? '') === 'TOTAL' && (int) $finalReturn['monto_devuelto'] === 775, 'completa la devolucion sin perdida decimal');
     expectQuantity(scalar($db, "SELECT disponible FROM stock WHERE id_producto={$weightProduct} AND id_bodega={$warehouse}"), '10.000', 'las devoluciones restauran el stock inicial exacto');

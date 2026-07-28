@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/_db.php';
 $uid = requireUser();
+requireModuleEntitlement('crm');
 $conn = getDB();
 $method = $_SERVER['REQUEST_METHOD'];
 

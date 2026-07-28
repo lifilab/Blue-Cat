@@ -10,7 +10,7 @@ function supervisorTestArg(string $name): ?string {
 
 $root = dirname(__DIR__);
 $env = supervisorTestArg('--env') ?? '.env.sprint1-test';
-$envPath = preg_match('~^(?:[A-Za-z]:[\\/]|/)~', $env) ? $env : $root . '/' . $env;
+$envPath = preg_match('~^(?:[A-Za-z]:[\\\\/]|/)~', $env) ? $env : $root . '/' . $env;
 putenv('BLUECAT_ENV_FILE=' . $envPath);
 require_once $root . '/assets/api/_supervisor.php';
 if (getenv('APP_ENV') !== 'test' || DB_NAME === 'erp') throw new RuntimeException('Solo se permite ejecutar en APP_ENV=test.');

@@ -57,6 +57,10 @@ requiresText($ventasJs, "accion: 'venta_anular'", 'Ventas debe usar el endpoint 
 requiresText($ventasJs, "accion: 'devolucion_crear'", 'Ventas debe usar el endpoint canónico de devolución.', $errors);
 requiresText($ventasJs, 'solicitarMotivoCorreccion', 'Ventas debe solicitar un motivo real antes de corregir.', $errors);
 requiresText($ventasJs, 'motivo: motivo', 'Ventas debe enviar el motivo informado al backend.', $errors);
+requiresText($ventasJs, 'function exportXLSX()', 'Ventas debe exponer la exportación XLSX.', $errors);
+forbidsText($ventasJs, 'function exportCSV()', 'Ventas no debe conservar el exportador CSV obsoleto.', $errors);
+requiresText($ventasHtml, 'Exportar XLSX', 'Ventas debe rotular correctamente la exportación XLSX.', $errors);
+forbidsText($ventasHtml, 'Exportar CSV', 'Ventas no debe ofrecer CSV en la interfaz.', $errors);
 requiresText($cuadreJs, 'solicitarMotivoCorreccion', 'Cuadre debe solicitar un motivo real antes de corregir.', $errors);
 requiresText($cuadreJs, 'motivo:motivo', 'Cuadre debe enviar el motivo informado al backend.', $errors);
 
@@ -64,6 +68,8 @@ requiresText($ventasApi, "\$accion === 'editar' || \$accion === 'eliminar'", 'El
 requiresText($ventasApi, '409', 'El API de ventas debe responder conflicto para mutaciones heredadas.', $errors);
 requiresText($ventasApi, 'cantidad_disponible_devolucion', 'El listado debe informar la cantidad pendiente de devolución.', $errors);
 requiresText($ventasApi, 'SELECT dp.*', 'El listado debe incluir id_detalle_pedido en cada ítem.', $errors);
+requiresText($ventasApi, 'bluecatXlsxBuildWorkbook', 'El API de ventas debe generar un libro OOXML real.', $errors);
+requiresText($ventasApi, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'El API de ventas debe responder con MIME XLSX.', $errors);
 requiresText($posApi, "supervisorRequire('pos.anular_venta'", 'La anulación debe exigir la política de Supervisor.', $errors);
 requiresText($returnsApi, "supervisorRequire('pos.devolucion'", 'La devolución debe exigir la política de Supervisor.', $errors);
 requiresText($returnsApi, "'motivo'=>\$reason", 'La autorización de devolución debe quedar ligada al motivo.', $errors);

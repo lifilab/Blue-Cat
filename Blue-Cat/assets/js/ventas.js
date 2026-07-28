@@ -453,19 +453,24 @@ function solicitarDevolucionTotal(id) {
   var motivo = solicitarMotivoCorreccion('Motivo real de la devolución:');
   if (motivo === null) return;
   if (!confirm('¿Procesar la devolución total pendiente de la venta #' + id + '?\n\nLa operación requiere autorización y quedará auditada.')) return;
+  var returnKey = 'return-' + Date.now() + '-' +
+    ((window.crypto && window.crypto.randomUUID)
+      ? window.crypto.randomUUID()
+      : Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2));
   apiPosPost({
     accion: 'devolucion_crear',
     id_pedido: Number(id),
     tipo: 'TOTAL',
     motivo: motivo,
-    items: items
+    items: items,
+    idempotency_key: returnKey
   }, function (response) {
     toast('Devolución procesada: ' + fmt(response.monto_devuelto || 0), 'ok');
     loadVentas();
   });
 }
 
-function exportCSV() {
+function exportXLSX() {
   if (!_permisos.exportar) { toast('No tiene permiso para exportar', 'err'); return; }
   var desde = $('fecha-desde').value || '';
   var hasta = $('fecha-hasta').value || '';
@@ -484,7 +489,7 @@ function exportCSV() {
 
   var a = document.createElement('a');
   a.href = API_VENTAS + '?' + params;
-  a.download = 'ventas_' + _currentPeriodo + '_' + (new Date().toISOString().substring(0, 10)) + '.xls';
+  a.download = 'ventas_' + _currentPeriodo + '_' + (new Date().toISOString().substring(0, 10)) + '.xlsx';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

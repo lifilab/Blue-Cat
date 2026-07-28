@@ -49,7 +49,6 @@ function loadCfg(section) {
     case 'parametros': loadParametros(); break;
     case 'planes': loadPlanes(); break;
     case 'suscripciones': loadSuscripciones(); break;
-    case 'modulos': loadModulos(); break;
     case 'sesiones': loadSesiones(); break;
     case 'auditoria': loadAuditoria(); break;
   }
@@ -118,23 +117,6 @@ function showCfgForm(type) {
       '<div><label>Nombre *</label><input id="f-nombre" required></div><div><label>Código *</label><input id="f-codigo" required></div>' +
       '<div><label>Tasa (%)</label><input type="number" id="f-tasa" step="0.01" value="0"></div><div><label>Tipo</label><select id="f-tipo"><option>IVA</option><option>EXENTO</option><option>RETENCION</option></select></div>' +
     '</div><button class="btn btn-primary" style="width:100%;margin-top:8px;"><i class="fas fa-save"></i> Crear</button></form>';
-  } else if (type === 'plan') {
-    h = '<h3><i class="fas fa-layer-group"></i> Nuevo Plan</h3><form onsubmit="savePlan(event)"><div class="form-grid">' +
-      '<div><label>Nombre *</label><input id="f-nombre" required></div><div><label>Precio/mes</label><input type="number" id="f-precio" value="0"></div>' +
-      '<div><label>Max Empresas</label><input type="number" id="f-me" value="1"></div><div><label>Max Sucursales</label><input type="number" id="f-ms" value="1"></div>' +
-      '<div><label>Max Usuarios</label><input type="number" id="f-mu" value="5"></div>' +
-    '</div><button class="btn btn-primary" style="width:100%;margin-top:8px;"><i class="fas fa-save"></i> Crear</button></form>';
-  } else if (type === 'suscripcion') {
-    h = '<h3><i class="fas fa-id-card"></i> Nueva Suscripción</h3><form onsubmit="saveSuscripcion(event)"><div class="form-grid">' +
-      '<div><label>Empresa *</label><select id="f-empresa"></select></div><div><label>Plan *</label><select id="f-plan"></select></div>' +
-    '</div><button class="btn btn-primary" style="width:100%;margin-top:8px;"><i class="fas fa-save"></i> Crear</button></form>';
-    // Populate selects
-    apiCfg('empresas', {}, function(items) {
-      var s = document.getElementById('f-empresa'); s.innerHTML = items.map(function(e) { return '<option value="' + e.id_empresa + '">' + esc(e.razon_social) + '</option>'; }).join('');
-    });
-    apiCfg('planes', {}, function(items) {
-      var s = document.getElementById('f-plan'); s.innerHTML = items.map(function(p) { return '<option value="' + p.id_plan + '">' + esc(p.nombre) + '</option>'; }).join('');
-    });
   }
   document.getElementById('cfg-modal-body').innerHTML = h;
   document.getElementById('cfg-modal').style.display = 'block';
@@ -152,11 +134,6 @@ function saveMoneda(e) { e.preventDefault();
   apiCfg('moneda_crear', { codigo: q('f-codigo'), nombre: q('f-nombre'), simbolo: q('f-simbolo'), decimales: parseInt(q('f-dec')) || 0 }, function() { toast('Moneda creada'); closeCfgModal(); loadMonedas(); }); }
 function saveImpuesto(e) { e.preventDefault();
   apiCfg('impuesto_crear', { nombre: q('f-nombre'), codigo: q('f-codigo'), tasa: parseFloat(q('f-tasa')) || 0, tipo: q('f-tipo') }, function() { toast('Impuesto creado'); closeCfgModal(); loadImpuestos(); }); }
-function savePlan(e) { e.preventDefault();
-  apiCfg('plan_crear', { nombre: q('f-nombre'), precio: parseInt(q('f-precio'))||0, max_empresas: parseInt(q('f-me'))||1, max_sucursales: parseInt(q('f-ms'))||1, max_usuarios: parseInt(q('f-mu'))||5 }, function() { toast('Plan creado'); closeCfgModal(); loadPlanes(); }); }
-function saveSuscripcion(e) { e.preventDefault();
-  apiCfg('suscripcion_crear', { id_empresa: parseInt(q('f-empresa')), id_plan: parseInt(q('f-plan')) }, function() { toast('Suscripción creada'); closeCfgModal(); loadSuscripciones(); }); }
-
 function editEmpresa(id) {
   apiCfg('empresas', {}, function(items) {
     var e = items.find(function(x) { return x.id_empresa == id; }); if (!e) return;
@@ -555,47 +532,8 @@ function loadSuscripciones() {
   apiCfg('suscripciones', {}, function(items) {
     document.getElementById('t-suscripciones').innerHTML = items.map(function(s) {
       var badge = s.estado==='activa'?'badge-success':(s.estado==='suspendida'?'badge-danger':'badge-gray');
-      return '<tr><td>' + esc(s.empresa) + '</td><td>' + esc(s.plan_nombre) + '</td><td>' + (s.fecha_inicio||'') + '</td><td><span class="badge ' + badge + '">' + s.estado + '</span></td><td><button class="btn btn-outline btn-xs" onclick="editSuscripcion(' + s.id_suscripcion + ')"><i class="fas fa-edit"></i></button></td></tr>';
-    }).join('') || '<tr><td colspan="5"><div class="empty-state"><i class="fas fa-id-card"></i><p>Sin suscripciones</p></div></td></tr>';
-  });
-}
-
-function editSuscripcion(id) {
-  apiCfg('suscripciones', {}, function(items) {
-    var s = items.find(function(x) { return x.id_suscripcion == id; }); if (!s) return;
-    var h = '<h3><i class="fas fa-edit"></i> Editar Suscripción</h3><form onsubmit="saveSuscripcionEdit(event,' + id + ')"><div class="form-grid">' +
-      '<div><label>Estado</label><select id="f-estado"><option value="activa"' + (s.estado==='activa'?' selected':'') + '>Activa</option><option value="suspendida"' + (s.estado==='suspendida'?' selected':'') + '>Suspendida</option><option value="cancelada"' + (s.estado==='cancelada'?' selected':'') + '>Cancelada</option></select></div>' +
-    '</div><button class="btn btn-primary" style="width:100%;margin-top:8px;"><i class="fas fa-save"></i> Guardar</button></form>';
-    document.getElementById('cfg-modal-body').innerHTML = h;
-    document.getElementById('cfg-modal').style.display = 'block';
-  });
-}
-
-function saveSuscripcionEdit(e, id) { e.preventDefault();
-  apiCfg('suscripcion_editar', { id: id, estado: q('f-estado') }, function() { toast('Actualizado'); closeCfgModal(); loadSuscripciones(); }); }
-
-// ═══ MÓDULOS ═══
-function loadModulos() {
-  apiCfg('planes', {}, function(items) {
-    var sel = document.getElementById('filter-plan-modulos');
-    sel.innerHTML = '<option value="">Seleccionar plan...</option>';
-    items.forEach(function(p) { sel.innerHTML += '<option value="' + p.id_plan + '">' + esc(p.nombre) + '</option>'; });
-  });
-}
-
-function loadPlanModulos() {
-  var id_plan = document.getElementById('filter-plan-modulos').value;
-  if (!id_plan) return;
-  apiCfg('plan_modulos', { id_plan: parseInt(id_plan) }, function(items) {
-    document.getElementById('t-modulos-grid').innerHTML = items.map(function(m) {
-      return '<div class="perm-row' + (m.asignado ? ' active' : '') + '" onclick="togglePlanModulo(' + id_plan + ',' + m.id_modulo + ',this)"><div class="perm-check"></div><i class="fas ' + esc(m.icono||'fa-cube') + '" style="width:16px;text-align:center;"></i> ' + esc(m.nombre) + ' <span style="font-size:10px;color:#94a3b8;">' + esc(m.codigo) + '</span></div>';
-    }).join('');
-  });
-}
-
-function togglePlanModulo(id_plan, id_modulo, el) {
-  apiCfg('plan_modulo_toggle', { id_plan: id_plan, id_modulo: id_modulo }, function(r) {
-    if (r.estado === 'asignado') el.classList.add('active'); else el.classList.remove('active');
+      return '<tr><td>' + esc(s.empresa) + '</td><td>' + esc(s.plan_nombre) + '</td><td>' + (s.fecha_inicio||'') + '</td><td><span class="badge ' + badge + '">' + s.estado + '</span></td></tr>';
+    }).join('') || '<tr><td colspan="4"><div class="empty-state"><i class="fas fa-id-card"></i><p>Sin licencia activa</p></div></td></tr>';
   });
 }
 

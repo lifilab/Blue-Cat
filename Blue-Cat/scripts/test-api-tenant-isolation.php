@@ -73,11 +73,40 @@ try {
     $code='APIB'.bin2hex(random_bytes(2));$name='Cliente API B';$stmt->bind_param('iiss',$userB,$accountB,$code,$name);$stmt->execute();$clientB=(int)$db->insert_id;$stmt->close();$clientIds=[$clientA,$clientB];
 
     $cashCode='API-CAJA-'.bin2hex(random_bytes(3));
-    $open=invokeApi($root,$envPath,'pos.php',$userA,'POST',[],['action'=>'caja_abrir','codigo'=>$cashCode,'nombre'=>'Caja API','monto_apertura'=>10000]);
+    $missingWarehouse=invokeApi($root,$envPath,'pos.php',$userA,'POST',[],['action'=>'caja_abrir','codigo'=>$cashCode,'nombre'=>'Caja API','monto_apertura'=>10000]);
+    assertApi(isset($missingWarehouse['error']),'el backend exige una bodega explicita al abrir caja');
+    $open=invokeApi($root,$envPath,'pos.php',$userA,'POST',[],['action'=>'caja_abrir','codigo'=>$cashCode,'nombre'=>'Caja API','id_bodega'=>$warehouseA,'monto_apertura'=>10000]);
     assertApi(!empty($open['success'])&&!empty($open['caja']['id_caja']),'el POS abre caja con contexto tenant');
     $cashA=(int)$open['caja']['id_caja'];$sessionA=(int)$open['caja']['id_sesion'];$cashIds=[$cashA];$sessionIds=[$sessionA];
     $cashAccount=(int)$db->query("SELECT id_cuenta FROM pos_caja WHERE id_caja={$cashA}")->fetch_row()[0];
     assertApi($cashAccount===$accountA,'la caja abierta queda asociada a la cuenta correcta');
+
+    $ordersBeforeFiscalChecks=(int)$db->query("SELECT COUNT(*) FROM pedido WHERE id_cuenta={$accountA}")->fetch_row()[0];
+    $invalidFiscalType=invokeApi($root,$envPath,'pos.php',$userA,'POST',[],[
+        'action'=>'venta_crear','items'=>[['id_producto'=>$productA,'cantidad'=>1]],
+        'pagos'=>[['metodo'=>'EFECTIVO','monto'=>1000]],'tipo_documento'=>'NOTA_CREDITO','id_caja'=>$cashA,
+        'idempotency_key'=>'tenant-test-invalid-document-'.bin2hex(random_bytes(8))
+    ]);
+    assertApi(isset($invalidFiscalType['error']),'el POS no permite forjar notas fiscales desde venta_crear');
+    $invoiceWithoutRut=invokeApi($root,$envPath,'pos.php',$userA,'POST',[],[
+        'action'=>'venta_crear','items'=>[['id_producto'=>$productA,'cantidad'=>1]],
+        'pagos'=>[['metodo'=>'EFECTIVO','monto'=>1000]],'tipo_documento'=>'FACTURA','id_caja'=>$cashA,'id_cliente'=>$clientA,
+        'idempotency_key'=>'tenant-test-invoice-no-rut-'.bin2hex(random_bytes(8))
+    ]);
+    assertApi(isset($invoiceWithoutRut['error']),'una FACTURA exige un cliente activo con RUT chileno valido');
+    $db->query("UPDATE cliente SET rut='12.345.678-5' WHERE id_cliente={$clientA}");
+    $invoiceWithoutTaxConfig=invokeApi($root,$envPath,'pos.php',$userA,'POST',[],[
+        'action'=>'venta_crear','items'=>[['id_producto'=>$productA,'cantidad'=>1]],
+        'pagos'=>[['metodo'=>'EFECTIVO','monto'=>1000]],'tipo_documento'=>'FACTURA','id_caja'=>$cashA,'id_cliente'=>$clientA,
+        'idempotency_key'=>'tenant-test-invoice-no-tax-'.bin2hex(random_bytes(8))
+    ]);
+    assertApi(isset($invoiceWithoutTaxConfig['error']),'una FACTURA exige una configuracion tributaria activa y valida');
+    $db->query("UPDATE cliente SET rut=NULL WHERE id_cliente={$clientA}");
+    assertApi(
+        (int)$db->query("SELECT COUNT(*) FROM pedido WHERE id_cuenta={$accountA}")->fetch_row()[0] === $ordersBeforeFiscalChecks
+        && abs((float)$db->query("SELECT disponible FROM stock WHERE id_producto={$productA} AND id_bodega={$warehouseA}")->fetch_row()[0]-10.0)<0.0001,
+        'los rechazos fiscales no crean ventas ni descuentan stock'
+    );
 
     $posClients=invokeApi($root,$envPath,'pos.php',$userA,'GET',['accion'=>'clientes']);
     $posClientIds=array_map(fn($row)=>(int)$row['id_cliente'],$posClients['clientes']??[]);
@@ -148,17 +177,20 @@ try {
     $detailA=(int)$db->query("SELECT id_detalle_pedido FROM detalle_pedido WHERE id_pedido={$orderA}")->fetch_row()[0];
     $partial=invokeApi($root,$envPath,'pos.php',$userA,'POST',[],[
         'action'=>'devolucion_crear','id_pedido'=>$orderA,'motivo'=>'Prueba parcial',
-        'items'=>[['id_detalle_pedido'=>$detailA,'id_producto'=>$productA,'cantidad'=>1]]
+        'items'=>[['id_detalle_pedido'=>$detailA,'id_producto'=>$productA,'cantidad'=>1]],
+        'idempotency_key'=>'tenant-test-return-partial-'.bin2hex(random_bytes(8))
     ]);
     assertApi(!empty($partial['success'])&&($partial['tipo']??'')==='PARCIAL'&&(int)$partial['monto_devuelto']===1000,'la primera devolución parcial usa monto calculado por servidor');
     $partial2=invokeApi($root,$envPath,'pos.php',$userA,'POST',[],[
         'action'=>'devolucion_crear','id_pedido'=>$orderA,'motivo'=>'Completar devolución',
-        'items'=>[['id_detalle_pedido'=>$detailA,'id_producto'=>$productA,'cantidad'=>1]]
+        'items'=>[['id_detalle_pedido'=>$detailA,'id_producto'=>$productA,'cantidad'=>1]],
+        'idempotency_key'=>'tenant-test-return-complete-'.bin2hex(random_bytes(8))
     ]);
     assertApi(!empty($partial2['success'])&&($partial2['tipo']??'')==='TOTAL','una segunda devolución completa el pedido sin exceder cantidades');
     $duplicateReturn=invokeApi($root,$envPath,'pos.php',$userA,'POST',[],[
         'action'=>'devolucion_crear','id_pedido'=>$orderA,'motivo'=>'Intento duplicado',
-        'items'=>[['id_detalle_pedido'=>$detailA,'id_producto'=>$productA,'cantidad'=>1]]
+        'items'=>[['id_detalle_pedido'=>$detailA,'id_producto'=>$productA,'cantidad'=>1]],
+        'idempotency_key'=>'tenant-test-return-duplicate-'.bin2hex(random_bytes(8))
     ]);
     assertApi(isset($duplicateReturn['error']),'no se puede devolver nuevamente una venta totalmente devuelta');
     $cashAfterReturns=(int)$db->query("SELECT monto_actual FROM pos_caja WHERE id_caja={$cashA}")->fetch_row()[0];
@@ -177,7 +209,13 @@ try {
     $promoDocument=invokeApi($root,$envPath,'pos.php',$userA,'GET',['accion'=>'documento','id'=>$promoOrder]);
     assertApi((int)($promoDocument['documento']['descuento']??0)===1000&&count($promoDocument['documento']['promociones']??[])===1,'la boleta reimprimible conserva la promoción y su descuento');
     $promoDetailIds=[];$rPromoDetails=$db->query("SELECT id_detalle_pedido,id_producto,cantidad_pedida FROM detalle_pedido WHERE id_pedido={$promoOrder}");while($row=$rPromoDetails->fetch_assoc())$promoDetailIds[]=['id_detalle_pedido'=>(int)$row['id_detalle_pedido'],'id_producto'=>(int)$row['id_producto'],'cantidad'=>(float)$row['cantidad_pedida']];
-    $promoReturn=invokeApi($root,$envPath,'pos.php',$userA,'POST',[],['action'=>'devolucion_crear','id_pedido'=>$promoOrder,'motivo'=>'Revertir venta promocional de prueba','items'=>$promoDetailIds]);
+    $promoReturn=invokeApi($root,$envPath,'pos.php',$userA,'POST',[],[
+        'action'=>'devolucion_crear',
+        'id_pedido'=>$promoOrder,
+        'motivo'=>'Revertir venta promocional de prueba',
+        'items'=>$promoDetailIds,
+        'idempotency_key'=>'tenant-test-return-promo-'.bin2hex(random_bytes(8)),
+    ]);
     assertApi(!empty($promoReturn['success'])&&(int)$promoReturn['monto_devuelto']===1000,'la devolución usa el total final realmente cobrado en la promoción');
     $cashAfterPromoReturn=(int)$db->query("SELECT monto_actual FROM pos_caja WHERE id_caja={$cashA}")->fetch_row()[0];
     assertApi($cashAfterPromoReturn===10000,'la venta promocional y su devolución mantienen el cuadre de caja');
