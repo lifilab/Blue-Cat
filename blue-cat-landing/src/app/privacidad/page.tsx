@@ -1,0 +1,4 @@
+import type { Metadata } from "next";
+import { LegalPage } from "@/components/legal/legal-page";
+export const metadata:Metadata={title:"Privacidad",robots:{index:false,follow:true}};
+export default function PrivacyPage(){return <LegalPage title="Privacidad" description="Cómo se prevé tratar la información comercial."><h2>Datos recopilados</h2><p>Datos de empresa, contacto y operación entregados voluntariamente para responder solicitudes comerciales.</p><h2>Finalidad</h2><p>Gestionar la cotización, verificar pagos, emitir licencias, entregar soporte y mantener trazabilidad de seguridad.</p><h2>Retención y derechos</h2><p>La política definitiva debe establecer plazos, base legal, responsables, transferencias, proveedores y canales para ejercer derechos según los países donde opere Blue Cat.</p></LegalPage>}

@@ -1,0 +1,2 @@
+import { PageHero } from "@/components/marketing/page-hero";
+export function LegalPage({title,description,children}:{title:string;description:string;children:React.ReactNode}){return <><PageHero eyebrow="Documento provisional" title={title}>{description}</PageHero><section className="section"><div className="container prose"><div className="notice"><strong>Revisión profesional requerida.</strong> Este contenido organiza los temas que deben regularse; no constituye asesoría legal ni términos finales.</div>{children}</div></section></>}
