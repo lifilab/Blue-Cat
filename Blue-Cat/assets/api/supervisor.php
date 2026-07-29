@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__.'/_supervisor.php';
-$uid=requireUser(); $conn=getDB();
+$uid=requireUser(); requireModuleEntitlement('pos'); $conn=getDB();
 if ($_SERVER['REQUEST_METHOD']!=='POST') json(['error'=>true,'message'=>'Método no permitido'],405);
 $input=getJsonInput();
 if (!$input) json(['error'=>true,'message'=>'Datos JSON requeridos'],400);

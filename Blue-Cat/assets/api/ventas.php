@@ -1,7 +1,9 @@
 <?php
 require_once __DIR__ . '/_db.php';
 require_once __DIR__ . '/_pos_integrity.php';
+require_once __DIR__ . '/_xlsx.php';
 $uid = requireUser();
+requireModuleEntitlement('ventas');
 $conn = getDB();
 $method = $_SERVER['REQUEST_METHOD'];
 
@@ -219,18 +221,46 @@ function sesiones($conn, $uid) {
 
 function exportar($conn, $uid) {
     $w = buildWhere($conn, $uid);
-    $sql = "SELECT p.id_pedido, p.fecha, p.tipo_documento, p.cliente_nombre, p.cliente_rut, p.precio_total, p.pago_total, p.diferencia, p.anulado, s.empleado FROM pedido p LEFT JOIN sesion s ON p.id_sesion=s.id_sesion WHERE $w ORDER BY p.fecha DESC";
+    $sql = "SELECT p.id_pedido, p.fecha, p.tipo_documento, p.cliente_nombre, p.cliente_rut, p.precio_total, p.pago_total, p.diferencia, p.anulado, s.empleado
+            FROM pedido p
+            LEFT JOIN sesion s ON p.id_sesion=s.id_sesion
+            WHERE $w
+            ORDER BY p.fecha DESC
+            LIMIT 5001";
     $rows = $conn->query($sql)->fetch_all(MYSQLI_ASSOC);
-    header('Content-Type: application/vnd.ms-excel; charset=utf-8');
-    header('Content-Disposition: attachment; filename="ventas_' . date('Y-m-d') . '.xls"');
-    echo "\xEF\xBB\xBF";
-    echo '<html><head><meta charset="UTF-8"><style>table{border-collapse:collapse;font-family:Arial}th{background:#1e3a8a;color:#fff;font-weight:bold}th,td{border:1px solid #cbd5e1;padding:6px 10px}td.num{text-align:right;mso-number-format:"0"}</style></head><body><table><thead><tr>';
-    foreach (['ID','Fecha','Documento','Cliente','RUT','Total','Pagado','Diferencia','Estado','Empleado'] as $h) echo '<th>' . $h . '</th>';
-    echo '</tr></thead><tbody>';
-    foreach ($rows as $r) {
-        echo '<tr><td class="num">' . (int)$r['id_pedido'] . '</td><td>' . htmlspecialchars($r['fecha']) . '</td><td>' . htmlspecialchars($r['tipo_documento']) . '</td><td>' . htmlspecialchars($r['cliente_nombre'] ?: 'Consumidor Final') . '</td><td style="mso-number-format:\'\\@\'">' . htmlspecialchars($r['cliente_rut']) . '</td><td class="num">' . (int)$r['precio_total'] . '</td><td class="num">' . (int)$r['pago_total'] . '</td><td class="num">' . (int)$r['diferencia'] . '</td><td>' . ($r['anulado'] ? 'ANULADA' : 'COMPLETADA') . '</td><td>' . htmlspecialchars($r['empleado']) . '</td></tr>';
+    if (count($rows) > 5000) {
+        json(['error'=>'La exportación XLSX admite hasta 5.000 ventas; reduzca el período o aplique más filtros'], 422);
     }
-    echo '</tbody></table></body></html>';
+    $data = array_map(static fn(array $row): array => [
+        (int)($row['id_pedido'] ?? 0),
+        (string)($row['fecha'] ?? ''),
+        (string)($row['tipo_documento'] ?? ''),
+        trim((string)($row['cliente_nombre'] ?? '')) ?: 'Consumidor Final',
+        (string)($row['cliente_rut'] ?? ''),
+        (int)($row['precio_total'] ?? 0),
+        (int)($row['pago_total'] ?? 0),
+        (int)($row['diferencia'] ?? 0),
+        !empty($row['anulado']) ? 'ANULADA' : 'COMPLETADA',
+        (string)($row['empleado'] ?? ''),
+    ], $rows);
+    try {
+        $workbook = bluecatXlsxBuildWorkbook(
+            ['ID','Fecha','Documento','Cliente','RUT','Total','Pagado','Diferencia','Estado','Empleado'],
+            $data,
+            'Ventas'
+        );
+    } catch (Throwable $error) {
+        error_log('ventas_xlsx: ' . $error->getMessage());
+        json(['error'=>'No se pudo generar el archivo XLSX'], 500);
+    }
+    auditar($conn, $uid, 'EXPORTAR', 'ventas', null, ['formato'=>'XLSX','filas'=>count($data)]);
+    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    header('Content-Disposition: attachment; filename="ventas_' . date('Y-m-d') . '.xlsx"');
+    header('Content-Length: ' . strlen($workbook));
+    header('Cache-Control: no-store, no-cache, must-revalidate');
+    header('Pragma: no-cache');
+    header('X-Content-Type-Options: nosniff');
+    echo $workbook;
     exit;
 }
 function cuadreV2($conn, $uid, $input) {

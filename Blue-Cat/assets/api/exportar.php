@@ -2,6 +2,7 @@
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/_db.php';
 $uid = requireUser();
+requireModuleEntitlement('facturas');
 requirePermission('facturas', 'exportar');
 $conn = getDB();
 
@@ -15,6 +16,17 @@ if ($tipo === 'facturas' && !$id_factura) {
     exportFactura($conn, $uid, $id_factura, $formato);
 } else {
     json(['error'=>'Parámetros inválidos'], 400);
+}
+
+function exportSafeFilename(string $value, string $fallback): string {
+    $safe = preg_replace('/[^A-Za-z0-9._-]+/', '_', $value) ?? '';
+    $safe = trim($safe, '._-');
+    return $safe !== '' ? substr($safe, 0, 80) : $fallback;
+}
+
+function exportCsvText(mixed $value): string {
+    $text = (string)($value ?? '');
+    return preg_match('/^[=+\-@]/u', $text) ? "'" . $text : $text;
 }
 
 function exportFactura($conn, $uid, $id, $formato) {
@@ -39,13 +51,14 @@ function exportFactura($conn, $uid, $id, $formato) {
     $stmt->close();
 
     if ($formato === 'csv') {
+        $safeNumber = exportSafeFilename((string)$f['numero'], 'documento');
         header('Content-Type: text/csv; charset=utf-8');
-        header('Content-Disposition: attachment; filename="factura_'.$f['numero'].'.csv"');
+        header('Content-Disposition: attachment; filename="factura_'.$safeNumber.'.csv"');
         $out = fopen('php://output', 'w');
         fwrite($out, "\xEF\xBB\xBF");
         fputcsv($out, ['Producto', 'Cantidad', 'Precio', 'Descuento', 'Neto', 'IVA', 'Total']);
         foreach ($f['detalle'] as $d) {
-            fputcsv($out, [$d['producto'], $d['cantidad'], $d['precio'], $d['descuento'], $d['neto'], $d['iva'], $d['total']]);
+            fputcsv($out, [exportCsvText($d['producto']), $d['cantidad'], $d['precio_unitario'], $d['descuento'], $d['neto'], $d['iva'], $d['total']]);
         }
         fputcsv($out, ['','','','','','','']);
         fputcsv($out, ['Total', '', '', '', '', '', $f['total']]);
@@ -54,8 +67,9 @@ function exportFactura($conn, $uid, $id, $formato) {
     }
 
     if ($formato === 'xml') {
+        $safeNumber = exportSafeFilename((string)$f['numero'], 'documento');
         header('Content-Type: application/xml; charset=utf-8');
-        header('Content-Disposition: attachment; filename="factura_'.$f['numero'].'.xml"');
+        header('Content-Disposition: attachment; filename="factura_'.$safeNumber.'.xml"');
         $xml = new SimpleXMLElement('<?xml version="1.0" encoding="UTF-8"?><Factura></Factura>');
         $xml->addChild('Numero', $f['numero']);
         $xml->addChild('Folio', $f['folio']);
@@ -68,7 +82,7 @@ function exportFactura($conn, $uid, $id, $formato) {
             $item = $det->addChild('Item');
             $item->addChild('Producto', htmlspecialchars($d['producto']));
             $item->addChild('Cantidad', $d['cantidad']);
-            $item->addChild('Precio', $d['precio']);
+            $item->addChild('Precio', $d['precio_unitario']);
             $item->addChild('Total', $d['total']);
         }
         echo $xml->asXML();
@@ -100,7 +114,17 @@ function exportListado($conn, $uid, $formato) {
         fwrite($out, "\xEF\xBB\xBF");
         fputcsv($out, ['Número','Folio','Cliente','RUT','Estado','Total','Pagado','Saldo','Fecha Emisión']);
         foreach ($rows as $r) {
-            fputcsv($out, [$r['numero'], $r['folio'], $r['razon_social'], $r['rut'], $r['estado'], $r['total'], $r['pagado'], $r['saldo'], $r['fecha_emision']]);
+            fputcsv($out, [
+                exportCsvText($r['numero']),
+                exportCsvText($r['folio']),
+                exportCsvText($r['razon_social']),
+                exportCsvText($r['rut']),
+                exportCsvText($r['estado']),
+                $r['total'],
+                $r['pagado'],
+                $r['saldo'],
+                $r['fecha_emision'],
+            ]);
         }
         fclose($out);
         exit;

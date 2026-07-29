@@ -6,6 +6,9 @@ $context = requireTenantContext();
 $accountId = $context->accountId;
 $input = getJsonInput();
 $accion = $input['accion'] ?? $_GET['accion'] ?? '';
+if (!in_array($accion, ['sidebar', 'validar_licencia'], true)) {
+    requireModuleEntitlement('configuracion');
+}
 
 function requierePermiso($modulo, $accion) {
     requirePermission($modulo, $accion);
@@ -28,7 +31,68 @@ function coreLog($conn, $uid, $accion, $entidad, $id_entidad = null, $detalle = 
 }
 
 function coreIsLockoutCritical(string $module, string $action): bool {
-    return $module === 'configuracion' && in_array($action, ['gestionar_roles','gestionar_usuarios'], true);
+    return $module === 'configuracion'
+        && in_array($action, ['ver','gestionar_roles','gestionar_usuarios'], true);
+}
+
+function coreAcquireAdminLock(mysqli $conn, int $accountId): void {
+    $lockName = 'bluecat:admin:' . $accountId;
+    $stmt = $conn->prepare('SELECT GET_LOCK(?,10) acquired');
+    $stmt->bind_param('s', $lockName);
+    $stmt->execute();
+    $acquired = (int)($stmt->get_result()->fetch_assoc()['acquired'] ?? 0);
+    $stmt->close();
+    if ($acquired !== 1) json(['error'=>'Otra modificación administrativa está en curso. Intente nuevamente.'],409);
+}
+
+function coreCountAdministrators(
+    mysqli $conn,
+    int $accountId,
+    ?int $excludeUser = null,
+    ?array $excludeRoleAssignment = null,
+    ?array $excludeRolePermission = null
+): int {
+    $where = [
+        'u.id_cuenta=?',
+        'u.activo=1',
+        "p.modulo='configuracion'",
+        "p.accion IN ('ver','gestionar_roles','gestionar_usuarios')",
+    ];
+    $types = 'i';
+    $params = [$accountId];
+    if ($excludeUser !== null) {
+        $where[] = 'u.id_user<>?';
+        $types .= 'i';
+        $params[] = $excludeUser;
+    }
+    if ($excludeRoleAssignment !== null) {
+        $where[] = 'NOT(ur.id_user=? AND ur.id_rol=?)';
+        $types .= 'ii';
+        $params[] = (int)$excludeRoleAssignment[0];
+        $params[] = (int)$excludeRoleAssignment[1];
+    }
+    if ($excludeRolePermission !== null) {
+        $where[] = 'NOT(rp.id_rol=? AND rp.id_permiso=?)';
+        $types .= 'ii';
+        $params[] = (int)$excludeRolePermission[0];
+        $params[] = (int)$excludeRolePermission[1];
+    }
+    $sql = 'SELECT COUNT(*) total FROM (
+        SELECT u.id_user
+        FROM usuario u
+        JOIN usuario_rol ur ON ur.id_user=u.id_user
+        JOIN rol_permiso rp ON rp.id_rol=ur.id_rol
+        JOIN permiso p ON p.id_permiso=rp.id_permiso
+        WHERE ' . implode(' AND ', $where) . "
+        GROUP BY u.id_user
+        HAVING COUNT(DISTINCT p.accion)=3
+    ) administradores";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param($types, ...$params);
+    $stmt->execute();
+    $total = (int)$stmt->get_result()->fetch_assoc()['total'];
+    $stmt->close();
+    return $total;
 }
 
 
@@ -206,8 +270,8 @@ case 'rol_permiso_toggle':
     if ($r->num_rows) {
         $stmt=$conn->prepare('SELECT modulo,accion FROM permiso WHERE id_permiso=?');$stmt->bind_param('i',$id_permiso);$stmt->execute();$permission=$stmt->get_result()->fetch_assoc();$stmt->close();
         if ($permission && coreIsLockoutCritical($permission['modulo'],$permission['accion'])) {
-            $stmt=$conn->prepare("SELECT COUNT(DISTINCT u.id_user) total FROM usuario u JOIN usuario_rol ur ON ur.id_user=u.id_user JOIN rol_permiso rp ON rp.id_rol=ur.id_rol JOIN permiso p ON p.id_permiso=rp.id_permiso WHERE u.id_cuenta=? AND u.activo=1 AND p.modulo=? AND p.accion=? AND NOT(rp.id_rol=? AND rp.id_permiso=?)");
-            $stmt->bind_param('issii',$accountId,$permission['modulo'],$permission['accion'],$id_rol,$id_permiso);$stmt->execute();$remaining=(int)$stmt->get_result()->fetch_assoc()['total'];$stmt->close();
+            coreAcquireAdminLock($conn, $accountId);
+            $remaining = coreCountAdministrators($conn, $accountId, null, null, [$id_rol, $id_permiso]);
             if ($remaining===0) json(['error'=>'No puede quitar el último acceso administrativo de la cuenta.'],409);
         }
         $stmt = $conn->prepare("DELETE FROM rol_permiso WHERE id_rol=? AND id_permiso=?"); $stmt->bind_param("ii", $id_rol, $id_permiso); $stmt->execute(); $stmt->close();
@@ -237,8 +301,8 @@ case 'usuario_rol_toggle':
     requireTenantRole($conn,$context,$id_rol,true);
     $stmt = $conn->prepare("SELECT id_usuario_rol FROM usuario_rol WHERE id_user=? AND id_rol=?"); $stmt->bind_param("ii", $uid_target, $id_rol); $stmt->execute(); $r = $stmt->get_result(); $stmt->close();
     if ($r->num_rows) {
-        $stmt=$conn->prepare("SELECT COUNT(DISTINCT u.id_user) total FROM usuario u JOIN usuario_rol ur ON ur.id_user=u.id_user JOIN rol_permiso rp ON rp.id_rol=ur.id_rol JOIN permiso p ON p.id_permiso=rp.id_permiso WHERE u.id_cuenta=? AND u.activo=1 AND p.modulo='configuracion' AND p.accion='gestionar_roles' AND NOT(ur.id_user=? AND ur.id_rol=?)");
-        $stmt->bind_param('iii',$accountId,$uid_target,$id_rol);$stmt->execute();$remainingAdmins=(int)$stmt->get_result()->fetch_assoc()['total'];$stmt->close();
+        coreAcquireAdminLock($conn, $accountId);
+        $remainingAdmins = coreCountAdministrators($conn, $accountId, null, [$uid_target, $id_rol]);
         if ($remainingAdmins===0) json(['error'=>'No puede quitar el rol del último administrador de la cuenta.'],409);
         $stmt = $conn->prepare("DELETE FROM usuario_rol WHERE id_user=? AND id_rol=?"); $stmt->bind_param("ii", $uid_target, $id_rol); $stmt->execute(); $stmt->close();
         coreLog($conn, $uid, 'QUITAR_ROL', 'usuario_rol', null, ['id_user' => $uid_target, 'id_rol' => $id_rol]);
@@ -284,8 +348,8 @@ case 'usuario_editar':
     requireTenantUser($conn,$context,$id);
     if (isset($input['id_sucursal']) && (int)$input['id_sucursal']>0) requireTenantEntity($conn,$context,'sucursal',(int)$input['id_sucursal']);
     if (isset($input['activo']) && (int)$input['activo']===0) {
-        $stmt=$conn->prepare("SELECT COUNT(DISTINCT u.id_user) total FROM usuario u JOIN usuario_rol ur ON ur.id_user=u.id_user JOIN rol_permiso rp ON rp.id_rol=ur.id_rol JOIN permiso p ON p.id_permiso=rp.id_permiso WHERE u.id_cuenta=? AND u.activo=1 AND u.id_user<>? AND p.modulo='configuracion' AND p.accion='gestionar_roles'");
-        $stmt->bind_param('ii',$accountId,$id);$stmt->execute();$remainingAdmins=(int)$stmt->get_result()->fetch_assoc()['total'];$stmt->close();
+        coreAcquireAdminLock($conn, $accountId);
+        $remainingAdmins = coreCountAdministrators($conn, $accountId, $id);
         if ($remainingAdmins===0 && verificarPermiso('configuracion','gestionar_roles')) json(['error'=>'No puede desactivar el último administrador de la cuenta.'],409);
     }
     $allowed = ['nombre_completo', 'cargo', 'telefono', 'id_sucursal', 'id_departamento', 'idioma', 'activo'];
@@ -457,15 +521,7 @@ case 'planes':
     break;
 
 case 'plan_crear':
-    $nombre = $input['nombre'] ?? '';
-    if (!$nombre) json(['error' => 'Nombre requerido'], 400);
-    $nombre_p = $input['nombre'] ?? ''; $desc_p = $input['descripcion'] ?? ''; $precio = (int)($input['precio'] ?? 0);
-    $me = (int)($input['max_empresas'] ?? 1); $ms = (int)($input['max_sucursales'] ?? 1); $mu = (int)($input['max_usuarios'] ?? 5);
-    $stmt = $conn->prepare("INSERT INTO plan (nombre, descripcion, precio, max_empresas, max_sucursales, max_usuarios) VALUES (?,?,?,?,?,?)");
-    $stmt->bind_param("ssiiii", $nombre_p, $desc_p, $precio, $me, $ms, $mu);
-    $stmt->execute(); $id = (int)$conn->insert_id; $stmt->close();
-    coreLog($conn, $uid, 'CREAR', 'plan', $id, ['nombre' => $nombre_p]);
-    json(['success' => true, 'id' => $id], 201);
+    json(['error'=>true,'code'=>'LICENSE_PROVIDER_MANAGED','message'=>'Los planes se administran desde el servicio comercial de Blue-Cat.'],403);
     break;
 
 // ═══ SUSCRIPCIONES ═══
@@ -476,19 +532,7 @@ case 'suscripciones':
     break;
 
 case 'suscripcion_crear':
-    $id_empresa_s = (int)($input['id_empresa'] ?? 0); $id_plan_s = (int)($input['id_plan'] ?? 0);
-    if (!$id_empresa_s || !$id_plan_s) json(['error' => 'Empresa y plan requeridos'], 400);
-    requireTenantEntity($conn,$context,'empresa',$id_empresa_s);
-    $stmt2 = $conn->prepare("SELECT max_usuarios FROM plan WHERE id_plan=?"); $stmt2->bind_param("i", $id_plan_s); $stmt2->execute(); $r = $stmt2->get_result()->fetch_assoc(); $stmt2->close();
-    $max_users = (int)($r['max_usuarios'] ?? 0);
-    $r = $conn->query("SELECT COUNT(*) as t FROM usuario WHERE id_cuenta={$accountId} AND activo=1");
-    $current = (int)$r->fetch_assoc()['t'];
-    if ($current > $max_users) json(['error' => "Límite de usuarios excedido ($current/$max_users). Desactive usuarios o aumente el plan."], 400);
-    $stmt = $conn->prepare("INSERT INTO suscripcion (id_empresa, id_plan, fecha_inicio, estado) VALUES (?,?,CURDATE(),'activa') ON DUPLICATE KEY UPDATE id_plan=?, estado='activa'");
-    $stmt->bind_param("iii", $id_empresa_s, $id_plan_s, $id_plan_s);
-    $stmt->execute(); $sid = (int)$conn->insert_id; $stmt->close();
-    coreLog($conn, $uid, 'CREAR', 'suscripcion', $sid ?: 0, ['id_empresa' => $id_empresa_s, 'id_plan' => $id_plan_s]);
-    json(['success' => true, 'id' => $sid], 201);
+    json(['error'=>true,'code'=>'LICENSE_PROVIDER_MANAGED','message'=>'La licencia se activa desde el servicio comercial de Blue-Cat.'],403);
     break;
 
 // ═══ MÓDULOS ═══
@@ -507,16 +551,7 @@ case 'plan_modulos':
     break;
 
 case 'plan_modulo_toggle':
-    $id_plan_pt = (int)($input['id_plan'] ?? 0); $id_modulo_pt = (int)($input['id_modulo'] ?? 0);
-    if (!$id_plan_pt || !$id_modulo_pt) json(['error' => 'Datos requeridos'], 400);
-    $stmt = $conn->prepare("SELECT id_plan_modulo FROM plan_modulo WHERE id_plan=? AND id_modulo=?"); $stmt->bind_param("ii", $id_plan_pt, $id_modulo_pt); $stmt->execute(); $r = $stmt->get_result(); $stmt->close();
-    if ($r->num_rows) {
-        $stmt = $conn->prepare("DELETE FROM plan_modulo WHERE id_plan=? AND id_modulo=?"); $stmt->bind_param("ii", $id_plan_pt, $id_modulo_pt); $stmt->execute(); $stmt->close();
-        json(['success' => true, 'estado' => 'quitado']);
-    } else {
-        $stmt = $conn->prepare("INSERT INTO plan_modulo (id_plan, id_modulo) VALUES (?,?)"); $stmt->bind_param("ii", $id_plan_pt, $id_modulo_pt); $stmt->execute(); $stmt->close();
-        json(['success' => true, 'estado' => 'asignado']);
-    }
+    json(['error'=>true,'code'=>'LICENSE_PROVIDER_MANAGED','message'=>'Los módulos contratados no pueden modificarse desde la instalación local.'],403);
     break;
 
 // ═══ SIDEBAR ═══

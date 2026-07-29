@@ -24,9 +24,9 @@
         <div class="stat"><span class="label">Monto</span><span class="val green" id="caja-monto">$0</span></div>
         <div class="stat"><span class="label">Caja</span><span class="val" id="caja-codigo">—</span></div>
         <div class="stat"><span class="label">Cajas activas</span><span class="val" id="db-cajas">0</span></div>
-        <button class="sidebar-btn" id="caja-action-btn" onclick="showAbrirCaja()"><i class="fas fa-plus"></i> Abrir Caja</button>
-        <button class="sidebar-btn" id="caja-mov-btn" style="display:none;" onclick="showMovimiento('INGRESO')"><i class="fas fa-arrow-down"></i> Ingreso Manual</button>
-        <button class="sidebar-btn" onclick="showMovimiento('EGRESO')"><i class="fas fa-arrow-up"></i> Egreso / Retiro</button>
+        <button hidden class="sidebar-btn" id="caja-action-btn" data-pos-permission="abrir_caja" onclick="showAbrirCaja()"><i class="fas fa-plus"></i> Abrir Caja</button>
+        <button hidden class="sidebar-btn" id="caja-mov-btn" data-pos-permission="abrir_caja" onclick="showMovimiento('INGRESO')"><i class="fas fa-arrow-down"></i> Ingreso Manual</button>
+        <button hidden class="sidebar-btn" data-pos-permission="abrir_caja" onclick="showMovimiento('EGRESO')"><i class="fas fa-arrow-up"></i> Egreso / Retiro</button>
       </div>
 
       <div class="section">
@@ -50,8 +50,8 @@
       <div class="section">
         <div class="section-title"><i class="fas fa-bolt"></i> Acciones</div>
         <button class="sidebar-btn" onclick="showHistorial()"><i class="fas fa-history"></i> Historial (F4)</button>
-        <button class="sidebar-btn" onclick="showCotizacionesList()"><i class="fas fa-file-invoice"></i> Cotizaciones</button>
-        <button class="sidebar-btn" onclick="showPromoManager()"><i class="fas fa-tags"></i> Promociones</button>
+        <button hidden data-pos-permission="realizar_venta" class="sidebar-btn" onclick="showCotizacionesList()"><i class="fas fa-file-invoice"></i> Cotizaciones</button>
+        <button hidden data-pos-permission="crear_promocion" class="sidebar-btn" onclick="showPromoManager()"><i class="fas fa-tags"></i> Promociones</button>
         <button class="sidebar-btn" onclick="clearCart()"><i class="fas fa-trash"></i> Limpiar Carrito</button>
       </div>
     </div>
@@ -92,17 +92,17 @@
         </div>
         <div class="promo-input">
           <input type="text" id="promo-input" placeholder="Código promocional" onkeydown="if(event.key==='Enter')applyPromo()">
-          <button onclick="applyPromo()"><i class="fas fa-tag"></i></button>
+          <button hidden data-pos-permission="realizar_venta" onclick="applyPromo()"><i class="fas fa-tag"></i></button>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;font-size:12px;">
-          <span id="cart-client" style="color:#64748b;cursor:pointer;" onclick="showClientSelector()"><i class="fas fa-user"></i> Consumidor Final</span>
+          <span hidden data-pos-permission="asociar_cliente" id="cart-client" style="color:#64748b;cursor:pointer;" onclick="showClientSelector()"><i class="fas fa-user"></i> Consumidor Final</span>
           <span style="color:#94a3b8;">F2=Cobrar</span>
         </div>
       </div>
       <div class="cart-actions">
-        <button class="pay-btn primary" onclick="showPayment()"><i class="fas fa-check-circle"></i> Cobrar <span id="cart-total-val" style="display:none;">0</span></button>
-        <button class="pay-btn secondary" onclick="showCotizacion()"><i class="fas fa-file-invoice"></i> Cotizar</button>
-        <button class="pay-btn secondary" onclick="showClientSelector()"><i class="fas fa-user"></i> Cliente</button>
+        <button hidden data-pos-permission="realizar_venta" class="pay-btn primary" onclick="showPayment()"><i class="fas fa-check-circle"></i> Cobrar <span id="cart-total-val" style="display:none;">0</span></button>
+        <button hidden data-pos-permission="realizar_venta" class="pay-btn secondary" onclick="showCotizacion()"><i class="fas fa-file-invoice"></i> Cotizar</button>
+        <button hidden data-pos-permission="asociar_cliente" class="pay-btn secondary" onclick="showClientSelector()"><i class="fas fa-user"></i> Cliente</button>
         <button class="pay-btn danger" onclick="clearCart()"><i class="fas fa-trash"></i> Vaciar</button>
       </div>
     </div>
@@ -118,7 +118,7 @@
 
   <script src="../assets/js/security.js?v=1"></script>
   <script src="../assets/js/supervisor-approval.js?v=1"></script>
-  <script src="../assets/js/pos.js?v=10"></script>
+  <script src="../assets/js/pos.js?v=14"></script>
   <script src="../assets/js/login_pvt.js?v=5"></script>
   <script src="../assets/js/navbar.js?v=3"></script>
 </body>

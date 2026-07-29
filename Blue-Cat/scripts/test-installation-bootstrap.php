@@ -1,14 +1,22 @@
 <?php
 declare(strict_types=1);
 
-if (!in_array('--allow-production', $argv, true)) {
-    fwrite(STDERR, "Esta prueba crea y elimina una base temporal. Use --allow-production para confirmar.\n");
+$root = dirname(__DIR__);
+$sourceEnv = $root . '/.env';
+foreach (array_slice($argv, 1) as $argument) {
+    if (str_starts_with($argument, '--env=')) {
+        $candidate = substr($argument, 6);
+        $sourceEnv = preg_match('~^(?:[A-Za-z]:[\\\\/]|/)~', $candidate)
+            ? $candidate
+            : $root . '/' . $candidate;
+    }
+}
+require_once $root . '/assets/api/env_loader.php';
+loadEnv($sourceEnv);
+if ((string)getenv('APP_ENV') !== 'test' && !in_array('--allow-production', $argv, true)) {
+    fwrite(STDERR, "Esta prueba crea y elimina una base temporal. Use APP_ENV=test o --allow-production.\n");
     exit(2);
 }
-
-$root = dirname(__DIR__);
-require_once $root . '/assets/api/env_loader.php';
-loadEnv($root . '/.env');
 $host = (string)(getenv('DB_HOST') ?: '127.0.0.1');
 $port = (int)(getenv('DB_PORT') ?: 3306);
 $user = (string)(getenv('DB_USER') ?: 'root');
@@ -57,7 +65,8 @@ try {
 
     $db = new mysqli($host, $user, $password, $database, $port);
     $checks = [
-        'cuenta'=>1,'usuario'=>1,'empresa'=>1,'sucursal'=>1,'bodega'=>1,'pos_caja_fisica'=>1,'core_installation'=>1,
+        'cuenta'=>1,'usuario'=>1,'empresa'=>1,'sucursal'=>1,'bodega'=>1,'pos_caja_fisica'=>1,
+        'core_installation'=>1,'plan'=>1,'suscripcion'=>1,'modulo'=>8,'plan_modulo'=>8,
     ];
     foreach ($checks as $table=>$expected) {
         $count = (int)$db->query("SELECT COUNT(*) total FROM `{$table}`")->fetch_assoc()['total'];
@@ -67,15 +76,33 @@ try {
     if (!$row || !password_verify('Bootstrap9Segura', $row['password'])) throw new RuntimeException('La contraseña inicial no quedó hasheada correctamente.');
     $adminRole = (int)$db->query("SELECT COUNT(*) total FROM usuario_rol ur JOIN rol r ON r.id_rol=ur.id_rol WHERE r.nombre='Administrador' AND r.id_cuenta IS NOT NULL")->fetch_assoc()['total'];
     if ($adminRole !== 1) throw new RuntimeException('El administrador no recibió su rol local.');
+    $visibleModules = (int)$db->query("SELECT COUNT(DISTINCT m.id_modulo) total
+        FROM modulo m
+        JOIN plan_modulo pm ON pm.id_modulo=m.id_modulo
+        JOIN suscripcion s ON s.id_plan=pm.id_plan
+        JOIN empresa e ON e.id_empresa=s.id_empresa
+        JOIN permiso p ON p.modulo=m.codigo AND p.accion='ver'
+        JOIN rol_permiso rp ON rp.id_permiso=p.id_permiso
+        JOIN usuario_rol ur ON ur.id_rol=rp.id_rol
+        WHERE e.id_cuenta=1 AND ur.id_user=1 AND s.estado='activa' AND m.activo=1")->fetch_assoc()['total'];
+    if ($visibleModules !== 8) throw new RuntimeException("La navegación del administrador solo resolvió {$visibleModules} de 8 módulos.");
     $db->close();
     $db = null;
 
     [$code,$out,$err] = runInstallCommand([PHP_BINARY,$root.'/scripts/bootstrap-installation.php','--env='.$envFile,'--config='.$configFile], $root);
     $result = json_decode($out, true);
     if ($code !== 0 || ($result['status'] ?? '') !== 'already-configured') throw new RuntimeException("La reparación idempotente falló: {$err} {$out}");
+    $db = new mysqli($host, $user, $password, $database, $port);
+    foreach (['plan'=>1,'suscripcion'=>1,'modulo'=>8,'plan_modulo'=>8] as $table=>$expected) {
+        $count = (int)$db->query("SELECT COUNT(*) total FROM `{$table}`")->fetch_assoc()['total'];
+        if ($count !== $expected) throw new RuntimeException("Reparación duplicó {$table}: se esperaba {$expected}, se obtuvo {$count}.");
+    }
+    $db->close();
+    $db = null;
     echo "PASS instalación inicial crea cuenta, administrador, empresa, sucursal, bodega y caja\n";
     echo "PASS contraseña elegida se almacena con hash fuerte\n";
-    echo "PASS segundo bootstrap es idempotente\n";
+    echo "PASS licencia local habilita los 8 módulos autorizados\n";
+    echo "PASS segundo bootstrap repara sin duplicar catálogo ni licencia\n";
 } finally {
     if (isset($db) && $db instanceof mysqli) $db->close();
     $admin->query("DROP DATABASE IF EXISTS `{$database}`");

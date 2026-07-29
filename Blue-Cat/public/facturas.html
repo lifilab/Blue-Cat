@@ -56,6 +56,11 @@
     .modal-overlay { display:none;position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.6);backdrop-filter:blur(4px);align-items:center;justify-content:center; }
     .modal-overlay.show { display:flex; }
     .modal-content { background:#fff;border-radius:20px;padding:28px 32px;width:520px;max-width:94%;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.18); }
+    .modal-content.modal-wide { width:760px; }
+    .legacy-card { border:1px solid #e2e8f0;border-radius:14px;padding:16px;margin-top:12px;background:#fff; }
+    .legacy-label { display:block;font-size:12px;font-weight:600;color:#475569;margin:12px 0 5px; }
+    .legacy-card .input { width:100%;box-sizing:border-box; }
+    .legacy-actions { display:flex;justify-content:flex-end;gap:8px;margin-top:14px; }
     @media(max-width:768px){ .kpi-grid { grid-template-columns:repeat(2,1fr); } .detail-grid { grid-template-columns:1fr; } }
   </style>
 </head>
@@ -84,9 +89,10 @@
       <select id="filter-estado" onchange="loadFacturas()"><option value="">Todos los estados</option><option value="BORRADOR">Borrador</option><option value="EMITIDA">Emitida</option><option value="ACEPTADA">Aceptada</option><option value="PAGADA">Pagada</option><option value="PARCIAL">Parcial</option><option value="VENCIDA">Vencida</option><option value="ANULADA">Anulada</option></select>
       <input type="date" id="filter-desde" onchange="loadFacturas()" style="width:140px;">
       <input type="date" id="filter-hasta" onchange="loadFacturas()" style="width:140px;">
-      <button class="btn btn-outline btn-sm" onclick="exportCSV()"><i class="fas fa-file-csv"></i> CSV</button>
+      <button id="btn-legacy-reconciliation" class="btn btn-outline btn-sm" onclick="showLegacyReconciliation()" hidden><i class="fas fa-link"></i> Conciliar legacy</button>
+      <button id="btn-export-facturas" class="btn btn-outline btn-sm" onclick="exportCSV()" hidden><i class="fas fa-file-csv"></i> CSV</button>
       <div class="spacer"></div>
-      <button class="btn btn-primary btn-sm" onclick="showCreateModal()"><i class="fas fa-plus"></i> Nueva Factura</button>
+      <button id="btn-create-factura" class="btn btn-primary btn-sm" onclick="showCreateModal()" hidden><i class="fas fa-plus"></i> Nueva Factura</button>
     </div>
 
     <!-- Table -->
@@ -113,6 +119,9 @@
   <!-- Pay modal -->
   <div class="modal-overlay" id="pay-modal"><div class="modal-content" id="pay-content"></div></div>
 
+  <!-- Legacy fiscal reconciliation modal -->
+  <div class="modal-overlay" id="legacy-modal"><div class="modal-content modal-wide" id="legacy-content"></div></div>
+
   <!-- Cerrar sesión -->
   <div id="cerrar-sesion-popup" class="popup"><div class="popup-content">
     <span class="close-btn" onclick="CloseSesionPopUp()">&times;</span>
@@ -123,7 +132,7 @@
 
   <script src="../assets/js/security.js?v=1"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="../assets/js/facturas.js?v=5"></script>
+  <script src="../assets/js/facturas.js?v=10"></script>
   <script src="../assets/js/login_pvt.js?v=5"></script>
   <script src="../assets/js/navbar.js?v=3"></script>
 </body>

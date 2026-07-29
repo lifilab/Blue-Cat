@@ -94,51 +94,7 @@ if ($accion === 'login' && $method === 'POST') {
 }
 
 if ($accion === 'registrar' && $method === 'POST') {
-    $nombre = trim((string)($_POST['new-username'] ?? ''));
-    $correo = trim((string)($_POST['e-mail'] ?? ''));
-    $password = (string)($_POST['new-password'] ?? '');
-    $confirm = (string)($_POST['confirm-password'] ?? '');
-    if ($nombre === '' || !filter_var($correo, FILTER_VALIDATE_EMAIL)) authError('Nombre y correo válido son obligatorios.', 400);
-    if ($password !== $confirm) authError('Las contraseñas no coinciden.', 400);
-    $passwordErrors = securityPasswordErrors($password);
-    if ($passwordErrors) authError('La contraseña requiere '.implode(', ', $passwordErrors).'.', 400);
-    $total = (int)$conn->query('SELECT COUNT(*) total FROM usuario')->fetch_assoc()['total'];
-    if ($total > 0) {
-        requireUser();
-        if (!verificarPermiso('usuarios','editar_cuentas')) authError('No tiene permiso para crear usuarios.', 403);
-    }
-
-    $stmt = $conn->prepare('SELECT COUNT(*) total FROM usuario WHERE nombre=? OR correo=?');
-    $stmt->bind_param('ss',$nombre,$correo); $stmt->execute();
-    $exists=(int)$stmt->get_result()->fetch_assoc()['total']; $stmt->close();
-    if ($exists) authError('El usuario o correo ya existe.',409);
-
-    $hash=securityHashPassword($password);
-    $conn->begin_transaction();
-    try {
-        if ($total === 0) {
-            $stmt=$conn->prepare("INSERT INTO cuenta (nombre,estado) VALUES (?,'ACTIVA')");
-            $stmt->bind_param('s',$nombre); $stmt->execute();
-            $idCuenta=(int)$conn->insert_id; $stmt->close();
-        } else {
-            $idCuenta=requireTenantContext()->accountId;
-        }
-        $stmt=$conn->prepare('INSERT INTO usuario (id_cuenta,nombre,correo,password,validar_sesion,activo) VALUES (?,?,?,?,0,1)');
-        $stmt->bind_param('isss',$idCuenta,$nombre,$correo,$hash); $stmt->execute();
-        $uid=(int)$conn->insert_id; $stmt->close();
-        if ($total === 0) {
-            $stmt=$conn->prepare('UPDATE cuenta SET id_usuario_propietario=? WHERE id_cuenta=?');
-            $stmt->bind_param('ii',$uid,$idCuenta); $stmt->execute(); $stmt->close();
-            provisionTenantRoles($conn,$idCuenta);
-            $rol='Administrador';
-            $stmt=$conn->prepare('INSERT IGNORE INTO usuario_rol (id_user,id_rol) SELECT ?,id_rol FROM rol WHERE nombre=? AND id_cuenta=? AND es_plantilla=0 LIMIT 1');
-            $stmt->bind_param('isi',$uid,$rol,$idCuenta); $stmt->execute(); $stmt->close();
-        }
-        $conn->commit();
-        authOk('Cuenta creada exitosamente.',['id_user'=>$uid,'rol'=>$total===0?'Administrador':''],201);
-    } catch (Throwable $e) {
-        $conn->rollback(); authError('No fue posible crear la cuenta.',500);
-    }
+    authError('El registro local está deshabilitado. La cuenta propietaria se crea durante la instalación y los empleados se administran dentro de Blue-Cat.', 410);
 }
 
 if ($accion === 'estado' && $method === 'GET') {

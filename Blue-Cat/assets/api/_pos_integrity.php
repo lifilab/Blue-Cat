@@ -1,5 +1,20 @@
 <?php
 
+function posRutValido(?string $rut): bool {
+    $normalizado = strtoupper(preg_replace('/[^0-9K]/i', '', (string)$rut) ?? '');
+    if (!preg_match('/^(\d{7,8})([0-9K])$/', $normalizado, $partes)) return false;
+    $cuerpo = $partes[1];
+    $suma = 0;
+    $multiplicador = 2;
+    for ($i = strlen($cuerpo) - 1; $i >= 0; $i--) {
+        $suma += ((int)$cuerpo[$i]) * $multiplicador;
+        $multiplicador = $multiplicador === 7 ? 2 : $multiplicador + 1;
+    }
+    $resultado = 11 - ($suma % 11);
+    $digito = $resultado === 11 ? '0' : ($resultado === 10 ? 'K' : (string)$resultado);
+    return hash_equals($digito, $partes[2]);
+}
+
 function posCanonicalPaymentMethod($value): string {
     $method = strtoupper(trim((string) $value));
     $method = strtr($method, [
@@ -29,6 +44,31 @@ function posPaymentValue($payment, string $key, $default = null) {
     if (is_array($payment)) return $payment[$key] ?? $default;
     if (is_object($payment)) return $payment->{$key} ?? $default;
     return $default;
+}
+
+/**
+ * Convierte la cantidad comercial en la cantidad exacta que mueve stock.
+ * Los productos por unidad nunca pueden fraccionarse; peso y volumen usan el
+ * contrato comun DECIMAL(18,3).
+ */
+function posNormalizeStockQuantity(float $quantity, string $saleType, string $productName = 'El producto'): float {
+    if (!is_finite($quantity) || $quantity <= 0) {
+        throw new InvalidArgumentException("{$productName} requiere una cantidad mayor a cero.");
+    }
+
+    if (strtoupper($saleType) === 'UNIDAD') {
+        $rounded = round($quantity);
+        if (abs($quantity - $rounded) > 0.000001) {
+            throw new InvalidArgumentException("{$productName} solo admite cantidades enteras.");
+        }
+        return (float) (int) $rounded;
+    }
+
+    $rounded = round($quantity, 3);
+    if (abs($quantity - $rounded) > 0.000001) {
+        throw new InvalidArgumentException("{$productName} admite como maximo 3 decimales.");
+    }
+    return $rounded;
 }
 
 /**

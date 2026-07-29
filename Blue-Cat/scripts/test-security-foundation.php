@@ -77,6 +77,14 @@ try {
     [$status,,$body] = securityTestRequest($base.'/auth.php?accion=login', 'POST', ['username'=>$username,'password'=>$password], $cookieFile, false);
     securityTestAssert($status === 403 && str_contains($body, 'CSRF_REJECTED'), "CSRF rechaza POST sin cabecera ni token (HTTP {$status}: {$body})");
 
+    [$status,,$body] = securityTestRequest($base.'/auth.php?accion=registrar', 'POST', [
+        'new-username'=>'registro-no-permitido',
+        'e-mail'=>'registro-no-permitido@example.test',
+        'new-password'=>'Registro9Seguro',
+        'confirm-password'=>'Registro9Seguro',
+    ], $cookieFile, true);
+    securityTestAssert($status === 410 && str_contains($body, 'registro local'), 'el login público no permite crear cuentas fuera del instalador');
+
     $maxAttempts = max(3, (int)($_ENV['LOGIN_MAX_ATTEMPTS'] ?? 5));
     for ($attempt=1; $attempt<=$maxAttempts; $attempt++) {
         [$status] = securityTestRequest($base.'/auth.php?accion=login', 'POST', ['username'=>$username,'password'=>'Incorrect-'.$attempt], $cookieFile, true);

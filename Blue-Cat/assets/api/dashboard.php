@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/_db.php';
 $uid = requireUser();
+requireModuleEntitlement('facturas');
 requirePermission('facturas', 'ver');
 $conn = getDB();
 $tenant = tenantContext($uid);
@@ -12,22 +13,22 @@ $mes = date('Y-m');
 $kpis = [];
 
 // Emitidas hoy
-$stmt = $conn->prepare("SELECT COUNT(*) as c, COALESCE(SUM(total),0) as t FROM factura WHERE id_cuenta=? AND DATE(fecha_emision)=? AND estado NOT IN ('ANULADA','RECHAZADA')");
+$stmt = $conn->prepare("SELECT COUNT(*) as c, COALESCE(SUM(CASE WHEN tipo='NOTA_CREDITO' THEN -total ELSE total END),0) as t FROM factura WHERE id_cuenta=? AND DATE(fecha_emision)=? AND estado NOT IN ('ANULADA','RECHAZADA')");
 $stmt->bind_param("is", $tenant->accountId, $hoy);
 $stmt->execute();
 $result = $stmt->get_result();
 $row = $result->fetch_assoc();
 $kpis['hoy_cantidad'] = (int)$row['c'];
-$kpis['hoy_monto'] = (int)$row['t'];
+$kpis['hoy_monto'] = (float)$row['t'];
 
 // Del mes
-$stmt = $conn->prepare("SELECT COUNT(*) as c, COALESCE(SUM(total),0) as t FROM factura WHERE id_cuenta=? AND DATE_FORMAT(fecha_emision,'%Y-%m')=? AND estado NOT IN ('ANULADA','RECHAZADA')");
+$stmt = $conn->prepare("SELECT COUNT(*) as c, COALESCE(SUM(CASE WHEN tipo='NOTA_CREDITO' THEN -total ELSE total END),0) as t FROM factura WHERE id_cuenta=? AND DATE_FORMAT(fecha_emision,'%Y-%m')=? AND estado NOT IN ('ANULADA','RECHAZADA')");
 $stmt->bind_param("is", $tenant->accountId, $mes);
 $stmt->execute();
 $result = $stmt->get_result();
 $row = $result->fetch_assoc();
 $kpis['mes_cantidad'] = (int)$row['c'];
-$kpis['mes_monto'] = (int)$row['t'];
+$kpis['mes_monto'] = (float)$row['t'];
 
 // Pendientes de pago
 $stmt = $conn->prepare("SELECT COUNT(*) as c, COALESCE(SUM(saldo),0) as t FROM factura WHERE id_cuenta=? AND estado IN ('EMITIDA','ACEPTADA','PARCIAL','PENDIENTE')");
@@ -36,7 +37,7 @@ $stmt->execute();
 $result = $stmt->get_result();
 $row = $result->fetch_assoc();
 $kpis['pendientes_cantidad'] = (int)$row['c'];
-$kpis['pendientes_monto'] = (int)$row['t'];
+$kpis['pendientes_monto'] = (float)$row['t'];
 
 // Vencidas
 $stmt = $conn->prepare("SELECT COUNT(*) as c, COALESCE(SUM(saldo),0) as t FROM factura WHERE id_cuenta=? AND estado IN ('EMITIDA','ACEPTADA','PARCIAL','PENDIENTE','VENCIDA') AND fecha_vencimiento < ?");
@@ -45,16 +46,16 @@ $stmt->execute();
 $result = $stmt->get_result();
 $row = $result->fetch_assoc();
 $kpis['vencidas_cantidad'] = (int)$row['c'];
-$kpis['vencidas_monto'] = (int)$row['t'];
+$kpis['vencidas_monto'] = (float)$row['t'];
 
 // Pagadas
-$stmt = $conn->prepare("SELECT COUNT(*) as c, COALESCE(SUM(total),0) as t FROM factura WHERE id_cuenta=? AND estado='PAGADA'");
+$stmt = $conn->prepare("SELECT COUNT(*) as c, COALESCE(SUM(CASE WHEN tipo='NOTA_CREDITO' THEN -total ELSE total END),0) as t FROM factura WHERE id_cuenta=? AND estado='PAGADA'");
 $stmt->bind_param("i", $tenant->accountId);
 $stmt->execute();
 $result = $stmt->get_result();
 $row = $result->fetch_assoc();
 $kpis['pagadas_cantidad'] = (int)$row['c'];
-$kpis['pagadas_monto'] = (int)$row['t'];
+$kpis['pagadas_monto'] = (float)$row['t'];
 
 // Anuladas
 $stmt = $conn->prepare("SELECT COUNT(*) as c, COALESCE(SUM(total),0) as t FROM factura WHERE id_cuenta=? AND estado='ANULADA'");
@@ -63,31 +64,31 @@ $stmt->execute();
 $result = $stmt->get_result();
 $row = $result->fetch_assoc();
 $kpis['anuladas_cantidad'] = (int)$row['c'];
-$kpis['anuladas_monto'] = (int)$row['t'];
+$kpis['anuladas_monto'] = (float)$row['t'];
 
 // Por estado
-$stmt = $conn->prepare("SELECT estado, COUNT(*) as cantidad, COALESCE(SUM(total),0) as monto FROM factura WHERE id_cuenta=? GROUP BY estado");
+$stmt = $conn->prepare("SELECT estado, COUNT(*) as cantidad, COALESCE(SUM(CASE WHEN tipo='NOTA_CREDITO' THEN -total ELSE total END),0) as monto FROM factura WHERE id_cuenta=? GROUP BY estado");
 $stmt->bind_param("i", $tenant->accountId);
 $stmt->execute();
 $result = $stmt->get_result();
 $kpis['por_estado'] = $result->fetch_all(MYSQLI_ASSOC);
 
 // Facturación diaria (últimos 30 días)
-$stmt = $conn->prepare("SELECT DATE(fecha_emision) as fecha, COUNT(*) as cantidad, COALESCE(SUM(total),0) as monto FROM factura WHERE id_cuenta=? AND fecha_emision >= DATE_SUB(?, INTERVAL 30 DAY) AND estado NOT IN ('ANULADA','RECHAZADA') GROUP BY DATE(fecha_emision) ORDER BY fecha ASC");
+$stmt = $conn->prepare("SELECT DATE(fecha_emision) as fecha, COUNT(*) as cantidad, COALESCE(SUM(CASE WHEN tipo='NOTA_CREDITO' THEN -total ELSE total END),0) as monto FROM factura WHERE id_cuenta=? AND fecha_emision >= DATE_SUB(?, INTERVAL 30 DAY) AND estado NOT IN ('ANULADA','RECHAZADA') GROUP BY DATE(fecha_emision) ORDER BY fecha ASC");
 $stmt->bind_param("is", $tenant->accountId, $hoy);
 $stmt->execute();
 $result = $stmt->get_result();
 $kpis['diario'] = $result->fetch_all(MYSQLI_ASSOC);
 
 // Facturación mensual (últimos 12 meses)
-$stmt = $conn->prepare("SELECT DATE_FORMAT(fecha_emision,'%Y-%m') as mes, COUNT(*) as cantidad, COALESCE(SUM(total),0) as monto FROM factura WHERE id_cuenta=? AND fecha_emision >= DATE_SUB(?, INTERVAL 12 MONTH) AND estado NOT IN ('ANULADA','RECHAZADA') GROUP BY DATE_FORMAT(fecha_emision,'%Y-%m') ORDER BY mes ASC");
+$stmt = $conn->prepare("SELECT DATE_FORMAT(fecha_emision,'%Y-%m') as mes, COUNT(*) as cantidad, COALESCE(SUM(CASE WHEN tipo='NOTA_CREDITO' THEN -total ELSE total END),0) as monto FROM factura WHERE id_cuenta=? AND fecha_emision >= DATE_SUB(?, INTERVAL 12 MONTH) AND estado NOT IN ('ANULADA','RECHAZADA') GROUP BY DATE_FORMAT(fecha_emision,'%Y-%m') ORDER BY mes ASC");
 $stmt->bind_param("is", $tenant->accountId, $hoy);
 $stmt->execute();
 $result = $stmt->get_result();
 $kpis['mensual'] = $result->fetch_all(MYSQLI_ASSOC);
 
 // Top productos más vendidos
-$stmt = $conn->prepare("SELECT d.producto, SUM(d.cantidad) as cantidad, SUM(d.total) as monto FROM factura_detalle d JOIN factura f ON d.id_factura = f.id_factura WHERE f.id_cuenta=? AND f.estado NOT IN ('ANULADA','RECHAZADA') GROUP BY d.id_producto, d.producto ORDER BY cantidad DESC LIMIT 10");
+$stmt = $conn->prepare("SELECT d.producto, SUM(CASE WHEN f.tipo='NOTA_CREDITO' THEN -d.cantidad ELSE d.cantidad END) as cantidad, SUM(CASE WHEN f.tipo='NOTA_CREDITO' THEN -d.total ELSE d.total END) as monto FROM factura_detalle d JOIN factura f ON d.id_factura = f.id_factura WHERE f.id_cuenta=? AND f.estado NOT IN ('ANULADA','RECHAZADA') GROUP BY d.id_producto, d.producto ORDER BY cantidad DESC LIMIT 10");
 $stmt->bind_param("i", $tenant->accountId);
 $stmt->execute();
 $result = $stmt->get_result();

@@ -3,6 +3,7 @@ require_once __DIR__ . '/_db.php';
 ini_set('display_errors', '0');
 ini_set('log_errors', '1');
 $uid = requireUser();
+requireModuleEntitlement('empleados');
 
 function requireEmpleadoActionPermission(string $accion): void {
     $permissions = [

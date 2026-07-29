@@ -5,6 +5,7 @@ require_once __DIR__ . '/_pos_integrity.php';
 require_once __DIR__ . '/_pos_returns.php';
 require_once __DIR__ . '/_promotion_engine.php';
 $uid = requireUser();
+requireModuleEntitlement('pos');
 $conn = getDB();
 $tenant = tenantContext($uid);
 $method = $_SERVER['REQUEST_METHOD'];
@@ -30,7 +31,7 @@ function getOpenSesion($conn, $uid) {
 }
 
 function getOpenCaja($conn, $uid) {
-    $sql = "SELECT c.*,s.id_sucursal FROM pos_caja c LEFT JOIN sucursal s ON s.id_cuenta=c.id_cuenta AND s.activo=1 AND (s.nombre=c.sucursal OR s.codigo=c.sucursal) WHERE c.id_user = ? AND c.estado = 'ABIERTA' ORDER BY c.id_caja DESC LIMIT 1";
+    $sql = "SELECT c.*,f.id_bodega,s.id_sucursal FROM pos_caja c JOIN pos_caja_fisica f ON f.id_caja_fisica=c.id_caja_fisica AND f.id_cuenta=c.id_cuenta LEFT JOIN sucursal s ON s.id_cuenta=c.id_cuenta AND s.activo=1 AND (s.nombre=c.sucursal OR s.codigo=c.sucursal) WHERE c.id_user = ? AND c.estado = 'ABIERTA' ORDER BY c.id_caja DESC LIMIT 1";
     $stmt = $conn->prepare($sql);
     $stmt->bind_param('i', $uid);
     $stmt->execute();
@@ -69,6 +70,7 @@ if ($method === 'GET') {
     switch ($action) {
         case 'dashboard':           GET_dashboard();          break;
         case 'productos':           GET_productos();          break;
+        case 'bodegas_caja':        GET_bodegas_caja();       break;
         case 'clientes':            GET_clientes();           break;
         case 'caja_estado':         GET_caja_estado();        break;
         case 'ventas_hoy':          GET_ventas_hoy();         break;
@@ -183,9 +185,9 @@ function GET_dashboard() {
 
     // stock_bajo
     $stockBajo = 0;
-    $sql = "SELECT COUNT(*) AS total FROM producto WHERE id_user = ? AND activo = 1 AND cantidad <= stock_minimo AND cantidad > 0";
+    $sql = "SELECT COUNT(*) AS total FROM producto WHERE id_cuenta = ? AND activo = 1 AND cantidad <= stock_minimo AND cantidad > 0";
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param('i', $uid);
+    $stmt->bind_param('i', $tenant->accountId);
     $stmt->execute();
     $result = $stmt->get_result();
     if ($row = $result->fetch_assoc()) {
@@ -195,9 +197,9 @@ function GET_dashboard() {
 
     // sin_stock
     $sinStock = 0;
-    $sql = "SELECT COUNT(*) AS total FROM producto WHERE id_user = ? AND activo = 1 AND cantidad <= 0";
+    $sql = "SELECT COUNT(*) AS total FROM producto WHERE id_cuenta = ? AND activo = 1 AND cantidad <= 0";
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param('i', $uid);
+    $stmt->bind_param('i', $tenant->accountId);
     $stmt->execute();
     $result = $stmt->get_result();
     if ($row = $result->fetch_assoc()) {
@@ -207,9 +209,9 @@ function GET_dashboard() {
 
     // promociones_activas
     $promoActivas = 0;
-    $sql = "SELECT COUNT(*) AS total FROM pos_promocion WHERE id_user = ? AND activo = 1 AND (fecha_fin IS NULL OR fecha_fin >= CURDATE())";
+    $sql = "SELECT COUNT(*) AS total FROM pos_promocion WHERE id_cuenta = ? AND activo = 1 AND (fecha_fin IS NULL OR fecha_fin >= CURDATE())";
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param('i', $uid);
+    $stmt->bind_param('i', $tenant->accountId);
     $stmt->execute();
     $result = $stmt->get_result();
     if ($row = $result->fetch_assoc()) {
@@ -284,6 +286,13 @@ function GET_productos() {
     $offset    = ($pagina - 1) * $porPagina;
     $search    = $_GET['q'] ?? '';
     $cat       = $_GET['cat'] ?? '';
+    $exact     = (string)($_GET['exact'] ?? '') === '1';
+    $cajaAbierta = getOpenCaja($conn, $uid);
+    $idBodega = (int)($cajaAbierta['id_bodega'] ?? 0);
+    if ($cajaAbierta && $idBodega <= 0) {
+        json(['error'=>true,'message'=>'La caja abierta no tiene bodega asignada. Ciérrela y vuelva a abrirla seleccionando una bodega.'],409);
+    }
+    if ($idBodega <= 0) $idBodega = getDefaultBodega($conn);
 
     $cuenta = buildCuentaFilter($conn, $uid, 'p.id_user');
 
@@ -292,21 +301,32 @@ function GET_productos() {
     $types  = $cuenta['types'];
 
     if ($search !== '') {
-        $searchParam = "%{$search}%";
-        $where .= " AND (p.nombre_producto LIKE ? OR p.codigo_de_barras LIKE ? OR p.categoria LIKE ?)";
-        $params[] = $searchParam;
-        $params[] = $searchParam;
-        $params[] = $searchParam;
-        $types  .= 'sss';
+        if ($exact) {
+            $where .= " AND (p.codigo_de_barras = ? OR p.sku = ?)";
+            $params[] = $search;
+            $params[] = $search;
+            $types .= 'ss';
+        } else {
+            $searchParam = "%{$search}%";
+            $where .= " AND (p.nombre_producto LIKE ? OR p.codigo_de_barras LIKE ? OR p.sku LIKE ? OR COALESCE(c.nombre,p.categoria,'') LIKE ?)";
+            $params[] = $searchParam;
+            $params[] = $searchParam;
+            $params[] = $searchParam;
+            $params[] = $searchParam;
+            $types  .= 'ssss';
+        }
     }
     if ($cat !== '') {
-        $where .= " AND p.categoria = ?";
+        $where .= " AND COALESCE(c.nombre,p.categoria,'') = ?";
         $params[] = $cat;
         $types  .= 's';
     }
 
     // Count
-    $countSql = "SELECT COUNT(*) AS total FROM producto p WHERE {$where}";
+    $countSql = "SELECT COUNT(*) AS total
+        FROM producto p
+        LEFT JOIN categoria c ON c.id_categoria=p.id_categoria AND c.id_cuenta=p.id_cuenta
+        WHERE {$where}";
     $stmt = $conn->prepare($countSql);
     if ($params) {
         $stmt->bind_param($types, ...$params);
@@ -317,16 +337,19 @@ function GET_productos() {
     $stmt->close();
 
     // Data
-    $dataSql = "SELECT p.id_producto, p.nombre_producto, p.precio_venta, p.codigo_de_barras, p.cantidad, p.categoria,
+    $dataSql = "SELECT p.id_producto, p.nombre_producto, p.precio_venta, p.codigo_de_barras, COALESCE(sb.cantidad,0) AS cantidad,
+                       COALESCE(c.nombre,NULLIF(p.categoria,''),'Sin categoría') AS categoria,
                        p.sku, p.tipo, p.tipo_venta, p.imagen,
                        um.abreviatura AS unidad_abrev
                 FROM producto p
+                LEFT JOIN categoria c ON c.id_categoria=p.id_categoria AND c.id_cuenta=p.id_cuenta
                 LEFT JOIN unidad_medida um ON p.id_unidad = um.id_unidad
+                LEFT JOIN (SELECT id_producto,GREATEST(SUM(disponible)-SUM(reservado)-SUM(comprometido)-SUM(bloqueado),0) AS cantidad FROM stock WHERE id_bodega=? GROUP BY id_producto) sb ON sb.id_producto=p.id_producto
                 WHERE {$where}
                 ORDER BY p.nombre_producto ASC
                 LIMIT ? OFFSET ?";
-    $dataParams = $params;
-    $dataTypes  = $types;
+    $dataParams = array_merge([$idBodega], $params);
+    $dataTypes  = 'i' . $types;
     $limitVar   = $porPagina;
     $offsetVar  = $offset;
     $dataParams[] = $limitVar;
@@ -348,7 +371,12 @@ function GET_productos() {
     // Categorías
     $catParams = $cuenta['params'];
     $catTypes  = $cuenta['types'];
-    $catSql = "SELECT DISTINCT categoria FROM producto p WHERE {$cuenta['sql']} AND p.activo = 1 AND p.categoria IS NOT NULL AND p.categoria != '' ORDER BY categoria";
+    $catSql = "SELECT DISTINCT COALESCE(c.nombre,NULLIF(p.categoria,'')) AS categoria
+        FROM producto p
+        LEFT JOIN categoria c ON c.id_categoria=p.id_categoria AND c.id_cuenta=p.id_cuenta
+        WHERE {$cuenta['sql']} AND p.activo=1
+          AND COALESCE(c.nombre,NULLIF(p.categoria,'')) IS NOT NULL
+        ORDER BY categoria";
     $stmt = $conn->prepare($catSql);
     if ($catParams) {
         $stmt->bind_param($catTypes, ...$catParams);
@@ -367,6 +395,18 @@ function GET_productos() {
         'pagina'     => $pagina,
         'categorias' => $categorias,
     ]);
+}
+
+function GET_bodegas_caja() {
+    global $conn, $tenant;
+    $stmt = $conn->prepare("SELECT id_bodega,codigo,nombre FROM bodega WHERE id_cuenta=? AND estado='ACTIVA' ORDER BY nombre,id_bodega");
+    $stmt->bind_param('i', $tenant->accountId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $bodegas = [];
+    while ($row = $result->fetch_assoc()) $bodegas[] = $row;
+    $stmt->close();
+    json(['bodegas'=>$bodegas]);
 }
 
 function GET_clientes() {
@@ -568,6 +608,12 @@ function GET_promociones() {
 
 function GET_cotizaciones() {
     global $conn, $uid, $tenant;
+    $cajaAbierta = getOpenCaja($conn, $uid);
+    $idBodega = (int)($cajaAbierta['id_bodega'] ?? 0);
+    if ($cajaAbierta && $idBodega <= 0) {
+        json(['error'=>true,'message'=>'La caja abierta no tiene bodega asignada. Ciérrela y vuelva a abrirla seleccionando una bodega.'],409);
+    }
+    if ($idBodega <= 0) $idBodega = getDefaultBodega($conn);
 
     $sql = "SELECT * FROM pos_cotizacion WHERE id_cuenta = ? ORDER BY id_cotizacion DESC";
     $stmt = $conn->prepare($sql);
@@ -584,11 +630,12 @@ function GET_cotizaciones() {
     foreach ($cotizaciones as &$cot) {
         $cid = (int) $cot['id_cotizacion'];
         $cot['items'] = [];
-        $sql = "SELECT d.*,p.cantidad stock_actual,p.tipo_venta,p.unidad_abrev,p.activo producto_activo
+        $sql = "SELECT d.*,COALESCE(sb.cantidad,0) stock_actual,p.tipo_venta,p.unidad_abrev,p.activo producto_activo
                 FROM pos_cotizacion_detalle d LEFT JOIN producto p ON p.id_producto=d.id_producto AND p.id_cuenta=?
+                LEFT JOIN (SELECT id_producto,GREATEST(SUM(disponible)-SUM(reservado)-SUM(comprometido)-SUM(bloqueado),0) cantidad FROM stock WHERE id_bodega=? GROUP BY id_producto) sb ON sb.id_producto=p.id_producto
                 WHERE d.id_cotizacion = ?";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param('ii', $tenant->accountId,$cid);
+        $stmt->bind_param('iii', $tenant->accountId,$idBodega,$cid);
         $stmt->execute();
         $r = $stmt->get_result();
         while ($item = $r->fetch_assoc()) {
@@ -644,15 +691,15 @@ function GET_venta_detalle() {
     }
 
     // Items
-    $sql = "SELECT dp.*, p.nombre_producto, p.codigo_de_barras,
+    $sql = "SELECT dp.*, p.nombre_producto, p.codigo_de_barras, p.tipo_venta,
                    COALESCE(SUM(dd.cantidad),0) AS cantidad_devuelta,
                    dp.cantidad_pedida-COALESCE(SUM(dd.cantidad),0) AS cantidad_disponible_devolucion
             FROM detalle_pedido dp
-            JOIN producto p ON dp.id_producto = p.id_producto
+            JOIN producto p ON dp.id_producto = p.id_producto AND p.id_cuenta=?
             LEFT JOIN pos_devolucion_detalle dd ON dd.id_detalle_pedido=dp.id_detalle_pedido
             WHERE dp.id_pedido = ? GROUP BY dp.id_detalle_pedido";
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param('i', $pedidoId);
+    $stmt->bind_param('ii', $tenant->accountId, $pedidoId);
     $stmt->execute();
     $result = $stmt->get_result();
     $venta['items'] = [];
@@ -830,20 +877,26 @@ function POST_caja_abrir($data) {
     $codigo         = strtoupper(trim((string)($data->codigo ?? '')));
     $nombreCaja     = $data->nombre ?? $data->nombre_caja ?? 'Caja Principal';
     $sucursal       = $data->sucursal ?? 'Principal';
+    $idBodega       = (int)($data->id_bodega ?? 0);
     $montoApertura  = (int) ($data->monto_apertura ?? 0);
     if (!preg_match('/^[A-Z0-9_-]{2,40}$/', $codigo)) {
         json(['error'=>true,'message'=>'Código de caja inválido. Use letras, números, guion o guion bajo.'],400);
     }
     if ($montoApertura<0) json(['error'=>true,'message'=>'El monto de apertura no puede ser negativo.'],400);
+    if ($idBodega<=0) json(['error'=>true,'message'=>'Debe crear y seleccionar una bodega activa.'],400);
 
     // Get open caja with FOR UPDATE
     $conn->begin_transaction();
 
     try {
-        $sql="INSERT INTO pos_caja_fisica(id_cuenta,codigo,nombre,sucursal,activo) VALUES(?,?,?,?,1)
-              ON DUPLICATE KEY UPDATE nombre=VALUES(nombre),sucursal=VALUES(sucursal)";
-        $stmt=$conn->prepare($sql);$stmt->bind_param('isss',$tenant->accountId,$codigo,$nombreCaja,$sucursal);$stmt->execute();$stmt->close();
-        $stmt=$conn->prepare("SELECT id_caja_fisica FROM pos_caja_fisica WHERE id_cuenta=? AND codigo=? AND activo=1 FOR UPDATE");
+        $stmt=$conn->prepare("SELECT id_bodega FROM bodega WHERE id_bodega=? AND id_cuenta=? AND estado='ACTIVA' FOR UPDATE");
+        $stmt->bind_param('ii',$idBodega,$tenant->accountId);$stmt->execute();$bodega=$stmt->get_result()->fetch_assoc();$stmt->close();
+        if(!$bodega)throw new Exception('La bodega seleccionada no pertenece a esta cuenta o está inactiva.');
+
+        $sql="INSERT INTO pos_caja_fisica(id_cuenta,codigo,nombre,sucursal,id_bodega,activo) VALUES(?,?,?,?,?,1)
+              ON DUPLICATE KEY UPDATE nombre=VALUES(nombre),sucursal=VALUES(sucursal),id_bodega=VALUES(id_bodega)";
+        $stmt=$conn->prepare($sql);$stmt->bind_param('isssi',$tenant->accountId,$codigo,$nombreCaja,$sucursal,$idBodega);$stmt->execute();$stmt->close();
+        $stmt=$conn->prepare("SELECT id_caja_fisica,id_bodega FROM pos_caja_fisica WHERE id_cuenta=? AND codigo=? AND activo=1 FOR UPDATE");
         $stmt->bind_param('is',$tenant->accountId,$codigo);$stmt->execute();$physical=$stmt->get_result()->fetch_assoc();$stmt->close();
         if(!$physical)throw new Exception('La caja física no está activa.');
         $physicalId=(int)$physical['id_caja_fisica'];
@@ -907,7 +960,7 @@ function POST_caja_abrir($data) {
         $conn->commit();
 
         // Fetch created caja
-        $sql = "SELECT * FROM pos_caja WHERE id_caja = ?";
+        $sql = "SELECT c.*,f.id_bodega FROM pos_caja c JOIN pos_caja_fisica f ON f.id_caja_fisica=c.id_caja_fisica WHERE c.id_caja = ?";
         $stmt = $conn->prepare($sql);
         $stmt->bind_param('i', $idCaja);
         $stmt->execute();
@@ -1047,13 +1100,19 @@ function POST_caja_movimiento($data) {
         // Update caja monto_actual
         if ($tipo === 'INGRESO') {
             $sql = "UPDATE pos_caja SET monto_actual = monto_actual + ? WHERE id_caja = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param('ii', $monto, $idCaja);
         } else {
-            $sql = "UPDATE pos_caja SET monto_actual = monto_actual - ? WHERE id_caja = ?";
+            $sql = "UPDATE pos_caja SET monto_actual = monto_actual - ? WHERE id_caja = ? AND monto_actual >= ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param('iii', $monto, $idCaja, $monto);
         }
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param('ii', $monto, $idCaja);
         $stmt->execute();
+        $movimientoAplicado = $stmt->affected_rows === 1;
         $stmt->close();
+        if (!$movimientoAplicado) {
+            throw new Exception('La caja no tiene efectivo suficiente para registrar el egreso.');
+        }
 
         insertAuditoria($conn, $uid, 'caja_movimiento', "{$tipo}: {$monto} - {$concepto}", $idCaja, 'pos_caja');
 
@@ -1073,8 +1132,12 @@ function POST_venta_crear($data) {
     $items          = $data->items ?? [];
     $pagos          = $data->pagos ?? [];
     $idempotencyKey = trim((string) ($data->idempotency_key ?? ''));
+    $tipoDocumento  = strtoupper(trim((string)($data->tipo_documento ?? 'BOLETA')));
+    if (!in_array($tipoDocumento, ['BOLETA','FACTURA'], true)) {
+        json(['error'=>true,'message'=>'El POS solo puede emitir BOLETA o FACTURA'], 400);
+    }
+    $data->tipo_documento = $tipoDocumento;
     $requestHash    = posSaleRequestHash($data);
-    $tipoDocumento  = $data->tipo_documento ?? 'BOLETA';
     $clienteData    = $data->cliente ?? null;
     $idCliente      = $data->id_cliente ?? posPaymentValue($clienteData, 'id_cliente');
     $clienteNombre  = $data->cliente_nombre ?? posPaymentValue($clienteData, 'nombre', '');
@@ -1155,11 +1218,11 @@ function POST_venta_crear($data) {
     $priceOverrides=[];
     $basePrices=[];
     foreach ($items as $item) {
-        $idp=(int)($item->id_producto??0); $sent=(int)($item->precio_unitario??0);
+        $idp=(int)($item->id_producto??0); $sent=(int)round((float)($item->precio_unitario??0));
         $stmt=$conn->prepare('SELECT precio_venta FROM producto WHERE id_producto=? AND id_cuenta=? AND activo=1');
         $stmt->bind_param('ii',$idp,$tenant->accountId); $stmt->execute(); $row=$stmt->get_result()->fetch_assoc(); $stmt->close();
         if (!$row) json(['error'=>true,'message'=>'Producto no encontrado o inactivo'],400);
-        $base=(int)$row['precio_venta'];
+        $base=(int)round((float)$row['precio_venta']);
         $basePrices[$idp]=$base;
         if ($sent!==$base) $priceOverrides[]=['id_producto'=>$idp,'precio_base'=>$base,'precio_nuevo'=>$sent];
     }
@@ -1217,15 +1280,9 @@ function POST_venta_crear($data) {
         }
         $idSesion = (int) $sesion['id_sesion'];
 
-        // Get default bodega
-        $idBodega = getDefaultBodega($conn);
-        if ($idBodega === 0) {
-            throw new Exception('No se encontró una bodega activa.');
-        }
-
         // Lock the cashier's open register for the complete sale.
         $requestedCaja = (int) ($data->id_caja ?? 0);
-        $sql = "SELECT * FROM pos_caja WHERE id_user=? AND id_cuenta=? AND estado='ABIERTA' ORDER BY id_caja DESC LIMIT 1 FOR UPDATE";
+        $sql = "SELECT c.*,f.id_bodega FROM pos_caja c JOIN pos_caja_fisica f ON f.id_caja_fisica=c.id_caja_fisica AND f.id_cuenta=c.id_cuenta JOIN bodega b ON b.id_bodega=f.id_bodega AND b.id_cuenta=c.id_cuenta AND b.estado='ACTIVA' WHERE c.id_user=? AND c.id_cuenta=? AND c.estado='ABIERTA' ORDER BY c.id_caja DESC LIMIT 1 FOR UPDATE";
         $stmt = $conn->prepare($sql);
         $stmt->bind_param('ii', $uid, $tenant->accountId);
         $stmt->execute();
@@ -1235,6 +1292,8 @@ function POST_venta_crear($data) {
             throw new Exception('No hay una caja abierta válida para esta venta.');
         }
         $idCaja = (int) $caja['id_caja'];
+        $idBodega = (int)($caja['id_bodega'] ?? 0);
+        if ($idBodega <= 0) throw new Exception('La caja abierta no tiene una bodega activa asignada.');
         $saleSucursal=(int)($data->id_sucursal??0);
         if($saleSucursal>0){$stmt=$conn->prepare('SELECT id_sucursal FROM sucursal WHERE id_sucursal=? AND id_cuenta=? AND activo=1 AND (nombre=? OR codigo=?)');$stmt->bind_param('iiss',$saleSucursal,$tenant->accountId,$caja['sucursal'],$caja['sucursal']);$stmt->execute();$validBranch=$stmt->get_result()->fetch_assoc();$stmt->close();if(!$validBranch)throw new Exception('La sucursal no corresponde a la caja abierta.');}
         else{$stmt=$conn->prepare('SELECT id_sucursal FROM sucursal WHERE id_cuenta=? AND activo=1 AND (nombre=? OR codigo=?) ORDER BY id_sucursal LIMIT 1');$stmt->bind_param('iss',$tenant->accountId,$caja['sucursal'],$caja['sucursal']);$stmt->execute();$branch=$stmt->get_result()->fetch_assoc();$stmt->close();$saleSucursal=(int)($branch['id_sucursal']??0);}
@@ -1253,6 +1312,18 @@ function POST_venta_crear($data) {
             $idCliente=$clientIdInt;$clienteNombre=$clientRow['nombre'];$clienteRut=$clientRow['rut'];$clienteCorreo=$clientRow['correo'];$clienteTelefono=$clientRow['telefono'];
         } else {
             $idCliente=null;
+        }
+        if ($tipoDocumento === 'FACTURA' && (!$idCliente || !posRutValido((string)$clienteRut))) {
+            throw new Exception('Una FACTURA requiere un cliente activo con RUT chileno válido.');
+        }
+
+        $stmt=$conn->prepare('SELECT * FROM config_boleta WHERE id_cuenta=? AND activo=1 ORDER BY id_config DESC LIMIT 1');
+        $stmt->bind_param('i',$tenant->accountId);$stmt->execute();$receiptConfig=$stmt->get_result()->fetch_assoc()?:[];$stmt->close();
+        if ($tipoDocumento === 'FACTURA') {
+            $iva = $receiptConfig['iva_porcentaje'] ?? null;
+            if (!is_numeric($iva) || (float)$iva < 0 || (float)$iva > 100) {
+                throw new Exception('Configure una tasa de IVA activa antes de emitir FACTURAS.');
+            }
         }
 
         // The rule engine owns eligibility and monetary calculation. It also
@@ -1325,7 +1396,7 @@ function POST_venta_crear($data) {
         foreach ($items as $item) {
             $idProducto     = (int) ($item->id_producto ?? 0);
             $cantidad       = (float) ($item->cantidad ?? 0);
-            $precioUnitario = (int) ($item->precio_unitario ?? 0);
+            $precioUnitario = (int) round((float) ($item->precio_unitario ?? 0));
             $itemOriginalTotal = (int) round($precioUnitario * $cantidad);
             $remainingQty=$promotionRemainingQuantity[$idProducto]??$cantidad;
             $remainingDiscount=$promotionRemainingDiscount[$idProducto]??0;
@@ -1354,18 +1425,21 @@ function POST_venta_crear($data) {
             if ($precioUnitario <= 0) {
                 throw new Exception('El precio unitario debe ser mayor a cero.');
             }
-            if (!isset($basePrices[$idProducto]) || (int) $producto['precio_venta'] !== $basePrices[$idProducto]) {
+            if (
+                !isset($basePrices[$idProducto])
+                || (int) round((float) $producto['precio_venta']) !== $basePrices[$idProducto]
+            ) {
                 throw new Exception('El precio del producto cambió. Recargue el POS y vuelva a intentar.');
             }
 
             $tipoVenta = $producto['tipo_venta'] ?? 'UNIDAD';
-            if ($tipoVenta === 'UNIDAD' && abs($cantidad - round($cantidad)) > 0.000001) {
-                throw new Exception("El producto \"{$producto['nombre_producto']}\" solo admite cantidades enteras.");
-            }
-            if ($tipoVenta !== 'UNIDAD' && abs($cantidad - round($cantidad, 3)) > 0.000001) {
-                throw new Exception("El producto \"{$producto['nombre_producto']}\" admite como máximo 3 decimales.");
-            }
-            $costoUnit = (int) round(((float) ($producto['costo_promedio'] ?? 0)) * 100);
+            $cantidadStock = posNormalizeStockQuantity(
+                $cantidad,
+                $tipoVenta,
+                "El producto \"{$producto['nombre_producto']}\""
+            );
+            $cantidad = $cantidadStock;
+            $costoUnit = round((float)($producto['costo_promedio'] ?? 0), 2);
             $linePromotion=$promotionLineMap[$idProducto]??[];
             $receiptItems[]=['id_producto'=>$idProducto,'codigo'=>$producto['codigo_de_barras'],'sku'=>$producto['sku'],'nombre'=>$producto['nombre_producto'],'cantidad'=>$cantidad,
                 'precio_original'=>$precioUnitario,'descuento'=>$itemDiscount,'precio_final_promedio'=>$cantidad>0?(int)round($itemTotal/$cantidad):0,
@@ -1381,24 +1455,11 @@ function POST_venta_crear($data) {
             $stmt->execute();
             $stmt->close();
 
-            // Descontar stock
-            if ($tipoVenta === 'UNIDAD') {
-                $cantidadInt = (int) ceil($cantidad);
-                $affected = descontarStock($conn, $idProducto, $idBodega, $cantidadInt);
-                if ($affected === 0) {
-                    throw new Exception("Stock insuficiente para el producto \"{$producto['nombre_producto']}\".");
-                }
-            } else {
-                // Peso/volumen: stock centralizado
-                $affected = actualizarStock($conn, $idProducto, $idBodega, 'disponible', -$cantidad);
-                if ($affected === 0) {
-                    throw new Exception("Stock insuficiente para el producto \"{$producto['nombre_producto']}\".");
-                }
-            }
+            // Stock y kardex deben mover exactamente la misma cantidad decimal.
+            descontarStock($conn, $idProducto, $idBodega, $cantidadStock);
 
             // Kardex
-            $salidaReal = ($tipoVenta === 'UNIDAD') ? (int) round($cantidad) : $cantidad;
-            actualizarKardex($conn, $uid, $idProducto, $idBodega, 'VENTA', $idPedido, 'PEDIDO', 0, $salidaReal, $costoUnit, "Venta #{$idPedido}");
+            actualizarKardex($conn, $uid, $idProducto, $idBodega, 'VENTA', $idPedido, 'PEDIDO', 0, $cantidadStock, $costoUnit, "Venta #{$idPedido}");
         }
 
         // INSERT pagos
@@ -1458,8 +1519,6 @@ function POST_venta_crear($data) {
             if(!$converted)throw new RuntimeException('No se pudo vincular la cotización a la venta.');
         }
 
-        $stmt=$conn->prepare('SELECT * FROM config_boleta WHERE id_cuenta=? AND activo=1 ORDER BY id_config DESC LIMIT 1');
-        $stmt->bind_param('i',$tenant->accountId);$stmt->execute();$receiptConfig=$stmt->get_result()->fetch_assoc()?:[];$stmt->close();
         // The logo is loaded from the current account asset when reprinting; it
         // is not duplicated into every sale snapshot.
         unset($receiptConfig['logo']);
@@ -1520,7 +1579,12 @@ function POST_venta_anular($data) {
         json(['error' => true, 'message' => 'ID de pedido requerido'], 400);
     }
 
-    $ctx=['entidad_tipo'=>'pedido','entidad_id'=>(string)$pedidoId];
+    $motivo = trim((string) ($data->motivo ?? ''));
+    if (mb_strlen($motivo) < 3 || mb_strlen($motivo) > 500) {
+        json(['error' => true, 'message' => 'Ingrese un motivo de anulación entre 3 y 500 caracteres'], 400);
+    }
+
+    $ctx=['entidad_tipo'=>'pedido','entidad_id'=>(string)$pedidoId,'motivo'=>$motivo];
     supervisorRequire('pos.anular_venta',$ctx,$data->supervisor_token ?? null);
 
     try {
@@ -1529,10 +1593,10 @@ function POST_venta_anular($data) {
         $sql = "SELECT p.*, s.id_user AS sesion_user
                 FROM pedido p
                 JOIN sesion s ON p.id_sesion = s.id_sesion
-                WHERE p.id_pedido = ?
+                WHERE p.id_pedido = ? AND p.id_cuenta = ?
                 FOR UPDATE";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param('i', $pedidoId);
+        $stmt->bind_param('ii', $pedidoId, $tenant->accountId);
         $stmt->execute();
         $result = $stmt->get_result();
         $pedido = $result->fetch_assoc();
@@ -1543,6 +1607,25 @@ function POST_venta_anular($data) {
         }
         if ((int) $pedido['anulado'] === 1) {
             throw new Exception('El pedido ya está anulado.');
+        }
+        if (strtoupper((string)($pedido['tipo_documento'] ?? '')) === 'FACTURA') {
+            throw new Exception('Una FACTURA debe corregirse mediante una nota de crédito fiscal.');
+        }
+        $stmt = $conn->prepare("SELECT id_factura FROM factura WHERE id_cuenta=? AND id_pedido=? AND tipo='FACTURA' AND estado<>'ANULADA' LIMIT 1 FOR UPDATE");
+        $stmt->bind_param('ii', $tenant->accountId, $pedidoId);
+        $stmt->execute();
+        $facturaActiva = (bool)$stmt->get_result()->fetch_row();
+        $stmt->close();
+        if ($facturaActiva) {
+            throw new Exception('La venta tiene una factura activa; emita una nota de crédito fiscal.');
+        }
+        $stmt = $conn->prepare('SELECT id_devolucion FROM pos_devolucion WHERE id_pedido=? LIMIT 1 FOR UPDATE');
+        $stmt->bind_param('i', $pedidoId);
+        $stmt->execute();
+        $hasReturn = (bool) $stmt->get_result()->fetch_row();
+        $stmt->close();
+        if ($hasReturn) {
+            throw new Exception('El pedido tiene devoluciones y no puede anularse completo.');
         }
 
         // Verify ownership (via cuenta)
@@ -1592,28 +1675,22 @@ function POST_venta_anular($data) {
             $cantidad   = (float) $det['cantidad_pedida'];
 
             // Get product tipo_venta
-            $sql = "SELECT tipo_venta, costo_promedio FROM producto WHERE id_producto = ?";
+            $sql = "SELECT tipo_venta, costo_promedio, nombre_producto FROM producto WHERE id_producto = ? AND id_cuenta = ?";
             $stmt = $conn->prepare($sql);
-            $stmt->bind_param('i', $idProducto);
+            $stmt->bind_param('ii', $idProducto, $tenant->accountId);
             $stmt->execute();
             $res = $stmt->get_result();
-            $prod = $res->fetch_assoc() ?: ['tipo_venta' => 'UNIDAD', 'costo_promedio' => 0];
+            $prod = $res->fetch_assoc();
             $stmt->close();
-
-            $tipoVenta = $prod['tipo_venta'];
-            $costoUnit = (int) round(((float) $prod['costo_promedio']) * 100);
-
-            if ($tipoVenta === 'UNIDAD') {
-                reponerStock($conn, $idProducto, $idBodega, (int) ceil($cantidad));
-            } else {
-                $affected = actualizarStock($conn, $idProducto, $idBodega, 'disponible', $cantidad);
-                if ($affected === 0) {
-                    throw new Exception('No se pudo reponer el stock para la anulacion del pedido.');
-                }
+            if (!$prod) {
+                throw new Exception('Producto del pedido no encontrado en la cuenta.');
             }
 
-            $entradaKardex = ($tipoVenta === 'UNIDAD') ? (int) ceil($cantidad) : 0;
-            actualizarKardex($conn, $uid, $idProducto, $idBodega, 'ANULACION', $pedidoId, 'PEDIDO', $entradaKardex, 0, $costoUnit, "Anulación pedido #{$pedidoId}");
+            $tipoVenta = $prod['tipo_venta'];
+            $costoUnit = round((float) $prod['costo_promedio'], 2);
+            $cantidadStock = posNormalizeStockQuantity($cantidad, $tipoVenta, (string) $prod['nombre_producto']);
+            reponerStock($conn, $idProducto, $idBodega, $cantidadStock);
+            actualizarKardex($conn, $uid, $idProducto, $idBodega, 'ANULACION', $pedidoId, 'PEDIDO', $cantidadStock, 0, $costoUnit, "Anulación pedido #{$pedidoId}: {$motivo}");
         }
 
         // UPDATE pedido anulado=1
@@ -1643,10 +1720,14 @@ function POST_venta_anular($data) {
                 $metodoPago = posCanonicalPaymentMethod($pago['nombre_metodo_pago'] ?? 'EFECTIVO');
 
                 if ($metodoPago === 'EFECTIVO') {
-                    $sql = "UPDATE pos_caja SET monto_actual = monto_actual - ? WHERE id_caja = ?";
+                    $sql = "UPDATE pos_caja SET monto_actual = monto_actual - ? WHERE id_caja = ? AND id_cuenta = ? AND monto_actual >= ?";
                     $stmt = $conn->prepare($sql);
-                    $stmt->bind_param('ii', $montoPago, $idCaja);
+                    $stmt->bind_param('iiii', $montoPago, $idCaja, $tenant->accountId, $montoPago);
                     $stmt->execute();
+                    if ($stmt->affected_rows !== 1) {
+                        $stmt->close();
+                        throw new Exception('La caja no tiene efectivo suficiente para anular esta venta. Procese una devolución desde una caja con saldo disponible.');
+                    }
                     $stmt->close();
                 }
 
@@ -1659,7 +1740,14 @@ function POST_venta_anular($data) {
             }
         }
 
-        insertAuditoria($conn, $uid, 'venta_anular', "Pedido #{$pedidoId} anulado", $pedidoId, 'pedido');
+        insertAuditoria(
+            $conn,
+            $uid,
+            'venta_anular',
+            (string) json_encode(['pedido_id'=>$pedidoId,'motivo'=>$motivo], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            $pedidoId,
+            'pedido'
+        );
 
         $conn->commit();
 
@@ -1918,188 +2006,10 @@ function POST_cotizacion_crear($data) {
 }
 
 function POST_cotizacion_convertir($data) {
-    global $conn, $uid, $tenant;
-
-    $idCotizacion = (int) ($data->id_cotizacion ?? 0);
-    if ($idCotizacion <= 0) {
-        json(['error' => true, 'message' => 'ID de cotización requerido'], 400);
-    }
-
-    $conn->begin_transaction();
-    try {
-        // Get cotizacion
-        $sql = "SELECT * FROM pos_cotizacion WHERE id_cotizacion = ? AND id_user = ? AND convertida = 0 FOR UPDATE";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param('ii', $idCotizacion, $uid);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $cot = $result->fetch_assoc();
-        $stmt->close();
-
-        if (!$cot) {
-            throw new Exception('Cotización no encontrada o ya convertida.');
-        }
-
-        // Get items
-        $sql = "SELECT * FROM pos_cotizacion_detalle WHERE id_cotizacion = ?";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param('i', $idCotizacion);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $items = [];
-        while ($row = $result->fetch_assoc()) {
-            $items[] = $row;
-        }
-        $stmt->close();
-
-        if (empty($items)) {
-            throw new Exception('Cotización sin productos.');
-        }
-
-        // Get session and bodega
-        $sql = "SELECT * FROM sesion WHERE id_user = ? AND fecha_cierre IS NULL ORDER BY id_sesion DESC LIMIT 1 FOR UPDATE";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param('i', $uid);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $sesion = $result->fetch_assoc();
-        $stmt->close();
-
-        if (!$sesion) {
-            throw new Exception('No hay sesión activa. Abra la caja primero.');
-        }
-        $idSesion = (int) $sesion['id_sesion'];
-
-        $idBodega = getDefaultBodega($conn);
-        if ($idBodega === 0) {
-            throw new Exception('No se encontró una bodega activa.');
-        }
-
-        $caja = getOpenCaja($conn, $uid);
-        $idCaja = $caja ? (int) $caja['id_caja'] : null;
-
-        $idCliente = $cot['id_cliente'];
-        $clienteNombre  = $cot['cliente_nombre'] ?? '';
-        $clienteRut     = $cot['cliente_rut'] ?? '';
-        $clienteCorreo  = $cot['cliente_correo'] ?? '';
-        $clienteTelefono = $cot['cliente_telefono'] ?? '';
-        $precioTotal = (int) $cot['total'];
-        $tipoDocumento = $data->tipo_documento ?? 'BOLETA';
-        $pagos = $data->pagos ?? [];
-
-        if (empty($pagos)) {
-            // Auto-create single EFECTIVO pago
-            $pagos = [(object) ['metodo' => 'EFECTIVO', 'monto' => $precioTotal]];
-        }
-
-        $pagoTotal = 0;
-        foreach ($pagos as $pago) {
-            $pagoTotal += (int) ($pago->monto ?? 0);
-        }
-        $diferenciaPedido = $pagoTotal - $precioTotal;
-
-        // INSERT pedido
-        $sql = "INSERT INTO pedido (id_cuenta, id_sesion, id_cliente, id_caja, id_bodega, tipo_documento,
-                    cliente_nombre, cliente_rut, cliente_correo, cliente_telefono,
-                    precio_total, pago_total, diferencia, fecha)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param('iiiisssssiiii', $tenant->accountId, $idSesion, $idCliente, $idCaja, $idBodega, $tipoDocumento,
-            $clienteNombre, $clienteRut, $clienteCorreo, $clienteTelefono,
-            $precioTotal, $pagoTotal, $diferenciaPedido);
-        $stmt->execute();
-        $idPedido = $conn->insert_id;
-        $stmt->close();
-
-        // Process items
-        foreach ($items as $item) {
-            $idProducto     = (int) ($item['id_producto'] ?? 0);
-            $cantidad       = (float) ($item['cantidad'] ?? 1);
-            $precioUnitario = (int) ($item['precio_unitario'] ?? 0);
-            $itemTotal      = (int) ($item['subtotal'] ?? 0);
-
-            if ($idProducto > 0) {
-                // Check stock
-                $sql = "SELECT tipo_venta, costo_promedio FROM producto WHERE id_producto = ? AND id_cuenta = ? AND activo = 1";
-                $stmt = $conn->prepare($sql);
-                $stmt->bind_param('ii', $idProducto, $tenant->accountId);
-                $stmt->execute();
-                $res = $stmt->get_result();
-                $prod = $res->fetch_assoc();
-                $stmt->close();
-
-                if ($prod) {
-                    $tipoVenta = $prod['tipo_venta'] ?? 'UNIDAD';
-                    $costoUnit = (int) round(((float) $prod['costo_promedio']) * 100);
-
-                    // INSERT detalle
-                    $sql = "INSERT INTO detalle_pedido (id_pedido, id_producto, cantidad_pedida, precio_total)
-                            VALUES (?, ?, ?, ?)";
-                    $stmt = $conn->prepare($sql);
-                    $stmt->bind_param('iidi', $idPedido, $idProducto, $cantidad, $itemTotal);
-                    $stmt->execute();
-                    $stmt->close();
-
-                    // Descontar stock
-                    if ($tipoVenta === 'UNIDAD') {
-                        descontarStock($conn, $idProducto, $idBodega, (int) ceil($cantidad));
-                    } else {
-                        $affected = actualizarStock($conn, $idProducto, $idBodega, 'disponible', -$cantidad);
-                        if ($affected === 0) {
-                            throw new Exception('No se pudo descontar el stock para la venta desde cotizacion.');
-                        }
-                    }
-
-                    $salidaKardex = ($tipoVenta === 'UNIDAD') ? (int) ceil($cantidad) : 0;
-                    actualizarKardex($conn, $uid, $idProducto, $idBodega, 'VENTA', $idPedido, 'PEDIDO', 0, $salidaKardex, $costoUnit, "Venta desde cotización #{$idCotizacion}");
-                }
-            }
-        }
-
-        // INSERT pagos
-        foreach ($pagos as $pago) {
-            $metodoPago = $pago->metodo ?? $pago->nombre_metodo_pago ?? 'EFECTIVO';
-            $montoPago  = (int) ($pago->monto ?? 0);
-
-            $sql = "INSERT INTO metodo_de_pago (id_pedido, nombre_metodo_pago, monto) VALUES (?, ?, ?)";
-            $stmt = $conn->prepare($sql);
-            $stmt->bind_param('isi', $idPedido, $metodoPago, $montoPago);
-            $stmt->execute();
-            $stmt->close();
-
-            if ($idCaja) {
-                $sql = "UPDATE pos_caja SET monto_actual = monto_actual + ? WHERE id_caja = ?";
-                $stmt = $conn->prepare($sql);
-                $stmt->bind_param('ii', $montoPago, $idCaja);
-                $stmt->execute();
-                $stmt->close();
-
-                $sql = "INSERT INTO pos_movimiento_caja (id_caja, id_user, tipo, concepto, monto, metodo, id_pedido)
-                        VALUES (?, ?, 'INGRESO', 'Venta desde cotización', ?, ?, ?)";
-                $stmt = $conn->prepare($sql);
-                $stmt->bind_param('iiisi', $idCaja, $uid, $montoPago, $metodoPago, $idPedido);
-                $stmt->execute();
-                $stmt->close();
-            }
-        }
-
-        // Mark cotizacion as converted
-        $sql = "UPDATE pos_cotizacion SET convertida = 1 WHERE id_cotizacion = ?";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param('i', $idCotizacion);
-        $stmt->execute();
-        $stmt->close();
-
-        insertAuditoria($conn, $uid, 'cotizacion_convertir', "Cotización #{$idCotizacion} convertida en Pedido #{$idPedido}", $idPedido, 'pedido');
-
-        $conn->commit();
-
-        json(['success' => true, 'id_pedido' => $idPedido, 'total' => $precioTotal]);
-
-    } catch (Exception $e) {
-        $conn->rollback();
-        json(['error' => true, 'message' => $e->getMessage()], 400);
-    }
+    json([
+        'error' => true,
+        'message' => 'Actualice el POS: la cotización debe cargarse al carrito y cobrarse por el flujo normal.',
+    ], 409);
 }
 
 function POST_cotizacion_eliminar($data) {
@@ -2190,163 +2100,4 @@ function POST_reserva_cancelar($data) {
     }
 
     json(['success' => true, 'message' => 'Reserva cancelada']);
-}
-
-function POST_devolucion_crear($data) {
-    global $conn, $uid, $tenant;
-
-    $pedidoId = (int) ($data->id_pedido ?? 0);
-    $tipo     = $data->tipo ?? 'TOTAL';
-    $motivo   = $data->motivo ?? '';
-    $items    = $data->items ?? [];
-
-    if ($pedidoId <= 0) {
-        json(['error' => true, 'message' => 'ID de pedido requerido'], 400);
-    }
-
-    $ctx=['entidad_tipo'=>'pedido','entidad_id'=>(string)$pedidoId,'tipo'=>$tipo];
-    supervisorRequire('pos.devolucion',$ctx,$data->supervisor_token ?? null);
-    try {
-        // Get pedido
-    $conn->begin_transaction();
-        $sql = "SELECT p.*, s.id_user AS sesion_user
-                FROM pedido p
-                JOIN sesion s ON p.id_sesion = s.id_sesion
-                WHERE p.id_pedido = ? AND p.anulado = 0 AND p.devuelto = 0
-                FOR UPDATE";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param('i', $pedidoId);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $pedido = $result->fetch_assoc();
-        $stmt->close();
-
-        if (!$pedido) {
-            throw new Exception('Pedido no encontrado, anulado o ya devuelto.');
-        }
-
-        // Verify ownership via cuenta
-        $cuenta = buildCuentaFilter($conn, $uid, 's.id_user');
-        $sql = "SELECT p.id_pedido FROM pedido p
-                JOIN sesion s ON p.id_sesion = s.id_sesion
-                WHERE p.id_pedido = ? AND {$cuenta['sql']}";
-        $cParams = $cuenta['params'];
-        $cTypes  = $cuenta['types'];
-        $cParamsFull = array_merge([$pedidoId], $cParams);
-        $cTypesFull  = 'i' . $cTypes;
-        $stmt = $conn->prepare($sql);
-        if ($cParamsFull) {
-            $stmt->bind_param($cTypesFull, ...$cParamsFull);
-        }
-        $stmt->execute();
-        $result = $stmt->get_result();
-        if (!$result->fetch_assoc()) {
-            $stmt->close();
-            throw new Exception('No tiene permisos para esta devolución.');
-        }
-        $stmt->close();
-
-        $idBodega = (int) $pedido['id_bodega'];
-
-        // Calculate total monto
-        $montoTotal = 0;
-        foreach ($items as $item) {
-            $sub = (int) ($item->subtotal ?? 0);
-            $montoTotal += $sub;
-        }
-
-        // INSERT devolucion
-        $sql = "INSERT INTO pos_devolucion (id_user, id_pedido, tipo, motivo, monto_devuelto)
-                VALUES (?, ?, ?, ?, ?)";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param('iissi', $uid, $pedidoId, $tipo, $motivo, $montoTotal);
-        $stmt->execute();
-        $idDevolucion = $conn->insert_id;
-        $stmt->close();
-
-        // Process items
-        foreach ($items as $item) {
-            $idProducto     = (int) ($item->id_producto ?? 0);
-            $cantidad       = (float) ($item->cantidad ?? 1);
-            $precioUnit     = (int) ($item->precio_unitario ?? 0);
-            $subtotalItem   = (int) ($item->subtotal ?? 0);
-
-            // INSERT detalle
-            $sql = "INSERT INTO pos_devolucion_detalle (id_devolucion, id_producto, cantidad, precio_unitario, subtotal)
-                    VALUES (?, ?, ?, ?, ?)";
-            $stmt = $conn->prepare($sql);
-            $stmt->bind_param('iidii', $idDevolucion, $idProducto, $cantidad, $precioUnit, $subtotalItem);
-            $stmt->execute();
-            $stmt->close();
-
-            // Get product data
-            $sql = "SELECT tipo_venta, costo_promedio FROM producto WHERE id_producto = ?";
-            $stmt = $conn->prepare($sql);
-            $stmt->bind_param('i', $idProducto);
-            $stmt->execute();
-            $res = $stmt->get_result();
-            $prod = $res->fetch_assoc() ?: ['tipo_venta' => 'UNIDAD', 'costo_promedio' => 0];
-            $stmt->close();
-
-            $tipoVenta = $prod['tipo_venta'];
-            $costoUnit = (int) round(((float) $prod['costo_promedio']) * 100);
-
-            // Reponer stock
-            if ($tipoVenta === 'UNIDAD') {
-                reponerStock($conn, $idProducto, $idBodega, (int) ceil($cantidad));
-            } else {
-                $affected = actualizarStock($conn, $idProducto, $idBodega, 'disponible', $cantidad);
-                if ($affected === 0) {
-                    throw new Exception('No se pudo reponer el stock para la devolucion.');
-                }
-            }
-
-            // Kardex
-            $entradaKardex = ($tipoVenta === 'UNIDAD') ? (int) ceil($cantidad) : 0;
-            actualizarKardex($conn, $uid, $idProducto, $idBodega, 'DEVOLUCION', $idDevolucion, 'DEVOLUCION', $entradaKardex, 0, $costoUnit, "Devolución #{$idDevolucion}, Pedido #{$pedidoId}");
-        }
-
-        // Revertir el pago en caja. Para devoluciones parciales se distribuye
-        // proporcionalmente entre los métodos originales; en TOTAL se revierte todo.
-        $idCaja=(int)($pedido['id_caja']??0);
-        if ($idCaja>0 && $montoTotal>0) {
-            $stmt=$conn->prepare('SELECT nombre_metodo_pago,monto FROM metodo_de_pago WHERE id_pedido=? ORDER BY id_metodo_de_pago');
-            $stmt->bind_param('i',$pedidoId);$stmt->execute();$pagosOriginales=$stmt->get_result()->fetch_all(MYSQLI_ASSOC);$stmt->close();
-            $totalOriginal=max(1,(int)($pedido['precio_total']??0));
-            $restante=min($montoTotal,$totalOriginal);$cantidadPagos=count($pagosOriginales);
-            foreach ($pagosOriginales as $idx=>$pago) {
-                if ($restante<=0) break;
-                $montoPago=(int)($pago['monto']??0);
-                $montoReversa=($idx===$cantidadPagos-1)?$restante:min($restante,(int)round($montoPago*$montoTotal/$totalOriginal));
-                if ($montoReversa<=0) continue;
-                $metodo=posCanonicalPaymentMethod($pago['nombre_metodo_pago']??'EFECTIVO');
-                $concepto="Devolución venta #{$pedidoId}";
-                if ($metodo==='EFECTIVO') {
-                    $stmt=$conn->prepare('UPDATE pos_caja SET monto_actual=monto_actual-? WHERE id_caja=?');
-                    $stmt->bind_param('ii',$montoReversa,$idCaja);$stmt->execute();$stmt->close();
-                }
-                $stmt=$conn->prepare("INSERT INTO pos_movimiento_caja(id_caja,id_user,tipo,concepto,monto,metodo,id_pedido) VALUES(?,?,'EGRESO',?,?,?,?)");
-                $stmt->bind_param('iisisi',$idCaja,$uid,$concepto,$montoReversa,$metodo,$pedidoId);$stmt->execute();$stmt->close();
-                $restante-=$montoReversa;
-            }
-            if ($restante>0) throw new Exception('No se pudo distribuir completamente el monto de la devolución.');
-        }
-
-        // Mark pedido as devuelto
-        $sql = "UPDATE pedido SET devuelto = 1 WHERE id_pedido = ?";
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param('i', $pedidoId);
-        $stmt->execute();
-        $stmt->close();
-
-        insertAuditoria($conn, $uid, 'devolucion_crear', "Devolución #{$idDevolucion} del Pedido #{$pedidoId}", $idDevolucion, 'pos_devolucion');
-
-        $conn->commit();
-
-        json(['success' => true, 'id_devolucion' => $idDevolucion, 'monto_devuelto' => $montoTotal]);
-
-    } catch (Exception $e) {
-        $conn->rollback();
-        json(['error' => true, 'message' => $e->getMessage()], 400);
-    }
 }

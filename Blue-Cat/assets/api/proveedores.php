@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/_db.php';
 $uid = requireUser();
+requireModuleEntitlement('proveedores');
 
 function requierePermiso($modulo, $accion) {
     requirePermission($modulo, $accion);

@@ -11,6 +11,7 @@ permissions:
 jobs:
   mysql-isolation:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       mysql:
         image: mysql:8.4
@@ -26,6 +27,11 @@ jobs:
           --health-retries=20
     steps:
       - uses: actions/checkout@v4
+      - name: PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mysqli, curl, zip
       - name: PHP runtime
         run: php --version
       - name: Configure isolated database
@@ -40,17 +46,58 @@ jobs:
             'DB_PASSWORD=' > Blue-Cat/.env.ci
       - name: Apply all migrations
         run: php Blue-Cat/scripts/migrate.php --env=.env.ci
+      - name: Verify legacy inventory upgrade
+        run: php Blue-Cat/scripts/test-migration-026-legacy-upgrade.php --env=.env.ci
+      - name: Verify migration 028 upgrade
+        run: php Blue-Cat/scripts/test-migration-028-upgrade.php --env=.env.ci
+      - name: Verify migration 029 reconciliation
+        run: php Blue-Cat/scripts/test-migration-029-upgrade.php --env=.env.ci
+      - name: Verify migration 030 product identity
+        run: php Blue-Cat/scripts/test-migration-030-upgrade.php --env=.env.ci
+      - name: Verify module entitlements
+        run: php Blue-Cat/scripts/test-module-entitlements.php --env=.env.ci
       - name: Verify tenant isolation
         run: php Blue-Cat/scripts/test-tenant-isolation.php --env=.env.ci
       - name: Verify API tenant isolation
         run: php Blue-Cat/scripts/test-api-tenant-isolation.php --env=.env.ci
       - name: Verify employee authorization
         run: php Blue-Cat/scripts/test-employees-authorization.php --env=.env.ci
+      - name: Verify supervisor authorization
+        run: php Blue-Cat/scripts/test-supervisor-authorization.php --env=.env.ci
       - name: Verify POS payment rules
         run: php Blue-Cat/scripts/test-pos-integrity.php
+      - name: Verify weighted POS quantities
+        run: php Blue-Cat/scripts/test-pos-weight-quantities.php --env=.env.ci
+      - name: Verify inventory transactions
+        run: php Blue-Cat/scripts/test-inventory-integrity.php --env=.env.ci
+      - name: Verify product import integrity
+        run: php Blue-Cat/scripts/test-product-import-integrity.php --env=.env.ci
+      - name: Verify invoice integrity
+        run: php Blue-Cat/scripts/test-factura-integrity.php --env=.env.ci
+      - name: Verify signed fiscal dashboard
+        run: php Blue-Cat/scripts/test-dashboard-signed-notes.php --env=.env.ci
+      - name: Verify legacy fiscal reconciliation
+        run: php Blue-Cat/scripts/test-factura-legacy-reconciliation.php --env=.env.ci
       - name: Verify promotion rule engine
         run: php Blue-Cat/scripts/test-promotion-engine.php --env=.env.ci
       - name: Verify concurrent POS sales
         run: php Blue-Cat/scripts/test-pos-concurrency.php --env=.env.ci
       - name: Verify POS invariants
         run: php Blue-Cat/scripts/verify-pos-integrity.php --env=.env.ci
+      - name: Verify clean installation bootstrap
+        run: php Blue-Cat/scripts/test-installation-bootstrap.php --env=.env.ci
+      - name: Start isolated API server
+        shell: bash
+        run: |
+          BLUECAT_ENV_FILE="$PWD/Blue-Cat/.env.ci" \
+            php -S 127.0.0.1:8765 -t Blue-Cat >/tmp/bluecat-api.log 2>&1 &
+          for attempt in $(seq 1 20); do
+            if curl --silent --fail http://127.0.0.1:8765/index.html >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/bluecat-api.log
+          exit 1
+      - name: Verify authentication and authorization foundation
+        run: php Blue-Cat/scripts/test-security-foundation.php --env=.env.ci --base-url=http://127.0.0.1:8765/assets/api

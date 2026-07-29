@@ -26,7 +26,7 @@ if (!is_array($lock) || ($lock['schema'] ?? 0) !== 1 || ($lock['platform'] ?? ''
 
 $requiredFiles = [
     'templates/Caddyfile.template'=>['@private path','php_fastcgi 127.0.0.1:9074','tls internal'],
-    'templates/php.ini.template'=>['session.cookie_secure=1','display_errors=Off','extension=mysqli'],
+    'templates/php.ini.template'=>['session.cookie_secure=1','display_errors=Off','extension=mysqli','extension=zip'],
     'templates/mariadb.ini.template'=>['bind-address=127.0.0.1','port=3307','local-infile=0'],
     'services/BlueCatDatabase.xml.template'=>['<id>BlueCatDatabase</id>','onfailure action="restart"'],
     'services/BlueCatPhp.xml.template'=>['<depend>BlueCatDatabase</depend>','127.0.0.1:9074'],

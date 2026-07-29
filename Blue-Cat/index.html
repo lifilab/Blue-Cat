@@ -165,9 +165,6 @@
       </div>
       <button type="button" class="btn btn-primary" onclick="validateLogin()"><i class="fas fa-sign-in-alt"></i> Ingresar</button>
     </form>
-    <div class="divider">o</div>
-    <button type="button" class="btn btn-secondary" onclick="showCreateAccountPopup()"><i class="fas fa-user-plus"></i> Crear cuenta</button>
-    <div id="account-success" class="form-msg success" style="display:none;"><i class="fas fa-check-circle"></i> Cuenta creada exitosamente</div>
   </div>
 
   <!-- Loader -->
@@ -178,20 +175,7 @@
     </div>
   </div>
 
-  <div id="create-account-popup" class="popup">
-    <div class="popup-content">
-      <span class="close-btn" onclick="hideCreateAccountPopup()">&times;</span>
-      <h2><i class="fas fa-user-plus"></i> Crear cuenta</h2>
-      <div id="account-error" class="form-msg error" style="display:none;margin-bottom:14px;"></div>
-      <input type="text" id="new-username" class="input" placeholder="Nombre de usuario" required>
-      <input type="text" id="e-mail" name="e-mail" class="input" placeholder="Correo electrónico" required>
-      <input type="password" id="new-password" name="new-password" class="input" placeholder="Contraseña" required>
-      <input type="password" id="confirm-password" name="confirm-password" class="input" placeholder="Confirmar contraseña" required>
-      <button type="button" class="btn btn-primary" onclick="createAccount()" style="width:100%;justify-content:center;">Crear cuenta</button>
-    </div>
-  </div>
-
   <script src="assets/js/security.js?v=1"></script>
-  <script src="assets/js/Index.js?v=6"></script>
+  <script src="assets/js/Index.js?v=7"></script>
 </body>
 </html>

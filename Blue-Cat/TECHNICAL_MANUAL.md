@@ -422,9 +422,9 @@ Blue-Cat/
 **POST /assets/api/ventas.php**
 - Descripción: Operaciones de ventas
 - Acciones:
-  - editar: Editar venta
-  - eliminar: Eliminar venta
   - cuadre: Realizar cuadre
+- Compatibilidad: `editar` y `eliminar` responden `409`; una venta confirmada es inmutable.
+- Correcciones: usar `venta_anular` o `devolucion_crear` en `/assets/api/pos.php`, con autorización de supervisor.
 
 ### CRM
 

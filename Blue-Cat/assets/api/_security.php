@@ -123,9 +123,9 @@ function securityRegisterSession(mysqli $db, int $userId): void
     $sessionHash = securityHash(session_id());
     $ipHash = securityHash(securityClientIp());
     $uaHash = securityHash((string)($_SERVER['HTTP_USER_AGENT'] ?? 'local'));
-    $expires = date('Y-m-d H:i:s', time() + securitySessionLifetimeSeconds());
-    $stmt = $db->prepare('INSERT INTO core_sesion (id_cuenta,id_user,session_hash,session_version,ip_hash,user_agent_hash,expires_at) VALUES (?,?,?,?,?,?,?)');
-    $stmt->bind_param('iisisss', $accountId, $userId, $sessionHash, $version, $ipHash, $uaHash, $expires);
+    $lifetime = securitySessionLifetimeSeconds();
+    $stmt = $db->prepare('INSERT INTO core_sesion (id_cuenta,id_user,session_hash,session_version,ip_hash,user_agent_hash,expires_at) VALUES (?,?,?,?,?,?,TIMESTAMPADD(SECOND,?,NOW()))');
+    $stmt->bind_param('iisissi', $accountId, $userId, $sessionHash, $version, $ipHash, $uaHash, $lifetime);
     $stmt->execute();
     $stmt->close();
     $_SESSION['security_session_hash'] = $sessionHash;
@@ -150,10 +150,10 @@ function securityValidateSession(mysqli $db, int $userId): bool
         $row = $stmt->get_result()->fetch_assoc();
         $stmt->close();
         if (!$row) return getenv('APP_ENV') === 'test' && getenv('BLUECAT_TEST_SESSION') === '1';
-        $expires = date('Y-m-d H:i:s', $now + securitySessionLifetimeSeconds());
+        $lifetime = securitySessionLifetimeSeconds();
         $id = (int)$row['id_sesion'];
-        $stmt = $db->prepare('UPDATE core_sesion SET last_activity_at=NOW(),expires_at=? WHERE id_sesion=?');
-        $stmt->bind_param('si', $expires, $id);
+        $stmt = $db->prepare('UPDATE core_sesion SET last_activity_at=NOW(),expires_at=TIMESTAMPADD(SECOND,?,NOW()) WHERE id_sesion=?');
+        $stmt->bind_param('ii', $lifetime, $id);
         $stmt->execute();
         $stmt->close();
         $_SESSION['security_session_hash'] = $sessionHash;

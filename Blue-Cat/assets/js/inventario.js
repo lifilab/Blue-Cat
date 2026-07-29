@@ -1,7 +1,46 @@
 // ========== GLOBALS ==========
 var API = '../assets/api/inventario.php';
+var inventoryPermissionsReady = false;
+var _inventoryCategoriesById = Object.create(null);
+var _inventoryBrandsById = Object.create(null);
 
-function api(accion, data, cb) {
+function inventoryHas(permission) {
+  return inventoryPermissionsReady
+    && typeof window.blueCatHasPermission === 'function'
+    && window.blueCatHasPermission('inventario', permission);
+}
+
+function inventoryHasAll(csv) {
+  return String(csv || '').split(',').filter(Boolean).every(function(permission) {
+    return inventoryHas(permission.trim());
+  });
+}
+
+function requireInventoryUi(permission, message) {
+  if (inventoryHasAll(permission)) return true;
+  toast(message || 'No tienes permiso para realizar esta acción', 'error');
+  return false;
+}
+
+function applyInventoryPermissions() {
+  document.querySelectorAll('[data-inventory-permissions]').forEach(function(element) {
+    element.hidden = !inventoryHasAll(element.getAttribute('data-inventory-permissions'));
+  });
+  document.querySelectorAll('[data-cost-column]').forEach(function(element) {
+    element.hidden = !inventoryHas('ver_costos');
+  });
+}
+
+document.addEventListener('bluecat:permissions-ready', function() {
+  inventoryPermissionsReady = true;
+  applyInventoryPermissions();
+  var productsSection = document.getElementById('section-productos');
+  if (productsSection && productsSection.classList.contains('active')) loadProductos();
+  var kardexSection = document.getElementById('section-kardex');
+  if (kardexSection && kardexSection.classList.contains('active')) loadKardex();
+});
+
+function api(accion, data, cb, errCb) {
   var xhr = new XMLHttpRequest();
   xhr.open('POST', API, true);
   xhr.setRequestHeader('Content-Type', 'application/json');
@@ -11,9 +50,13 @@ function api(accion, data, cb) {
         try { cb(JSON.parse(xhr.responseText)); } catch(e) { cb(xhr.responseText); }
       } else {
         try { var e = JSON.parse(xhr.responseText);
-          if (window.SupervisorApproval && window.SupervisorApproval.handle(e, function(token) { data.supervisor_token=token; api(accion,data,cb); })) return;
+          if (window.SupervisorApproval && window.SupervisorApproval.handle(e, function(token) { data.supervisor_token=token; api(accion,data,cb,errCb); })) return;
           toast(e.message || (typeof e.error==='string' ? e.error : 'Error'), 'error');
-        } catch(ex) { toast('Error de conexión', 'error'); }
+          if (typeof errCb === 'function') errCb(e);
+        } catch(ex) {
+          toast('Error de conexión', 'error');
+          if (typeof errCb === 'function') errCb({ error: true, message: 'Error de conexión' });
+        }
       }
     }
   };
@@ -33,9 +76,16 @@ function toast(msg, type) {
 
 function esc(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
-function num(n) { return parseInt(n) || 0; }
+function num(n) {
+  var value = Number.parseFloat(n);
+  return Number.isFinite(value) ? value : 0;
+}
 
 function fmt(n) { return (num(n)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.'); }
+
+function fmtMoney(n) {
+  return num(n).toLocaleString('es-CL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 
 function closeModal() { document.getElementById('modal-overlay').style.display = 'none'; }
 
@@ -102,16 +152,24 @@ function loadProductos() {
   var estado = document.getElementById('filter-estado').value;
   api('productos', { search: search, id_categoria: num(cat), id_marca: num(marca), estado: estado, limit: 200 }, function(r) {
     var tbody = document.getElementById('tbody-productos');
+    var canViewCosts = inventoryHas('ver_costos');
+    var canEdit = inventoryHas('editar');
+    var canUpdatePrices = inventoryHasAll('precios,ver_costos');
     document.getElementById('product-count').textContent = r.total + ' productos';
     if (!r.items || !r.items.length) {
-      tbody.innerHTML = '<tr><td colspan="11"><div class="empty-state"><i class="fas fa-box-open"></i><p>No hay productos</p></div></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="' + (canViewCosts ? 11 : 10) + '"><div class="empty-state"><i class="fas fa-box-open"></i><p>No hay productos</p></div></td></tr>';
       return;
     }
     tbody.innerHTML = r.items.map(function(p) {
       var badge = p.activo == 0 ? '<span class="badge badge-danger">Inactivo</span>' :
         (num(p.cantidad) === 0 ? '<span class="badge badge-danger">Sin stock</span>' :
         (num(p.cantidad) <= num(p.stock_minimo) && p.stock_minimo > 0 ? '<span class="badge badge-warning">Stock bajo</span>' : '<span class="badge badge-success">' + num(p.cantidad) + ' uds</span>'));
-      return '<tr><td class="cell-id">#' + p.id_producto + '</td><td><a href="#" onclick="showProductEditForm(' + p.id_producto + ');return false;" style="color:#4f46e5;font-weight:500;">' + esc(p.nombre_producto) + '</a></td><td>' + esc(p.codigo_de_barras) + '</td><td>' + esc(p.sku) + '</td><td>' + esc(p.categoria_nombre) + '</td><td>' + esc(p.marca_nombre) + '</td><td>' + badge + '</td><td>$' + fmt(p.precio_costo) + '</td><td class="cell-price">$' + fmt(p.precio_venta) + '</td><td>' + (p.activo == 1 ? '<span class="badge badge-success">Activo</span>' : '<span class="badge badge-danger">Inactivo</span>') + '</td><td><button class="btn btn-outline btn-xs" onclick="showProductDetail(' + p.id_producto + ')" title="Ver detalle"><i class="fas fa-eye"></i></button> <button class="btn btn-outline btn-xs" onclick="showProductEditForm(' + p.id_producto + ')" title="Editar"><i class="fas fa-edit"></i></button></td></tr>';
+      var openAction = canEdit ? 'showProductEditForm' : 'showProductDetail';
+      var costCell = canViewCosts ? '<td>$' + fmtMoney(p.precio_costo) + '</td>' : '';
+      var actions = '<button class="btn btn-outline btn-xs" onclick="showProductDetail(' + p.id_producto + ')" title="Ver detalle"><i class="fas fa-eye"></i></button>';
+      if (canEdit) actions += ' <button class="btn btn-outline btn-xs" onclick="showProductEditForm(' + p.id_producto + ')" title="Editar ficha"><i class="fas fa-edit"></i></button>';
+      if (canUpdatePrices) actions += ' <button class="btn btn-outline btn-xs" onclick="showPriceCostForm(' + p.id_producto + ')" title="Actualizar costo y precio con documento"><i class="fas fa-receipt"></i> Costo/precio</button>';
+      return '<tr><td class="cell-id">#' + p.id_producto + '</td><td><a href="#" onclick="' + openAction + '(' + p.id_producto + ');return false;" style="color:#4f46e5;font-weight:500;">' + esc(p.nombre_producto) + '</a></td><td>' + esc(p.codigo_de_barras) + '</td><td>' + esc(p.sku) + '</td><td>' + esc(p.categoria_nombre) + '</td><td>' + esc(p.marca_nombre) + '</td><td>' + badge + '</td>' + costCell + '<td class="cell-price">$' + fmtMoney(p.precio_venta) + '</td><td>' + (p.activo == 1 ? '<span class="badge badge-success">Activo</span>' : '<span class="badge badge-danger">Inactivo</span>') + '</td><td>' + actions + '</td></tr>';
     }).join('');
   });
 }
@@ -122,6 +180,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
 function showProductDetail(id) {
   api('producto', { id: id }, function(p) {
+    var canViewCosts = inventoryHas('ver_costos');
+    var canEdit = inventoryHas('editar');
+    var canDelete = inventoryHas('eliminar');
+    var canUpdatePrices = inventoryHasAll('precios,ver_costos');
     var stockHtml = (p.stock_bodegas || []).map(function(s) {
       return '<tr><td>' + esc(s.bodega_nombre) + '</td><td>' + num(s.disponible) + '</td><td>' + num(s.reservado) + '</td><td>' + num(s.comprometido) + '</td><td>' + num(s.en_transito) + '</td></tr>';
     }).join('') || '<tr><td colspan="5" style="color:#94a3b8;">Sin stock registrado</td></tr>';
@@ -136,7 +198,7 @@ function showProductDetail(id) {
       '<div class="modal-body">' +
       '<div class="kpi-row">' +
         '<div class="kpi-item"><div class="kpi-value">$' + fmt(p.precio_venta) + '</div><div class="kpi-label">Precio venta</div></div>' +
-        '<div class="kpi-item"><div class="kpi-value">$' + fmt(p.precio_costo) + '</div><div class="kpi-label">Costo</div></div>' +
+        (canViewCosts ? '<div class="kpi-item"><div class="kpi-value">$' + fmtMoney(p.precio_costo) + '</div><div class="kpi-label">Costo</div></div>' : '') +
         '<div class="kpi-item"><div class="kpi-value">' + num(p.cantidad) + '</div><div class="kpi-label">Stock total</div></div>' +
       '</div>' +
       '<div class="tab-bar">' +
@@ -158,8 +220,9 @@ function showProductDetail(id) {
       '<div id="prod-tab-stock" style="display:none;"><table><thead><tr><th>Bodega</th><th>Disponible</th><th>Reservado</th><th>Comprometido</th><th>Tránsito</th></tr></thead><tbody>' + stockHtml + '</tbody></table></div>' +
       '<div id="prod-tab-lotes" style="display:none;"><table><thead><tr><th>Lote</th><th>Proveedor</th><th>Vencimiento</th><th>Cantidad</th><th>Estado</th></tr></thead><tbody>' + loteHtml + '</tbody></table></div>' +
       '<div style="margin-top:12px;display:flex;gap:8px;">' +
-        '<button class="btn btn-primary btn-sm" onclick="showProductEditForm(' + p.id_producto + ')"><i class="fas fa-edit"></i> Editar</button>' +
-        '<button class="btn btn-danger btn-sm" onclick="if(confirm(\'Desactivar producto?\')){api(\'producto_eliminar\',{id:' + p.id_producto + '},function(){toast(\'Producto desactivado\');loadProductos();closeModal();})}"><i class="fas fa-ban"></i> Desactivar</button>' +
+        (canEdit ? '<button class="btn btn-primary btn-sm" onclick="showProductEditForm(' + p.id_producto + ')"><i class="fas fa-edit"></i> Editar</button>' : '') +
+        (canUpdatePrices ? '<button class="btn btn-outline btn-sm" onclick="showPriceCostForm(' + p.id_producto + ')"><i class="fas fa-receipt"></i> Costo y precio</button>' : '') +
+        (canDelete ? '<button class="btn btn-danger btn-sm" onclick="if(confirm(\'Desactivar producto?\')){api(\'producto_eliminar\',{id:' + p.id_producto + '},function(){toast(\'Producto desactivado\');loadProductos();closeModal();})}"><i class="fas fa-ban"></i> Desactivar</button>' : '') +
       '</div></div>'
     );
   });
@@ -173,6 +236,7 @@ function switchProdTab(tab, btn) {
 }
 
 function showProductForm() {
+  if (!requireInventoryUi('crear')) return;
   loadCategoriasSelectForForm();
   loadMarcasSelectForForm();
   loadUnidadesSelectForForm();
@@ -187,9 +251,10 @@ function showProductForm() {
       '<div><label>Unidad Medida</label><select id="f-unidad"></select></div>' +
       '<div><label>Tipo de Venta *</label><select id="f-tipo_venta"><option value="UNIDAD">Por Unidad</option><option value="PESO">Por Peso (kg, g, lb)</option><option value="VOLUMEN">Por Volumen (L, mL)</option></select></div>' +
       '<div><label>Tipo</label><select id="f-tipo"><option value="PRODUCTO">Producto</option><option value="SERVICIO">Servicio</option><option value="MATERIA_PRIMA">Materia Prima</option><option value="TERMINADO">Terminado</option><option value="CONSUMIBLE">Consumible</option></select></div>' +
-      '<div><label>Precio Costo</label><input type="number" step="0.01" id="f-precio_costo"></div>' +
-      '<div><label>Precio Venta * <small>(por unidad/kg/L)</small></label><input type="number" step="0.01" id="f-precio_venta" required></div>' +
-      '<div><label>Cantidad Inicial <small>(uds/kg/L)</small></label><input type="number" step="0.001" id="f-cantidad" value="0"></div>' +
+      (inventoryHas('ver_costos') ? '<div><label>Precio Costo</label><input type="number" min="0" max="99999999.99" step="0.01" id="f-precio_costo"></div>' : '') +
+      '<div><label>Precio Venta * <small>(por unidad/kg/L)</small></label><input type="number" min="0" max="99999999.99" step="0.01" id="f-precio_venta" required></div>' +
+      '<div><label>Cantidad Inicial <small>(uds/kg/L)</small></label><input type="number" min="0" step="0.001" id="f-cantidad" value="0"></div>' +
+      '<div><label>Bodega del stock inicial <small>(obligatoria si cantidad &gt; 0)</small></label><select id="f-bodega"><option value="">Cargando bodegas activas...</option></select></div>' +
       '<div><label>Stock Mínimo</label><input type="number" step="0.001" id="f-stock_minimo" value="0"></div>' +
       '<div><label>Stock Máximo</label><input type="number" step="0.001" id="f-stock_maximo" value="0"></div>' +
       '<div><label>Punto Reposición</label><input type="number" step="0.001" id="f-punto_reposicion" value="0"></div>' +
@@ -201,6 +266,7 @@ function showProductForm() {
       '<div class="full"><label>Descripción</label><textarea id="f-descripcion" rows="3"></textarea></div>' +
     '</div><button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:12px;"><i class="fas fa-save"></i> Crear Producto</button></form></div>'
   );
+  loadActiveBodegasSelect('f-bodega');
 }
 
 function saveProduct(e) {
@@ -214,9 +280,9 @@ function saveProduct(e) {
     id_unidad: num(document.getElementById('f-unidad').value),
     tipo_venta: document.getElementById('f-tipo_venta').value,
     tipo: document.getElementById('f-tipo').value,
-    precio_costo: Math.round(parseFloat(document.getElementById('f-precio_costo').value) || 0),
-    precio_venta: Math.round(parseFloat(document.getElementById('f-precio_venta').value) || 0),
+    precio_venta: parseFloat(document.getElementById('f-precio_venta').value) || 0,
     cantidad: parseFloat(document.getElementById('f-cantidad').value) || 0,
+    id_bodega: num(document.getElementById('f-bodega').value),
     stock_minimo: parseFloat(document.getElementById('f-stock_minimo').value) || 0,
     stock_maximo: parseFloat(document.getElementById('f-stock_maximo').value) || 0,
     punto_reposicion: parseFloat(document.getElementById('f-punto_reposicion').value) || 0,
@@ -227,6 +293,12 @@ function saveProduct(e) {
     volumen: parseFloat(document.getElementById('f-volumen').value) || 0,
     descripcion: document.getElementById('f-descripcion').value
   };
+  var costInput = document.getElementById('f-precio_costo');
+  if (costInput && inventoryHas('ver_costos')) data.precio_costo = parseFloat(costInput.value) || 0;
+  if (data.cantidad > 0 && !data.id_bodega) {
+    toast('Seleccione la bodega activa del stock inicial', 'error');
+    return;
+  }
   api('producto_crear', data, function(r) {
     toast('Producto creado');
     closeModal();
@@ -235,6 +307,7 @@ function saveProduct(e) {
 }
 
 function showProductEditForm(id) {
+  if (!requireInventoryUi('editar')) return;
   api('producto', { id: id }, function(p) {
     loadCategoriasSelectForForm('f-categoria', p.id_categoria);
     loadMarcasSelectForForm('f-marca', p.id_marca);
@@ -250,8 +323,7 @@ function showProductEditForm(id) {
         '<div><label>Unidad</label><select id="f-unidad"></select></div>' +
         '<div><label>Tipo de Venta</label><select id="f-tipo_venta"><option value="UNIDAD"' + ((p.tipo_venta||'UNIDAD')==='UNIDAD'?' selected':'') + '>Por Unidad</option><option value="PESO"' + (p.tipo_venta==='PESO'?' selected':'') + '>Por Peso</option><option value="VOLUMEN"' + (p.tipo_venta==='VOLUMEN'?' selected':'') + '>Por Volumen</option></select></div>' +
         '<div><label>Tipo</label><select id="f-tipo"><option value="PRODUCTO"' + (p.tipo==='PRODUCTO'?' selected':'') + '>Producto</option><option value="SERVICIO"' + (p.tipo==='SERVICIO'?' selected':'') + '>Servicio</option><option value="MATERIA_PRIMA"' + (p.tipo==='MATERIA_PRIMA'?' selected':'') + '>Materia Prima</option><option value="TERMINADO"' + (p.tipo==='TERMINADO'?' selected':'') + '>Terminado</option></select></div>' +
-        '<div><label>Costo</label><input type="number" step="0.01" id="f-precio_costo" value="' + num(p.precio_costo) + '"></div>' +
-        '<div><label>Precio Venta <small>(por unidad/kg/L)</small></label><input type="number" step="0.01" id="f-precio_venta" value="' + num(p.precio_venta) + '"></div>' +
+        '<div class="full" style="padding:10px 12px;border:1px solid #dbeafe;background:#eff6ff;border-radius:8px;color:#1e40af;font-size:12px;"><i class="fas fa-receipt"></i> Los valores comerciales se actualizan desde <strong>Costo y precio</strong> para dejar respaldo del ticket y del impuesto.</div>' +
         '<div><label>Stock Mínimo</label><input type="number" step="0.001" id="f-stock_minimo" value="' + num(p.stock_minimo) + '"></div>' +
         '<div><label>Stock Máximo</label><input type="number" step="0.001" id="f-stock_maximo" value="' + num(p.stock_maximo) + '"></div>' +
         '<div><label>Control Lote</label><select id="f-control_lote"><option value="0"' + (p.control_lote==0?' selected':'') + '>No</option><option value="1"' + (p.control_lote==1?' selected':'') + '>Sí</option></select></div>' +
@@ -273,8 +345,6 @@ function saveProductEdit(e, id) {
     id_unidad: num(document.getElementById('f-unidad').value),
     tipo_venta: document.getElementById('f-tipo_venta').value,
     tipo: document.getElementById('f-tipo').value,
-    precio_costo: Math.round(parseFloat(document.getElementById('f-precio_costo').value) || 0),
-    precio_venta: Math.round(parseFloat(document.getElementById('f-precio_venta').value) || 0),
     stock_minimo: parseFloat(document.getElementById('f-stock_minimo').value) || 0,
     stock_maximo: parseFloat(document.getElementById('f-stock_maximo').value) || 0,
     descripcion: document.getElementById('f-descripcion').value
@@ -290,15 +360,25 @@ function saveProductEdit(e, id) {
 function loadCategorias() {
   api('categorias', {}, function(items) {
     items = items.items || items;
+    _inventoryCategoriesById = Object.create(null);
+    items.forEach(function(c) { _inventoryCategoriesById[String(c.id_categoria)] = c; });
     var tbody = document.getElementById('tbody-categorias');
     if (!items.length) { tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state"><i class="fas fa-tags"></i><p>Sin categorías</p></div></td></tr>'; return; }
     tbody.innerHTML = items.map(function(c) {
-      return '<tr><td>#' + c.id_categoria + '</td><td>' + esc(c.nombre) + '</td><td>' + esc(c.descripcion||'') + '</td><td>-</td><td>' + (c.activo == 1 ? '<span class="badge badge-success">Activo</span>' : '<span class="badge badge-danger">Inactivo</span>') + '</td><td><button class="btn btn-outline btn-xs" onclick="showCategoriaEditForm(' + c.id_categoria + ',\'' + esc(c.nombre) + '\',\'' + esc(c.descripcion||'') + '\')"><i class="fas fa-edit"></i></button></td></tr>';
+      var action = inventoryHas('editar') ? '<button class="btn btn-outline btn-xs" onclick="editCategoriaById(' + Number(c.id_categoria) + ')"><i class="fas fa-edit"></i></button>' : '';
+      return '<tr><td>#' + c.id_categoria + '</td><td>' + esc(c.nombre) + '</td><td>' + esc(c.descripcion||'') + '</td><td>-</td><td>' + (c.activo == 1 ? '<span class="badge badge-success">Activo</span>' : '<span class="badge badge-danger">Inactivo</span>') + '</td><td>' + action + '</td></tr>';
     }).join('');
   });
 }
 
+function editCategoriaById(id) {
+  var category = _inventoryCategoriesById[String(id)];
+  if (!category) { toast('Categoría no encontrada', 'error'); return; }
+  showCategoriaEditForm(Number(id), category.nombre || '', category.descripcion || '');
+}
+
 function showCategoriaForm() {
+  if (!requireInventoryUi('crear')) return;
   openModal('<div class="modal-body"><h3><i class="fas fa-plus"></i> Nueva Categoría</h3><form onsubmit="saveCategoria(event)"><label>Nombre</label><input type="text" id="cat-nombre" class="input" required><label>Descripción</label><textarea id="cat-desc" class="input" rows="3"></textarea><button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:12px;"><i class="fas fa-save"></i> Crear</button></form></div>');
 }
 
@@ -310,7 +390,8 @@ function saveCategoria(e) {
 }
 
 function showCategoriaEditForm(id, nombre, desc) {
-  openModal('<div class="modal-body"><h3><i class="fas fa-edit"></i> Editar Categoría</h3><form onsubmit="saveCategoriaEdit(event,' + id + ')"><label>Nombre</label><input type="text" id="cat-nombre" class="input" value="' + nombre + '" required><label>Descripción</label><textarea id="cat-desc" class="input" rows="3">' + desc + '</textarea><button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:12px;"><i class="fas fa-save"></i> Guardar</button></form></div>');
+  if (!requireInventoryUi('editar')) return;
+  openModal('<div class="modal-body"><h3><i class="fas fa-edit"></i> Editar Categoría</h3><form onsubmit="saveCategoriaEdit(event,' + Number(id) + ')"><label>Nombre</label><input type="text" id="cat-nombre" class="input" value="' + esc(nombre) + '" required><label>Descripción</label><textarea id="cat-desc" class="input" rows="3">' + esc(desc) + '</textarea><button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:12px;"><i class="fas fa-save"></i> Guardar</button></form></div>');
 }
 
 function saveCategoriaEdit(e, id) {
@@ -324,15 +405,25 @@ function saveCategoriaEdit(e, id) {
 function loadMarcas() {
   api('marcas', {}, function(items) {
     items = items.items || items;
+    _inventoryBrandsById = Object.create(null);
+    items.forEach(function(m) { _inventoryBrandsById[String(m.id_marca)] = m; });
     var tbody = document.getElementById('tbody-marcas');
     if (!items.length) { tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state"><i class="fas fa-tag"></i><p>Sin marcas</p></div></td></tr>'; return; }
     tbody.innerHTML = items.map(function(m) {
-      return '<tr><td>#' + m.id_marca + '</td><td>' + esc(m.nombre) + '</td><td>' + esc(m.descripcion||'') + '</td><td>-</td><td>' + (m.activo == 1 ? '<span class="badge badge-success">Activo</span>' : '<span class="badge badge-danger">Inactivo</span>') + '</td><td><button class="btn btn-outline btn-xs" onclick="showMarcaEditForm(' + m.id_marca + ',\'' + esc(m.nombre) + '\',\'' + esc(m.descripcion||'') + '\')"><i class="fas fa-edit"></i></button></td></tr>';
+      var action = inventoryHas('editar') ? '<button class="btn btn-outline btn-xs" onclick="editMarcaById(' + Number(m.id_marca) + ')"><i class="fas fa-edit"></i></button>' : '';
+      return '<tr><td>#' + m.id_marca + '</td><td>' + esc(m.nombre) + '</td><td>' + esc(m.descripcion||'') + '</td><td>-</td><td>' + (m.activo == 1 ? '<span class="badge badge-success">Activo</span>' : '<span class="badge badge-danger">Inactivo</span>') + '</td><td>' + action + '</td></tr>';
     }).join('');
   });
 }
 
+function editMarcaById(id) {
+  var brand = _inventoryBrandsById[String(id)];
+  if (!brand) { toast('Marca no encontrada', 'error'); return; }
+  showMarcaEditForm(Number(id), brand.nombre || '', brand.descripcion || '');
+}
+
 function showMarcaForm() {
+  if (!requireInventoryUi('crear')) return;
   openModal('<div class="modal-body"><h3><i class="fas fa-plus"></i> Nueva Marca</h3><form onsubmit="saveMarca(event)"><label>Nombre</label><input type="text" id="mar-nombre" class="input" required><label>Descripción</label><textarea id="mar-desc" class="input" rows="3"></textarea><button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:12px;"><i class="fas fa-save"></i> Crear</button></form></div>');
 }
 
@@ -344,7 +435,8 @@ function saveMarca(e) {
 }
 
 function showMarcaEditForm(id, nombre, desc) {
-  openModal('<div class="modal-body"><h3><i class="fas fa-edit"></i> Editar Marca</h3><form onsubmit="saveMarcaEdit(event,' + id + ')"><label>Nombre</label><input type="text" id="mar-nombre" class="input" value="' + nombre + '" required><label>Descripción</label><textarea id="mar-desc" class="input" rows="3">' + desc + '</textarea><button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:12px;"><i class="fas fa-save"></i> Guardar</button></form></div>');
+  if (!requireInventoryUi('editar')) return;
+  openModal('<div class="modal-body"><h3><i class="fas fa-edit"></i> Editar Marca</h3><form onsubmit="saveMarcaEdit(event,' + Number(id) + ')"><label>Nombre</label><input type="text" id="mar-nombre" class="input" value="' + esc(nombre) + '" required><label>Descripción</label><textarea id="mar-desc" class="input" rows="3">' + esc(desc) + '</textarea><button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:12px;"><i class="fas fa-save"></i> Guardar</button></form></div>');
 }
 
 function saveMarcaEdit(e, id) {
@@ -362,12 +454,14 @@ function loadBodegas() {
     if (!items.length) { tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><i class="fas fa-warehouse"></i><p>Sin bodegas</p></div></td></tr>'; return; }
     tbody.innerHTML = items.map(function(b) {
       var est = b.estado === 'ACTIVA' ? '<span class="badge badge-success">' + b.estado + '</span>' : '<span class="badge badge-gray">' + b.estado + '</span>';
-      return '<tr><td>' + esc(b.codigo) + '</td><td>' + esc(b.nombre) + '</td><td>' + esc(b.responsable||'') + '</td><td>' + esc(b.direccion||'') + '</td><td>' + est + '</td><td>' + num(b.total_items) + '</td><td><button class="btn btn-outline btn-xs" onclick="showBodegaEditForm(' + b.id_bodega + ')"><i class="fas fa-edit"></i></button></td></tr>';
+      var action = inventoryHas('editar') ? '<button class="btn btn-outline btn-xs" onclick="showBodegaEditForm(' + b.id_bodega + ')"><i class="fas fa-edit"></i></button>' : '';
+      return '<tr><td>' + esc(b.codigo) + '</td><td>' + esc(b.nombre) + '</td><td>' + esc(b.responsable||'') + '</td><td>' + esc(b.direccion||'') + '</td><td>' + est + '</td><td>' + num(b.total_items) + '</td><td>' + action + '</td></tr>';
     }).join('');
   });
 }
 
 function showBodegaForm() {
+  if (!requireInventoryUi('crear')) return;
   openModal('<div class="modal-body"><h3><i class="fas fa-plus"></i> Nueva Bodega</h3><form onsubmit="saveBodega(event)"><div class="form-grid">' +
     '<div><label>Nombre *</label><input type="text" id="b-nombre" required></div><div><label>Código</label><input type="text" id="b-codigo" placeholder="Auto"></div>' +
     '<div><label>Responsable</label><input type="text" id="b-responsable"></div><div><label>Teléfono</label><input type="text" id="b-telefono"></div>' +
@@ -391,6 +485,7 @@ function saveBodega(e) {
 }
 
 function showBodegaEditForm(id) {
+  if (!requireInventoryUi('editar')) return;
   api('bodegas', {}, function(items) {
     items = items.items || items;
     var b = items.find(function(x) { return x.id_bodega == id; });
@@ -453,38 +548,40 @@ function loadMovimientos() {
 var _stockProduct = null, _stockBodega = null;
 
 function showQuickStock() {
+  if (!requireInventoryUi('movimientos')) return;
+  _stockProduct = null;
+  _stockBodega = null;
   openModal(
     '<h3 style="font-size:18px;font-weight:700;margin-bottom:0;"><i class="fas fa-bolt" style="color:#059669;"></i> Actualizar Stock</h3>' +
-    '<p style="font-size:12px;color:#64748b;margin:4px 0 12px;">Código de barras → Enter busca → Enter cantidad → Enter costo → ¡listo!</p>' +
+    '<p style="font-size:12px;color:#64748b;margin:4px 0 12px;">Seleccione la bodega, escanee el producto e indique solo la cantidad que ingresa.</p>' +
+    '<label for="qs-bodega" style="font-size:11px;font-weight:600;color:#475569;">Bodega activa *</label>' +
+    '<select id="qs-bodega" class="input" required style="padding:10px;width:100%;box-sizing:border-box;margin-bottom:8px;"><option value="">Cargando bodegas activas...</option></select>' +
     '<input type="text" id="qs-barcode" class="input" placeholder="Pistoleá el código..." style="font-size:18px;padding:12px;width:100%;box-sizing:border-box;margin-bottom:8px;">' +
-    '<div style="display:flex;gap:8px;margin-bottom:8px;">' +
-      '<div style="flex:1;"><label style="font-size:11px;font-weight:600;color:#475569;">Cantidad</label><input type="number" id="qs-cant" class="input" value="1" min="1" style="padding:10px;width:100%;box-sizing:border-box;"></div>' +
-      '<div style="flex:1;"><label style="font-size:11px;font-weight:600;color:#475569;">Costo $</label><input type="number" id="qs-costo" class="input" value="0" style="padding:10px;width:100%;box-sizing:border-box;"></div>' +
-    '</div>' +
+    '<label for="qs-cant" style="font-size:11px;font-weight:600;color:#475569;">Cantidad que ingresa *</label>' +
+    '<input type="number" id="qs-cant" class="input" value="1" min="0.001" step="0.001" style="padding:10px;width:100%;box-sizing:border-box;margin-bottom:8px;">' +
     '<div id="qs-info" style="min-height:44px;padding:8px 0;font-size:13px;color:#64748b;border-bottom:1px solid #e2e8f0;margin-bottom:8px;">' +
-      '<span style="color:#94a3b8;">Esperando escaneo...</span>' +
+      '<span style="color:#94a3b8;">Esperando selección de bodega y escaneo...</span>' +
     '</div>' +
-    '<div id="qs-feedback" style="min-height:20px;"></div>'
+    '<div id="qs-feedback" style="min-height:20px;"></div>' +
+    '<button type="button" class="btn btn-success" style="width:100%;justify-content:center;margin-top:8px;" onclick="quickStockSave()"><i class="fas fa-plus"></i> Registrar ingreso</button>'
   );
+  loadActiveBodegasSelect('qs-bodega');
   setTimeout(function() {
     var b = document.getElementById('qs-barcode');
     var c = document.getElementById('qs-cant');
-    var co = document.getElementById('qs-costo');
+    var warehouse = document.getElementById('qs-bodega');
     if (!b) return;
-    b.focus();
-    
-    // Barcode: Enter searches and advances to cantidad
+    if (warehouse) warehouse.addEventListener('change', function() {
+      _stockBodega = num(warehouse.value) || null;
+      _stockProduct = null;
+      document.getElementById('qs-info').innerHTML = '<span style="color:#94a3b8;">Esperando escaneo...</span>';
+      if (_stockBodega) b.focus();
+    });
+
     b.addEventListener('keydown', function(e) {
       if (e.key === 'Enter') { e.preventDefault(); buscarStockBarcode(); }
     });
-    
-    // Cantidad: Enter advances to costo
     if (c) c.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter') { e.preventDefault(); if (co) co.focus(); co.select(); }
-    });
-    
-    // Costo: Enter saves the movement
-    if (co) co.addEventListener('keydown', function(e) {
       if (e.key === 'Enter') { e.preventDefault(); quickStockSave(); }
     });
   }, 150);
@@ -493,16 +590,16 @@ function showQuickStock() {
 function buscarStockBarcode() {
   var barcode = document.getElementById('qs-barcode').value.trim();
   if (!barcode) return;
-  api('producto_barcode', { barcode: barcode }, function(p) {
+  var warehouse = document.getElementById('qs-bodega');
+  _stockBodega = warehouse ? num(warehouse.value) : 0;
+  if (!_stockBodega) { toast('Seleccione una bodega activa', 'error'); return; }
+  api('producto_barcode', { barcode: barcode, id_bodega: _stockBodega }, function(p) {
     _stockProduct = p;
-    _stockBodega = p.id_bodega || p.id_bodega_default || 0;
     var sc = p.stock_disponible <= 0 ? '#dc2626' : (p.stock_disponible <= 5 ? '#d97706' : '#059669');
     document.getElementById('qs-info').innerHTML =
       '<div style="font-weight:700;font-size:15px;color:#1e293b;">' + esc(p.nombre_producto) + '</div>' +
-      '<div>Stock: <span style="color:' + sc + ';font-weight:600;">' + p.stock_disponible + '</span> | ' +
-      'Bodega: <strong>' + esc(p.bodega_nombre||'Principal') + '</strong> | $' + fmt(p.precio_venta) + '</div>';
-    if (p.precio_costo) document.getElementById('qs-costo').value = p.precio_costo;
-    // Advance to cantidad
+      '<div>Stock en esta bodega: <span style="color:' + sc + ';font-weight:600;">' + p.stock_disponible + '</span> | ' +
+      'Bodega: <strong>' + esc(p.bodega_nombre) + '</strong></div>';
     var cant = document.getElementById('qs-cant');
     if (cant) { cant.focus(); cant.select(); }
   });
@@ -510,32 +607,108 @@ function buscarStockBarcode() {
 
 function quickStockSave() {
   if (!_stockProduct) { toast('Escaneá un producto primero', 'error'); return; }
-  if (!_stockBodega) { toast('Producto sin bodega', 'error'); return; }
-  var cant = num(document.getElementById('qs-cant').value) || 1;
-  var costo = num(document.getElementById('qs-costo').value) || 0;
+  if (!_stockBodega) { toast('Seleccione una bodega activa', 'error'); return; }
+  var cant = num(document.getElementById('qs-cant').value);
+  if (!(cant > 0)) { toast('La cantidad debe ser mayor a cero', 'error'); return; }
   api('movimiento_crear', {
     tipo: 'INGRESO', id_producto: _stockProduct.id_producto,
-    cantidad: cant, id_bodega: _stockBodega, costo: costo,
-    observaciones: 'Actualización rápida: ' + esc(_stockProduct.codigo_de_barras)
+    cantidad: cant, id_bodega: _stockBodega,
+    observaciones: 'Ingreso rápido: ' + String(_stockProduct.codigo_de_barras || '')
   }, function(r) {
     var fb = document.getElementById('qs-feedback');
     fb.innerHTML = '<span style="color:#059669;font-weight:600;">✓ +' + cant + ' — Stock: ' + (_stockProduct.stock_disponible + cant) + '</span>';
     _stockProduct.stock_disponible += cant;
-    // Reset for next scan
     document.getElementById('qs-barcode').value = '';
     document.getElementById('qs-cant').value = '1';
-    document.getElementById('qs-costo').value = '0';
     document.getElementById('qs-info').innerHTML = '<span style="color:#94a3b8;">Esperando escaneo...</span>';
     _stockProduct = null;
     loadProductos(); loadStock(); loadMovimientos(); loadDashboard();
     setTimeout(function() { document.getElementById('qs-feedback').innerHTML = ''; }, 2500);
-    // Focus back to barcode for next scan
     var b = document.getElementById('qs-barcode');
     if (b) b.focus();
   });
 }
 
+// ========== COSTO Y PRECIO (SIN ALTERAR STOCK) ==========
+function showPriceCostForm(id) {
+  if (!requireInventoryUi('precios,ver_costos')) return;
+  api('producto', { id: id }, function(p) {
+    openModal(
+      '<div class="modal-body"><h3><i class="fas fa-receipt"></i> Costo y precio</h3>' +
+      '<p style="font-size:13px;color:#64748b;margin-bottom:14px;">' + esc(p.nombre_producto) + '. Este registro no modifica existencias.</p>' +
+      '<form onsubmit="savePriceCost(event,' + p.id_producto + ')"><div class="form-grid">' +
+        '<div><label>Monto de costo *</label><input type="number" id="pc-monto" min="0" max="99999999.99" step="0.01" value="' + num(p.precio_costo) + '" required oninput="updatePriceCostPreview()"></div>' +
+        '<div><label>El monto ingresado es *</label><select id="pc-base" onchange="updatePriceCostPreview()"><option value="NETO">Neto (sin impuesto)</option><option value="BRUTO">Bruto (con impuesto)</option></select></div>' +
+        '<div><label>Impuesto % *</label><input type="number" id="pc-impuesto" min="0" max="100" step="0.01" value="' + num(p.iva_porcentaje) + '" required oninput="updatePriceCostPreview()"></div>' +
+        '<div><label>Nuevo precio de venta *</label><input type="number" id="pc-venta" min="0" max="99999999.99" step="0.01" value="' + num(p.precio_venta) + '" required></div>' +
+        '<div class="full" id="pc-preview" style="padding:10px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;"></div>' +
+        '<div class="full"><label>Ticket o documento de referencia *</label><input type="text" id="pc-referencia" maxlength="120" placeholder="Ej.: Factura proveedor 1234" required></div>' +
+        '<div class="full"><label>Observaciones</label><textarea id="pc-observaciones" maxlength="1000" rows="2"></textarea></div>' +
+      '</div><button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:12px;"><i class="fas fa-save"></i> Guardar costo y precio</button></form></div>'
+    );
+    updatePriceCostPreview();
+  });
+}
+
+function updatePriceCostPreview() {
+  var amountInput = document.getElementById('pc-monto');
+  var baseInput = document.getElementById('pc-base');
+  var taxInput = document.getElementById('pc-impuesto');
+  var preview = document.getElementById('pc-preview');
+  if (!amountInput || !baseInput || !taxInput || !preview) return;
+  var amount = Math.max(0, num(amountInput.value));
+  var taxRate = Math.min(100, Math.max(0, num(taxInput.value)));
+  var factor = 1 + taxRate / 100;
+  var net = baseInput.value === 'BRUTO' ? Math.round((amount / factor) * 100) / 100 : amount;
+  var gross = baseInput.value === 'NETO' ? Math.round((amount * factor) * 100) / 100 : amount;
+  var tax = Math.round((gross - net) * 100) / 100;
+  preview.innerHTML = '<strong>Cálculo informativo:</strong> neto $' + fmtMoney(net) + ' + impuesto $' + fmtMoney(tax) + ' = bruto $' + fmtMoney(gross) + '. El servidor volverá a calcularlo antes de guardar.';
+}
+
+function savePriceCost(event, id) {
+  event.preventDefault();
+  var reference = document.getElementById('pc-referencia').value.trim();
+  if (!reference) { toast('Ingrese el ticket o documento de referencia', 'error'); return; }
+  api('producto_actualizar_precios', {
+    id_producto: id,
+    monto_costo: document.getElementById('pc-monto').value,
+    base_costo: document.getElementById('pc-base').value,
+    impuesto_porcentaje: document.getElementById('pc-impuesto').value,
+    precio_venta: document.getElementById('pc-venta').value,
+    documento_referencia: reference,
+    observaciones: document.getElementById('pc-observaciones').value
+  }, function(result) {
+    toast('Costo neto $' + fmtMoney(result.costo_neto) + ' y precio actualizados');
+    closeModal();
+    loadProductos();
+  });
+}
+
 // ========== TRANSFERENCIAS ==========
+var _transferenciaIdempotencyKey = null;
+
+function generarClaveIdempotenciaTransferencia() {
+  if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+    return window.crypto.randomUUID();
+  }
+
+  var cryptoApi = window.crypto || window.msCrypto;
+  if (cryptoApi && typeof cryptoApi.getRandomValues === 'function' && window.Uint8Array) {
+    var bytes = new window.Uint8Array(16);
+    var hex = [];
+    var i;
+    cryptoApi.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 15) | 64;
+    bytes[8] = (bytes[8] & 63) | 128;
+    for (i = 0; i < bytes.length; i++) hex.push(('0' + bytes[i].toString(16)).slice(-2));
+    return hex.slice(0, 4).join('') + '-' + hex.slice(4, 6).join('') + '-' + hex.slice(6, 8).join('') + '-' + hex.slice(8, 10).join('') + '-' + hex.slice(10).join('');
+  }
+
+  return 'trf-' + new Date().getTime().toString(36) + '-' +
+    Math.floor(Math.random() * 0x100000000).toString(36) + '-' +
+    Math.floor(Math.random() * 0x100000000).toString(36);
+}
+
 function loadTransferencias() {
   api('transferencias', {}, function(items) {
     items = items.items || items;
@@ -544,9 +717,11 @@ function loadTransferencias() {
     tbody.innerHTML = items.map(function(t) {
       var badge = t.estado === 'RECIBIDA' ? 'badge-success' : (t.estado === 'EN_TRANSITO' ? 'badge-info' : (t.estado === 'CANCELADA' ? 'badge-danger' : 'badge-warning'));
       var actions = '';
-      if (t.estado === 'PENDIENTE') actions += '<button class="btn btn-success btn-xs" onclick="enviarTransferencia(' + t.id_transferencia + ')"><i class="fas fa-paper-plane"></i></button> ';
-      if (t.estado === 'EN_TRANSITO') actions += '<button class="btn btn-success btn-xs" onclick="recibirTransferencia(' + t.id_transferencia + ')"><i class="fas fa-check"></i></button> ';
-      if (t.estado !== 'RECIBIDA' && t.estado !== 'CANCELADA') actions += '<button class="btn btn-danger btn-xs" onclick="cancelarTransferencia(' + t.id_transferencia + ')"><i class="fas fa-ban"></i></button>';
+      if (inventoryHas('transferencias')) {
+        if (t.estado === 'PENDIENTE') actions += '<button class="btn btn-success btn-xs" onclick="enviarTransferencia(' + t.id_transferencia + ')"><i class="fas fa-paper-plane"></i></button> ';
+        if (t.estado === 'EN_TRANSITO') actions += '<button class="btn btn-success btn-xs" onclick="recibirTransferencia(' + t.id_transferencia + ')"><i class="fas fa-check"></i></button> ';
+        if (t.estado !== 'RECIBIDA' && t.estado !== 'CANCELADA') actions += '<button class="btn btn-danger btn-xs" onclick="cancelarTransferencia(' + t.id_transferencia + ')"><i class="fas fa-ban"></i></button>';
+      }
       var items = (t.detalles || []).map(function(d) { return d.cantidad + 'x ' + d.nombre_producto; }).join(', ');
       return '<tr><td>' + esc(t.numero) + '</td><td>' + esc(t.bodega_origen_nombre) + '</td><td>' + esc(t.bodega_destino_nombre) + '</td><td><span class="badge ' + badge + '">' + t.estado + '</span></td><td style="font-size:12px;">' + esc(items.substring(0,50)) + '</td><td>' + t.fecha_creacion + '</td><td>' + actions + '</td></tr>';
     }).join('');
@@ -554,10 +729,12 @@ function loadTransferencias() {
 }
 
 function showTransferenciaForm() {
+  if (!requireInventoryUi('transferencias')) return;
+  _transferenciaIdempotencyKey = generarClaveIdempotenciaTransferencia();
   openModal('<div class="modal-body"><h3><i class="fas fa-plus"></i> Nueva Transferencia</h3><form onsubmit="saveTransferencia(event)"><div class="form-grid">' +
     '<div><label>Origen *</label><select id="trf-origen"></select></div><div><label>Destino *</label><select id="trf-destino"></select></div>' +
     '<div class="full"><label>Productos (seleccione y agregue)</label></div>' +
-    '<div class="full"><div id="trf-items"><div class="trf-row" style="display:flex;gap:8px;margin-bottom:6px;"><select class="trf-prod" style="flex:2;padding:7px;border:1px solid #e2e8f0;border-radius:6px;"></select><input type="number" class="trf-cant" placeholder="Cant" style="flex:1;padding:7px;border:1px solid #e2e8f0;border-radius:6px;"></div></div>' +
+    '<div class="full"><div id="trf-items"><div class="trf-row" style="display:flex;gap:8px;margin-bottom:6px;"><select class="trf-prod" style="flex:2;padding:7px;border:1px solid #e2e8f0;border-radius:6px;"></select><input type="number" class="trf-cant" min="0.001" step="0.001" placeholder="Cant" style="flex:1;padding:7px;border:1px solid #e2e8f0;border-radius:6px;"></div></div>' +
     '<button type="button" class="btn btn-outline btn-sm full" onclick="addTrfRow()"><i class="fas fa-plus"></i> Agregar producto</button></div>' +
     '<div class="full"><label>Observaciones</label><textarea id="trf-obs" rows="2"></textarea></div>' +
   '</div><button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:12px;"><i class="fas fa-save"></i> Crear Transferencia</button></form></div>');
@@ -572,13 +749,14 @@ function addTrfRow() {
   var div = document.createElement('div');
   div.className = 'trf-row';
   div.style.cssText = 'display:flex;gap:8px;margin-bottom:6px;';
-  div.innerHTML = '<select class="trf-prod" style="flex:2;padding:7px;border:1px solid #e2e8f0;border-radius:6px;"></select><input type="number" class="trf-cant" placeholder="Cant" style="flex:1;padding:7px;border:1px solid #e2e8f0;border-radius:6px;"><button type="button" class="btn btn-danger btn-xs" onclick="this.parentElement.remove()"><i class="fas fa-times"></i></button>';
+  div.innerHTML = '<select class="trf-prod" style="flex:2;padding:7px;border:1px solid #e2e8f0;border-radius:6px;"></select><input type="number" class="trf-cant" min="0.001" step="0.001" placeholder="Cant" style="flex:1;padding:7px;border:1px solid #e2e8f0;border-radius:6px;"><button type="button" class="btn btn-danger btn-xs" onclick="this.parentElement.remove()"><i class="fas fa-times"></i></button>';
   items.appendChild(div);
   loadProductosSelectMulti();
 }
 
 function saveTransferencia(e) {
   e.preventDefault();
+  if (!_transferenciaIdempotencyKey) _transferenciaIdempotencyKey = generarClaveIdempotenciaTransferencia();
   var rows = document.querySelectorAll('.trf-row');
   var productos = [];
   rows.forEach(function(r) {
@@ -591,7 +769,8 @@ function saveTransferencia(e) {
     id_bodega_origen: num(document.getElementById('trf-origen').value),
     id_bodega_destino: num(document.getElementById('trf-destino').value),
     productos: productos,
-    observaciones: document.getElementById('trf-obs').value
+    observaciones: document.getElementById('trf-obs').value,
+    idempotency_key: _transferenciaIdempotencyKey
   }, function(r) { toast('Transferencia creada: ' + r.numero); closeModal(); loadTransferencias(); });
 }
 
@@ -624,13 +803,14 @@ function loadAjustes() {
 }
 
 function showAjusteForm() {
+  if (!requireInventoryUi('ajustes')) return;
   loadBodegasSelect('aj-bodega');
   loadProductosSelect('aj-producto');
   openModal('<div class="modal-body"><h3><i class="fas fa-plus"></i> Nuevo Ajuste</h3><form onsubmit="saveAjuste(event)"><div class="form-grid">' +
     '<div><label>Tipo *</label><select id="aj-tipo"><option value="AUMENTO">Aumento</option><option value="DISMINUCION">Disminución</option><option value="REGULARIZACION">Regularización</option><option value="CORRECCION">Corrección</option></select></div>' +
     '<div><label>Producto *</label><select id="aj-producto"></select></div>' +
     '<div><label>Bodega *</label><select id="aj-bodega"></select></div>' +
-    '<div><label>Nuevo Stock *</label><input type="number" id="aj-cantidad" required></div>' +
+    '<div><label>Nuevo Stock *</label><input type="number" id="aj-cantidad" min="0" step="0.001" required></div>' +
     '<div><label>Autorizado por</label><input type="text" id="aj-autorizado"></div>' +
     '<div><label>Documento</label><input type="text" id="aj-documento"></div>' +
     '<div class="full"><label>Motivo *</label><textarea id="aj-motivo" required></textarea></div>' +
@@ -666,19 +846,28 @@ function loadFisicos() {
 }
 
 function showFisicoForm() {
-  loadBodegasSelect('fis-bodega');
+  if (!requireInventoryUi('conteo_fisico')) return;
   openModal('<div class="modal-body"><h3><i class="fas fa-plus"></i> Nuevo Inventario Físico</h3><form onsubmit="saveFisico(event)"><div class="form-grid">' +
-    '<div><label>Tipo</label><select id="fis-tipo"><option value="GENERAL">General</option><option value="BODEGA">Por Bodega</option><option value="CATEGORIA">Por Categoría</option></select></div>' +
-    '<div><label>Bodega (opcional)</label><select id="fis-bodega"><option value="">Todas</option></select></div>' +
+    '<div><label>Tipo</label><select id="fis-tipo" onchange="actualizarAlcanceFisico()"><option value="GENERAL">General</option><option value="BODEGA">Por Bodega</option></select></div>' +
+    '<div><label>Bodega</label><select id="fis-bodega" disabled><option value="">Todas</option></select></div>' +
     '<div class="full"><label>Observaciones</label><textarea id="fis-obs" rows="2"></textarea></div>' +
   '</div><button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:12px;"><i class="fas fa-save"></i> Iniciar</button></form></div>');
+  loadBodegasSelect('fis-bodega');
+}
+
+function actualizarAlcanceFisico() {
+  var porBodega = document.getElementById('fis-tipo').value === 'BODEGA';
+  var select = document.getElementById('fis-bodega');
+  select.disabled = !porBodega;
+  if (!porBodega) select.value = '';
 }
 
 function saveFisico(e) {
   e.preventDefault();
+  var tipo = document.getElementById('fis-tipo').value;
   api('inventario_fisico_crear', {
-    tipo: document.getElementById('fis-tipo').value,
-    id_bodega: num(document.getElementById('fis-bodega').value),
+    tipo: tipo,
+    id_bodega: tipo === 'BODEGA' ? num(document.getElementById('fis-bodega').value) : 0,
     observaciones: document.getElementById('fis-obs').value
   }, function(r) { toast('Inventario creado: ' + r.codigo); closeModal(); loadFisicos(); });
 }
@@ -686,14 +875,41 @@ function saveFisico(e) {
 function verFisicoDetalle(id) {
   api('inventario_fisico_detalle', { id: id }, function(items) {
     openModal('<div class="modal-body"><h3>Detalle Inventario Físico</h3><table><thead><tr><th>Producto</th><th>Código</th><th>Conteo 1</th><th>Conteo 2</th><th>Conteo 3</th><th>Diferencia</th></tr></thead><tbody>' +
-      (items.map(function(c) { return '<tr><td>' + esc(c.nombre_producto) + '</td><td>' + esc(c.codigo_de_barras) + '</td><td><span class="cell-editable" contenteditable onblur="actualizarConteo(' + c.id_conteo + ',\'conteo1\',this)">' + (c.conteo1 != null ? c.conteo1 : '-') + '</span></td><td contenteditable onblur="actualizarConteo(' + c.id_conteo + ',\'conteo2\',this)">' + (c.conteo2 != null ? c.conteo2 : '-') + '</td><td contenteditable onblur="actualizarConteo(' + c.id_conteo + ',\'conteo3\',this)">' + (c.conteo3 != null ? c.conteo3 : '-') + '</td><td>' + (c.diferencia != null ? c.diferencia : '-') + '</td></tr>'; }).join('') || '<tr><td colspan="6" style="color:#94a3b8;">Sin datos</td></tr>') +
-    '</tbody></table><button class="btn btn-success" style="width:100%;margin-top:12px;" onclick="cerrarFisico(' + id + ')"><i class="fas fa-check"></i> Cerrar y Conciliar</button></div>');
+      (items.map(function(c) { return '<tr><td>' + esc(c.nombre_producto) + '</td><td>' + esc(c.codigo_de_barras) + '</td>' + celdaConteoFisico(c.id_conteo, 'conteo1', c.conteo1) + celdaConteoFisico(c.id_conteo, 'conteo2', c.conteo2) + celdaConteoFisico(c.id_conteo, 'conteo3', c.conteo3) + '<td>' + (c.diferencia != null ? c.diferencia : '-') + '</td></tr>'; }).join('') || '<tr><td colspan="6" style="color:#94a3b8;">Sin datos</td></tr>') +
+    '</tbody></table>' + (inventoryHas('conteo_fisico') ? '<button class="btn btn-success" style="width:100%;margin-top:12px;" onclick="cerrarFisico(' + id + ')"><i class="fas fa-check"></i> Cerrar y Conciliar</button>' : '') + '</div>');
   });
 }
 
+function celdaConteoFisico(id, ronda, valor) {
+  var texto = valor != null ? String(valor) : '-';
+  var valorAnterior = texto.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return '<td><span class="cell-editable" contenteditable="true" data-previous-value="' + valorAnterior + '" onblur="actualizarConteo(' + id + ',\'' + ronda + '\',this)">' + esc(texto) + '</span></td>';
+}
+
 function actualizarConteo(id, ronda, el) {
-  var val = num(el.textContent);
-  api('inventario_fisico_conteo', { id_conteo: id, ronda: ronda, valor: val }, function() {});
+  var texto = String(el.textContent || '').replace(/^\s+|\s+$/g, '');
+  var valorAnterior = el.getAttribute('data-previous-value');
+  var textoNormalizado = texto.replace(',', '.');
+  if (!/^\d+(?:\.\d{1,3})?$/.test(textoNormalizado)) {
+    el.textContent = valorAnterior !== null ? valorAnterior : '-';
+    toast('Ingrese un conteo válido, mayor o igual a 0 y con máximo 3 decimales', 'error');
+    return;
+  }
+
+  var val = parseFloat(textoNormalizado);
+  if (!isFinite(val) || val < 0) {
+    el.textContent = valorAnterior !== null ? valorAnterior : '-';
+    toast('Ingrese un conteo válido, mayor o igual a 0 y con máximo 3 decimales', 'error');
+    return;
+  }
+
+  api('inventario_fisico_conteo', { id_conteo: id, ronda: ronda, valor: val }, function() {
+    var valorGuardado = String(val);
+    el.textContent = valorGuardado;
+    el.setAttribute('data-previous-value', valorGuardado);
+  }, function() {
+    el.textContent = valorAnterior !== null ? valorAnterior : '-';
+  });
 }
 
 function cerrarFisico(id) {
@@ -706,9 +922,11 @@ function loadKardex() {
   var id_producto = num(document.getElementById('filter-kardex-producto').value);
   api('kardex', { id_producto: id_producto, limit: 100 }, function(r) {
     var tbody = document.getElementById('tbody-kardex');
-    if (!r.items || !r.items.length) { tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state"><i class="fas fa-book"></i><p>Sin movimientos kardex</p></div></td></tr>'; return; }
+    var canViewCosts = inventoryHas('ver_costos');
+    if (!r.items || !r.items.length) { tbody.innerHTML = '<tr><td colspan="' + (canViewCosts ? 9 : 7) + '"><div class="empty-state"><i class="fas fa-book"></i><p>Sin movimientos kardex</p></div></td></tr>'; return; }
     tbody.innerHTML = r.items.map(function(k) {
-      return '<tr><td>' + k.fecha + '</td><td>' + esc(k.nombre_producto) + '</td><td>' + esc(k.bodega_nombre||'-') + '</td><td>' + k.tipo_movimiento + '</td><td class="cell-price">' + (k.entrada > 0 ? k.entrada : '-') + '</td><td class="cell-price">' + (k.salida > 0 ? k.salida : '-') + '</td><td class="cell-price">' + k.saldo + '</td><td>$' + fmt(k.costo_unitario) + '</td></tr>';
+      var costCells = canViewCosts ? '<td>$' + fmtMoney(k.costo_unitario) + '</td><td>$' + fmtMoney(k.costo_total) + '</td>' : '';
+      return '<tr><td>' + k.fecha + '</td><td>' + esc(k.nombre_producto) + '</td><td>' + esc(k.bodega_nombre||'-') + '</td><td>' + k.tipo_movimiento + '</td><td class="cell-price">' + (k.entrada > 0 ? k.entrada : '-') + '</td><td class="cell-price">' + (k.salida > 0 ? k.salida : '-') + '</td><td class="cell-price">' + k.saldo + '</td>' + costCells + '</tr>';
     }).join('');
   });
 }
@@ -727,10 +945,11 @@ function loadLotes() {
 }
 
 function showLoteForm() {
+  if (!requireInventoryUi('crear')) return;
   loadProductosSelect('lote-producto');
   openModal('<div class="modal-body"><h3><i class="fas fa-plus"></i> Nuevo Lote</h3><form onsubmit="saveLote(event)"><div class="form-grid">' +
     '<div><label>Producto *</label><select id="lote-producto"></select></div><div><label>N° Lote *</label><input type="text" id="lote-numero" required></div>' +
-    '<div><label>Cantidad</label><input type="number" id="lote-cantidad"></div><div><label>Proveedor</label><select id="lote-proveedor"><option value="">Seleccionar...</option></select></div>' +
+    '<div><label>Cantidad</label><input type="number" id="lote-cantidad" min="0.001" step="0.001"></div><div><label>Proveedor</label><select id="lote-proveedor"><option value="">Seleccionar...</option></select></div>' +
     '<div><label>Fabricación</label><input type="date" id="lote-fabricacion"></div><div><label>Vencimiento</label><input type="date" id="lote-vencimiento"></div>' +
   '</div><button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:12px;"><i class="fas fa-save"></i> Crear</button></form></div>');
   // Load proveedores
@@ -765,6 +984,7 @@ function loadSeries() {
 }
 
 function showSerieForm() {
+  if (!requireInventoryUi('crear')) return;
   loadProductosSelect('serie-producto');
   openModal('<div class="modal-body"><h3><i class="fas fa-plus"></i> Nueva Serie</h3><form onsubmit="saveSerie(event)"><div class="form-grid">' +
     '<div><label>Producto *</label><select id="serie-producto"></select></div><div><label>N° Serie *</label><input type="text" id="serie-numero" required></div>' +
@@ -786,7 +1006,8 @@ function loadAlertas() {
     var tbody = document.getElementById('tbody-alertas');
     if (!items.length) { tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><i class="fas fa-bell-slash"></i><p>Sin alertas pendientes</p></div></td></tr>'; return; }
     tbody.innerHTML = items.map(function(a) {
-      return '<tr><td><span class="badge badge-danger">' + a.tipo + '</span></td><td>' + esc(a.nombre_producto) + '</td><td>' + esc(a.mensaje) + '</td><td>' + a.created_at + '</td><td><button class="btn btn-success btn-xs" onclick="resolverAlerta(' + a.id_alerta + ')"><i class="fas fa-check"></i></button></td></tr>';
+      var action = inventoryHas('editar') ? '<button class="btn btn-success btn-xs" onclick="resolverAlerta(' + a.id_alerta + ')"><i class="fas fa-check"></i></button>' : '';
+      return '<tr><td><span class="badge badge-danger">' + a.tipo + '</span></td><td>' + esc(a.nombre_producto) + '</td><td>' + esc(a.mensaje) + '</td><td>' + a.created_at + '</td><td>' + action + '</td></tr>';
     }).join('');
   });
 }
@@ -807,11 +1028,13 @@ function switchReporte(tipo, btn) {
 
   if (tipo === 'existencias') {
     title.innerHTML = '<i class="fas fa-file-alt"></i> Reporte de Existencias';
-    thead.innerHTML = '<tr><th>Producto</th><th>Código</th><th>SKU</th><th>Categoría</th><th>Stock</th><th>Disponible</th><th>Costo Prom.</th><th>Valor Costo</th><th>Precio Venta</th><th>Valor Venta</th></tr>';
+    var canViewCosts = inventoryHas('ver_costos');
+    thead.innerHTML = '<tr><th>Producto</th><th>Código</th><th>SKU</th><th>Categoría</th><th>Stock</th><th>Disponible</th>' + (canViewCosts ? '<th>Costo Prom.</th><th>Valor Costo</th>' : '') + '<th>Precio Venta</th><th>Valor Venta</th></tr>';
     api('reporte_existencias', {}, function(items) {
       items = items.items || items;
       tbody.innerHTML = items.map(function(p) {
-        return '<tr><td>' + esc(p.nombre_producto) + '</td><td>' + esc(p.codigo_de_barras) + '</td><td>' + esc(p.sku) + '</td><td>' + esc(p.categoria||'') + '</td><td>' + num(p.stock_total) + '</td><td>' + num(p.disponible) + '</td><td>$' + fmt(p.costo_promedio) + '</td><td>$' + fmt(p.valor_costo) + '</td><td class="cell-price">$' + fmt(p.precio_venta) + '</td><td class="cell-price">$' + fmt(p.valor_venta) + '</td></tr>';
+        var costCells = canViewCosts ? '<td>$' + fmtMoney(p.costo_promedio) + '</td><td>$' + fmtMoney(p.valor_costo) + '</td>' : '';
+        return '<tr><td>' + esc(p.nombre_producto) + '</td><td>' + esc(p.codigo_de_barras) + '</td><td>' + esc(p.sku) + '</td><td>' + esc(p.categoria||'') + '</td><td>' + num(p.stock_total) + '</td><td>' + num(p.disponible) + '</td>' + costCells + '<td class="cell-price">$' + fmtMoney(p.precio_venta) + '</td><td class="cell-price">$' + fmtMoney(p.valor_venta) + '</td></tr>';
       }).join('');
     });
   } else if (tipo === 'stock_critico') {
@@ -849,6 +1072,46 @@ function loadAuditoria() {
 }
 
 // ========== SELECT HELPERS ==========
+function selectRequestErrorMessage(response, fallback) {
+  if (!response || typeof response !== 'object') return fallback;
+  if (response.message) return response.message;
+  if (typeof response.error === 'string') return response.error;
+  if (response.error && response.error.message) return response.error.message;
+  return fallback;
+}
+
+function requestSelectData(data, cb) {
+  var xhr = new XMLHttpRequest();
+  xhr.open('POST', API, true);
+  xhr.setRequestHeader('Content-Type', 'application/json');
+  xhr.onload = function() {
+    var response;
+    if (xhr.status < 200 || xhr.status >= 300) {
+      try { response = JSON.parse(xhr.responseText); } catch(e) { response = null; }
+      toast(selectRequestErrorMessage(response, 'No se pudieron cargar las opciones'), 'error');
+      return;
+    }
+    try { response = JSON.parse(xhr.responseText); }
+    catch(e) { toast('Respuesta inválida al cargar las opciones', 'error'); return; }
+    if (response && (response.error || response.success === false)) {
+      toast(selectRequestErrorMessage(response, 'No se pudieron cargar las opciones'), 'error');
+      return;
+    }
+    cb(response);
+  };
+  xhr.onerror = function() { toast('Error de conexión al cargar las opciones', 'error'); };
+  xhr.send(JSON.stringify(data));
+}
+
+function selectResponseItems(response) {
+  var items = response && typeof response.items !== 'undefined' ? response.items : response;
+  if (Object.prototype.toString.call(items) !== '[object Array]') {
+    toast('Respuesta inválida al cargar las opciones', 'error');
+    return null;
+  }
+  return items;
+}
+
 function loadCategoriasSelect() {
   api('categorias', {}, function(items) {
     items = items.items || items;
@@ -889,77 +1152,70 @@ function loadMarcasSelectForForm(id, selected) {
 
 function loadUnidadesSelectForForm(id, selected) {
   id = id || 'f-unidad';
-  var xhr = new XMLHttpRequest();
-  xhr.open('POST', API, true);
-  xhr.setRequestHeader('Content-Type', 'application/json');
-  xhr.onreadystatechange = function() {
-    if (xhr.readyState === 4) {
-      var sel = document.getElementById(id);
-      if (!sel) return;
-      sel.innerHTML = '<option value="">Seleccionar...</option>';
-      try { JSON.parse(xhr.responseText).forEach(function(u) { sel.innerHTML += '<option value="' + u.id_unidad + '"' + (u.id_unidad == selected ? ' selected' : '') + '>' + esc(u.nombre) + ' (' + u.abreviatura + ')</option>'; }); } catch(e) {}
-    }
-  };
-  xhr.send(JSON.stringify({ accion: 'unidades' }));
+  requestSelectData({ accion: 'unidades' }, function(response) {
+    var sel = document.getElementById(id);
+    if (!sel) return;
+    var items = selectResponseItems(response);
+    if (!items) return;
+    sel.innerHTML = '<option value="">Seleccionar...</option>';
+    items.forEach(function(u) { sel.innerHTML += '<option value="' + u.id_unidad + '"' + (u.id_unidad == selected ? ' selected' : '') + '>' + esc(u.nombre) + ' (' + esc(u.abreviatura) + ')</option>'; });
+  });
 }
 
 function loadBodegasSelect(id, selected) {
   id = id || 'filter-stock-bodega';
-  var xhr = new XMLHttpRequest();
-  xhr.open('POST', API, true);
-  xhr.setRequestHeader('Content-Type', 'application/json');
-  xhr.onreadystatechange = function() {
-    if (xhr.readyState === 4) {
-      var sel = document.getElementById(id);
-      if (!sel) return;
-      sel.innerHTML = '<option value="">Seleccionar...</option>';
-      try { var r = JSON.parse(xhr.responseText); (r.items || r || []).forEach(function(b) { sel.innerHTML += '<option value="' + b.id_bodega + '"' + (b.id_bodega == selected ? ' selected' : '') + '>' + esc(b.nombre) + '</option>'; }); } catch(e) {}
-    }
-  };
-  xhr.send(JSON.stringify({ accion: 'bodegas' }));
+  requestSelectData({ accion: 'bodegas' }, function(response) {
+    var sel = document.getElementById(id);
+    if (!sel) return;
+    var items = selectResponseItems(response);
+    if (!items) return;
+    sel.innerHTML = '<option value="">Seleccionar...</option>';
+    items.forEach(function(b) { sel.innerHTML += '<option value="' + b.id_bodega + '"' + (b.id_bodega == selected ? ' selected' : '') + '>' + esc(b.nombre) + '</option>'; });
+  });
+}
+
+function loadActiveBodegasSelect(id, selected) {
+  requestSelectData({ accion: 'bodegas', limit: 100 }, function(response) {
+    var sel = document.getElementById(id);
+    if (!sel) return;
+    var items = selectResponseItems(response);
+    if (!items) return;
+    var active = items.filter(function(b) { return String(b.estado || '').toUpperCase() === 'ACTIVA'; });
+    sel.innerHTML = '<option value="">Seleccionar bodega activa...</option>';
+    active.forEach(function(b) {
+      sel.innerHTML += '<option value="' + b.id_bodega + '"' + (b.id_bodega == selected ? ' selected' : '') + '>' + esc(b.nombre) + '</option>';
+    });
+    if (!active.length) sel.innerHTML = '<option value="">No hay bodegas activas</option>';
+  });
 }
 
 function loadProductosSelect(id, selected) {
   id = id || 'filter-kardex-producto';
-  var xhr = new XMLHttpRequest();
-  xhr.open('POST', API, true);
-  xhr.setRequestHeader('Content-Type', 'application/json');
-  xhr.onreadystatechange = function() {
-    if (xhr.readyState === 4) {
-      var sel = document.getElementById(id);
-      if (!sel) return;
-      sel.innerHTML = '<option value="">Seleccionar...</option>';
-      try {
-        var r = JSON.parse(xhr.responseText);
-        (r.items || r).forEach(function(p) { sel.innerHTML += '<option value="' + (p.id_producto || p.id) + '"' + ((p.id_producto||p.id) == selected ? ' selected' : '') + '>' + esc(p.nombre_producto) + '</option>'; });
-      } catch(e) {}
-    }
-  };
-  xhr.send(JSON.stringify({ accion: 'productos', limit: 500 }));
+  requestSelectData({ accion: 'productos', limit: 500 }, function(response) {
+    var sel = document.getElementById(id);
+    if (!sel) return;
+    var items = selectResponseItems(response);
+    if (!items) return;
+    sel.innerHTML = '<option value="">Seleccionar...</option>';
+    items.forEach(function(p) { sel.innerHTML += '<option value="' + (p.id_producto || p.id) + '"' + ((p.id_producto||p.id) == selected ? ' selected' : '') + '>' + esc(p.nombre_producto) + '</option>'; });
+  });
 }
 
 function loadProductosSelectMulti() {
   // Populate ALL .trf-prod select elements in transferencia form
-  var xhr = new XMLHttpRequest();
-  xhr.open('POST', API, true);
-  xhr.setRequestHeader('Content-Type', 'application/json');
-  xhr.onreadystatechange = function() {
-    if (xhr.readyState === 4 && xhr.status >= 200 && xhr.status < 300) {
-      try {
-        var r = JSON.parse(xhr.responseText);
-        var opts = '<option value="">Seleccionar producto...</option>';
-        (r.items || r || []).forEach(function(p) {
-          opts += '<option value="' + (p.id_producto || p.id) + '">' + esc(p.nombre_producto) + '</option>';
-        });
-        document.querySelectorAll('.trf-prod').forEach(function(sel) {
-          var val = sel.value;
-          sel.innerHTML = opts;
-          if (val) sel.value = val;
-        });
-      } catch(e) {}
-    }
-  };
-  xhr.send(JSON.stringify({ accion: 'productos', limit: 500 }));
+  requestSelectData({ accion: 'productos', limit: 500 }, function(response) {
+    var items = selectResponseItems(response);
+    if (!items) return;
+    var opts = '<option value="">Seleccionar producto...</option>';
+    items.forEach(function(p) {
+      opts += '<option value="' + (p.id_producto || p.id) + '">' + esc(p.nombre_producto) + '</option>';
+    });
+    document.querySelectorAll('.trf-prod').forEach(function(sel) {
+      var val = sel.value;
+      sel.innerHTML = opts;
+      if (val) sel.value = val;
+    });
+  });
 }
 
 function loadSelectBodegas(id) {
@@ -971,25 +1227,112 @@ document.addEventListener('DOMContentLoaded', function() {
   loadDashboard();
 });
 
-function exportProductosXls() {
-  window.location.href = API + '?accion=exportar_productos';
+function loadActiveWarehousesForFile(selectId, submitId) {
+  requestSelectData({ accion: 'bodegas', limit: 100 }, function(response) {
+    var select = document.getElementById(selectId);
+    if (!select) return;
+    var items = selectResponseItems(response);
+    if (!items) return;
+    var active = items.filter(function(b) { return String(b.estado || '').toUpperCase() === 'ACTIVA'; });
+    select.innerHTML = '<option value="">Seleccionar...</option>' + active.map(function(b) {
+      return '<option value="' + b.id_bodega + '">' + esc(b.nombre) + '</option>';
+    }).join('');
+    if (!active.length) {
+      select.innerHTML = '<option value="">No hay bodegas activas</option>';
+      var submit = document.getElementById(submitId);
+      if (submit) submit.disabled = true;
+    }
+  });
 }
 
-function importProductosFile(input) {
-  if (!input.files || !input.files[0]) return;
+function showExportProductos() {
+  if (!requireInventoryUi('exportar,ver_costos')) return;
+  openModal(
+    '<div class="modal-body"><h3><i class="fas fa-file-excel"></i> Exportar productos a XLSX</h3>' +
+    '<p style="font-size:13px;color:#64748b;margin-bottom:16px;">La columna Cantidad contendrá exclusivamente el stock disponible de la bodega elegida.</p>' +
+    '<form onsubmit="exportProductosXlsx(event)">' +
+      '<label for="export-productos-bodega">Bodega activa *</label>' +
+      '<select id="export-productos-bodega" required><option value="">Cargando bodegas...</option></select>' +
+      '<button type="submit" id="export-productos-submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:16px;"><i class="fas fa-download"></i> Descargar XLSX de esta bodega</button>' +
+    '</form></div>'
+  );
+  loadActiveWarehousesForFile('export-productos-bodega', 'export-productos-submit');
+}
+
+function exportProductosXlsx(event) {
+  event.preventDefault();
+  var warehouse = document.getElementById('export-productos-bodega');
+  if (!warehouse || !warehouse.value) { toast('Seleccione una bodega activa', 'error'); return; }
+  window.location.href = API + '?accion=exportar_productos&id_bodega=' + encodeURIComponent(warehouse.value);
+  closeModal();
+}
+
+function downloadProductosTemplate() {
+  if (!requireInventoryUi('importar,ver_costos')) return;
+  window.location.href = API + '?accion=plantilla_productos';
+}
+
+function showImportProductos() {
+  if (!requireInventoryUi('importar,precios,ver_costos')) return;
+  openModal(
+    '<div class="modal-body"><h3><i class="fas fa-file-import"></i> Importar productos</h3>' +
+    '<p style="font-size:13px;color:#64748b;margin-bottom:8px;">Operación masiva: la columna Cantidad reemplazará el stock objetivo únicamente en la bodega seleccionada y el archivo puede actualizar precios y costos.</p>' +
+    '<p style="font-size:12px;color:#64748b;margin-bottom:16px;">Use XLSX o CSV. XLS se admite solo para tablas HTML exportadas por versiones antiguas; XLS binario no es compatible.</p>' +
+    '<p style="font-size:12px;color:#64748b;margin-bottom:12px;">La plantilla trae cinco ejemplos inactivos y con cantidad 0; edítelos o elimínelos antes de usarla con datos reales.</p>' +
+    '<button type="button" class="btn btn-outline btn-sm" onclick="downloadProductosTemplate()" style="margin-bottom:14px;"><i class="fas fa-download"></i> Descargar plantilla XLSX</button>' +
+    '<form onsubmit="importProductosFile(event)">' +
+      '<label for="import-productos-bodega">Bodega activa *</label>' +
+      '<select id="import-productos-bodega" required><option value="">Cargando bodegas...</option></select>' +
+      '<label for="import-productos-reference" style="margin-top:12px;">Factura, guía o documento de respaldo *</label>' +
+      '<input type="text" id="import-productos-reference" maxlength="120" placeholder="Ej.: FACTURA-12345" required>' +
+      '<label for="import-productos-file" style="margin-top:12px;">Archivo XLSX, XLS compatible o CSV *</label>' +
+      '<input type="file" id="import-productos-file" accept=".xlsx,.xls,.csv" required>' +
+      '<button type="submit" id="import-productos-submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:16px;"><i class="fas fa-file-import"></i> Importar en esta bodega</button>' +
+      '<div id="import-productos-errors" style="margin-top:14px;"></div>' +
+    '</form></div>'
+  );
+  loadActiveWarehousesForFile('import-productos-bodega', 'import-productos-submit');
+}
+
+function importProductosFile(event) {
+  event.preventDefault();
+  var input = document.getElementById('import-productos-file');
+  var warehouse = document.getElementById('import-productos-bodega');
+  var reference = document.getElementById('import-productos-reference');
+  var submit = document.getElementById('import-productos-submit');
+  if (!input || !input.files || !input.files[0]) { toast('Seleccione un archivo XLSX, XLS compatible o CSV', 'error'); return; }
+  if (!warehouse || !warehouse.value) { toast('Seleccione una bodega activa', 'error'); return; }
+  if (!reference || !reference.value.trim()) { toast('Indique la factura, guía o documento de respaldo', 'error'); return; }
   var fd = new FormData();
   fd.append('file', input.files[0]);
+  fd.append('id_bodega', warehouse.value);
+  fd.append('referencia_documento', reference.value.trim());
   var xhr = new XMLHttpRequest();
   xhr.open('POST', '../assets/api/importar_productos.php', true);
+  if (submit) submit.disabled = true;
   xhr.onload = function() {
-    input.value = '';
+    if (submit) submit.disabled = false;
     try {
       var r = JSON.parse(xhr.responseText);
-      toast(r.msg || (r.success ? 'Importación completada' : 'Error al importar'), r.success ? 'success' : 'error');
-      if (r.success) loadProductos();
+      var details = Array.isArray(r.detalle_errores) ? r.detalle_errores : [];
+      var errorsBox = document.getElementById('import-productos-errors');
+      if (errorsBox) {
+        errorsBox.innerHTML = details.length
+          ? '<div style="padding:10px;border-radius:8px;background:#fff7ed;color:#9a3412;font-size:12px;"><strong>Filas por corregir:</strong><ul style="margin:6px 0 0 18px;">' + details.map(function(item) { return '<li>Fila ' + esc(String(item.fila)) + ': ' + esc(item.motivo) + '</li>'; }).join('') + '</ul></div>'
+          : '';
+      }
+      var message = r.msg || r.message || (typeof r.error === 'string' ? r.error : '') || (r.success ? 'Importación completada' : 'Error al importar');
+      toast(message, r.success && !details.length ? 'success' : 'error');
+      if (r.success) {
+        loadProductos();
+        if (!details.length) closeModal();
+      }
     } catch(e) { toast('Respuesta inválida al importar', 'error'); }
   };
-  xhr.onerror = function() { input.value=''; toast('Error de conexión al importar', 'error'); };
+  xhr.onerror = function() {
+    if (submit) submit.disabled = false;
+    toast('Error de conexión al importar', 'error');
+  };
   xhr.send(fd);
 }
 
