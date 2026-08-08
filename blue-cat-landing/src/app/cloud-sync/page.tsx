@@ -1,0 +1,8 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import { CloudCog, DatabaseBackup, Network, ShieldCheck } from "lucide-react";
+import { PageHero } from "@/components/marketing/page-hero";
+import { cloudService } from "@/config/commercial";
+export const metadata:Metadata={title:"Cloud Sync",description:"Servicio mensual opcional de infraestructura y sincronización para Blue Cat."};
+const cases=[[Network,"Sucursales conectadas","Evaluación para compartir información operativa entre ubicaciones."],[DatabaseBackup,"Respaldo remoto","Estrategia de copias externas y recuperación definida según el entorno."],[CloudCog,"Operación administrada","Monitoreo e infraestructura recurrente solo cuando el cliente la contrata."],[ShieldCheck,"Alcance controlado","Diseño de acceso, cifrado, auditoría y continuidad según cada implementación."]] as const;
+export default function CloudPage(){return <><PageHero eyebrow="Servicio adicional" title="Conecta sucursales sin convertir toda licencia en una suscripción.">{cloudService.description}</PageHero><section className="section"><div className="container"><div className="notice"><strong>Importante:</strong> Cloud Sync está sujeto a evaluación técnica. Las capacidades exactas, frecuencia de sincronización, respaldos y niveles de servicio se documentan antes de contratar.</div><div className="grid-2" style={{marginTop:"2rem"}}>{cases.map(([Icon,title,text])=><article className="card" key={title}><span className="card-icon"><Icon size={22}/></span><h2 style={{fontSize:"1.2rem"}}>{title}</h2><p>{text}</p></article>)}</div><div style={{marginTop:"2rem"}}><Link className="button button-primary" href="/comprar?plan=enterprise&cloud=true">Solicitar evaluación</Link></div></div></section></>}

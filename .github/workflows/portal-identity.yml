@@ -1,0 +1,91 @@
+name: Portal identity
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "blue-cat-landing/**"
+      - ".github/workflows/portal-identity.yml"
+  push:
+    branches:
+      - "codex/**"
+    paths:
+      - "blue-cat-landing/**"
+      - ".github/workflows/portal-identity.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-identity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_DATABASE: blue_cat_identity_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    defaults:
+      run:
+        working-directory: blue-cat-landing
+
+    env:
+      NODE_ENV: test
+      NEXT_PUBLIC_SITE_URL: http://127.0.0.1:3000
+      DATABASE_URL: mysql://root@127.0.0.1:3306/blue_cat_identity_test
+      DATABASE_TIMEZONE: local
+      CURRENT_TERMS_VERSION: terms-ci
+      CURRENT_PRIVACY_VERSION: privacy-ci
+      CURRENT_MARKETING_CONSENT_VERSION: marketing-ci
+      EMAIL_PROVIDER: console
+      COMMERCE_ENABLED: "false"
+      LEGAL_STATUS: draft
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: blue-cat-landing/package-lock.json
+
+      - name: Generate ephemeral test secrets
+        shell: bash
+        run: |
+          identity_key="$(openssl rand -base64 32 | tr -d '\n')"
+          identity_pepper="$(openssl rand -hex 32)"
+          outbox_token="$(openssl rand -hex 32)"
+          purchase_token="$(openssl rand -hex 32)"
+          echo "::add-mask::$identity_key"
+          echo "::add-mask::$identity_pepper"
+          echo "::add-mask::$outbox_token"
+          echo "::add-mask::$purchase_token"
+          {
+            echo "IDENTITY_DATA_KEY=$identity_key"
+            echo "IDENTITY_HASH_PEPPER=$identity_pepper"
+            echo "OUTBOX_WORKER_TOKEN=$outbox_token"
+            echo "PURCHASE_TOKEN_SECRET=$purchase_token"
+          } >> "$GITHUB_ENV"
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run db:migrate
+      - run: npm run test:identity
+      - run: npm run build
+      - run: npm audit --audit-level=high
