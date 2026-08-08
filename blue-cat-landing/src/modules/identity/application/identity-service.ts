@@ -249,7 +249,7 @@ export async function loginPortal(
   };
 }
 
-export async function requestPasswordReset(emailInput: string, requestId: string): Promise<{ accepted: true; resetToken?: string }> {
+export async function issueAccountRecoveryChallenge(emailInput: string, requestId: string): Promise<{ accepted: true; resetToken?: string }> {
   const email = normalizeEmail(emailInput);
   const [rows] = await getPool().query<UserRow[]>(
     "SELECT * FROM portal_users WHERE normalized_email=? AND status<>'disabled' LIMIT 1",

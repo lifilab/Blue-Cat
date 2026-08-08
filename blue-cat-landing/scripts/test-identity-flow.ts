@@ -9,7 +9,7 @@ import {
   confirmMfaEnrollment,
   loginPortal,
   registerPortalAccount,
-  requestPasswordReset,
+  issueAccountRecoveryChallenge,
   resetPortalPassword,
   verifyPortalEmail,
 } from "../src/modules/identity/application/identity-service";
@@ -75,7 +75,7 @@ async function main() {
   assert.equal(overview.organizations.length, 1);
   assert.equal(overview.organizations[0]?.role, "owner");
 
-  const reset = await requestPasswordReset(email, randomUUID());
+  const reset = await issueAccountRecoveryChallenge(email, randomUUID());
   assert.ok(reset.resetToken);
   assert.equal(await resetPortalPassword(reset.resetToken!, "BlueCat-New!2026", randomUUID()), true);
   assert.equal(await authenticatePortalRequest(authenticatedRequest), null, "Password reset revokes prior sessions.");
