@@ -1,0 +1,106 @@
+name: blue-cat-commercial-staging
+
+services:
+  database:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${PORTAL_DB_NAME:?PORTAL_DB_NAME is required}
+      MYSQL_USER: ${PORTAL_DB_USER:?PORTAL_DB_USER is required}
+      MYSQL_PASSWORD: ${PORTAL_DB_PASSWORD:?PORTAL_DB_PASSWORD is required}
+      MYSQL_ROOT_PASSWORD: ${PORTAL_DB_ROOT_PASSWORD:?PORTAL_DB_ROOT_PASSWORD is required}
+    volumes:
+      - portal-db:/var/lib/mysql
+    networks: [data]
+    expose: ["3306"]
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    security_opt: ["no-new-privileges:true"]
+
+  migrate:
+    image: ${PORTAL_IMAGE_REPOSITORY:-ghcr.io/lifilab/blue-cat-portal}:${PORTAL_IMAGE_TAG:?PORTAL_IMAGE_TAG is required}-migrator
+    restart: "no"
+    env_file: .env.staging
+    depends_on:
+      database:
+        condition: service_healthy
+    networks: [data]
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+
+  portal:
+    image: ${PORTAL_IMAGE_REPOSITORY:-ghcr.io/lifilab/blue-cat-portal}:${PORTAL_IMAGE_TAG:?PORTAL_IMAGE_TAG is required}
+    restart: unless-stopped
+    env_file: .env.staging
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [edge, data]
+    expose: ["3000"]
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/.next/cache
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+
+  outbox-worker:
+    image: ${PORTAL_IMAGE_REPOSITORY:-ghcr.io/lifilab/blue-cat-portal}:${PORTAL_IMAGE_TAG:?PORTAL_IMAGE_TAG is required}
+    restart: unless-stopped
+    environment:
+      OUTBOX_WORKER_TOKEN: ${OUTBOX_WORKER_TOKEN:?OUTBOX_WORKER_TOKEN is required}
+    command:
+      - node
+      - -e
+      - >-
+        const run=()=>fetch('http://portal:3000/api/internal/email-outbox/process',
+        {method:'POST',headers:{Authorization:'Bearer '+process.env.OUTBOX_WORKER_TOKEN}})
+        .then(r=>{if(!r.ok)throw new Error('HTTP_'+r.status);return r.text()})
+        .catch(e=>console.error(JSON.stringify({event:'outbox_tick_failed',code:e.message})));
+        run();setInterval(run,30000)
+    depends_on:
+      portal:
+        condition: service_healthy
+    networks: [data]
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      disable: true
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      STAGING_HOST: ${STAGING_HOST:?STAGING_HOST is required}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      portal:
+        condition: service_healthy
+    networks: [edge]
+    cap_drop: ["ALL"]
+    cap_add: ["NET_BIND_SERVICE"]
+    security_opt: ["no-new-privileges:true"]
+
+networks:
+  edge: {}
+  data:
+    internal: true
+
+volumes:
+  portal-db: {}
+  caddy-data: {}
+  caddy-config: {}

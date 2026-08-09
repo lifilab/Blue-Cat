@@ -1,0 +1,12 @@
+.git
+.github
+.next
+node_modules
+coverage
+storage
+.env
+.env.*
+*.log
+docs
+README.md
+SPRINT_2_ACCEPTANCE.md

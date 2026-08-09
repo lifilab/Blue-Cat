@@ -1,0 +1,97 @@
+name: Staging readiness
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "blue-cat-landing/**"
+      - ".github/workflows/staging-readiness.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-readiness-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: blue-cat-landing
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: blue-cat-landing/package-lock.json
+
+      - run: npm ci
+
+      - name: Generate ephemeral staging configuration
+        shell: bash
+        run: |
+          identity_key="$(openssl rand -base64 32 | tr -d '\n')"
+          identity_pepper="$(openssl rand -hex 32)"
+          outbox_token="$(openssl rand -hex 32)"
+          purchase_token="$(openssl rand -hex 32)"
+          database_password="$(openssl rand -hex 24)"
+          resend_key="re_$(openssl rand -hex 24)"
+          for value in "$identity_key" "$identity_pepper" "$outbox_token" "$purchase_token" "$database_password" "$resend_key"; do
+            echo "::add-mask::$value"
+          done
+          {
+            echo "APP_ENV=staging"
+            echo "NODE_ENV=production"
+            echo "NEXT_PUBLIC_SITE_URL=https://staging.blue-cat.test"
+            echo "STAGING_HOST=staging.blue-cat.test"
+            echo "DEPLOYMENT_COMMIT=0000000000000000000000000000000000000001"
+            echo "PORTAL_IMAGE_TAG=0000000000000000000000000000000000000001"
+            echo "DATABASE_URL=mysql://portal:$database_password@database:3306/blue_cat_portal"
+            echo "DATABASE_CREATE_ALLOWED=false"
+            echo "IDENTITY_DATA_KEY=$identity_key"
+            echo "IDENTITY_HASH_PEPPER=$identity_pepper"
+            echo "OUTBOX_WORKER_TOKEN=$outbox_token"
+            echo "PURCHASE_TOKEN_SECRET=$purchase_token"
+            echo "EMAIL_PROVIDER=resend"
+            echo "EMAIL_FROM=Blue Cat Staging <cuentas@blue-cat.test>"
+            echo "RESEND_API_KEY=$resend_key"
+            echo "CURRENT_TERMS_VERSION=terms-staging-ci"
+            echo "CURRENT_PRIVACY_VERSION=privacy-staging-ci"
+            echo "CURRENT_MARKETING_CONSENT_VERSION=marketing-staging-ci"
+            echo "COMMERCE_ENABLED=false"
+            echo "LEGAL_STATUS=draft"
+            echo "PUBLIC_INDEXING_ENABLED=false"
+          } >> "$GITHUB_ENV"
+
+      - run: npm run staging:verify-config
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build portal runtime image
+        uses: docker/build-push-action@v6
+        with:
+          context: blue-cat-landing
+          target: runner
+          push: false
+          build-args: |
+            NEXT_PUBLIC_SITE_URL=https://staging.blue-cat.test
+            NEXT_PUBLIC_COMMERCIAL_EMAIL=ventas@blue-cat.test
+            PUBLIC_INDEXING_ENABLED=false
+          cache-from: type=gha,scope=staging-runner
+          cache-to: type=gha,mode=max,scope=staging-runner
+
+      - name: Build migration image
+        uses: docker/build-push-action@v6
+        with:
+          context: blue-cat-landing
+          target: migrator
+          push: false
+          cache-from: type=gha,scope=staging-migrator
+          cache-to: type=gha,mode=max,scope=staging-migrator

@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 
 const productionOnlyCsp = process.env.NODE_ENV === "production" ? "; upgrade-insecure-requests" : "";
 const developmentScriptCsp = process.env.NODE_ENV === "production" ? "" : " 'unsafe-eval'";
+const publicIndexingEnabled = process.env.PUBLIC_INDEXING_ENABLED === "true";
 const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
@@ -12,8 +13,10 @@ const securityHeaders = [
 ];
 
 if (process.env.NODE_ENV === "production") securityHeaders.push({ key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" });
+if (!publicIndexingEnabled) securityHeaders.push({ key: "X-Robots-Tag", value: "noindex, nofollow, noarchive" });
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   poweredByHeader: false,
   reactStrictMode: true,
   async headers() {
