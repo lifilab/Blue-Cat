@@ -1,5 +1,7 @@
 # Despliegue
 
+El entorno público de staging tiene un procedimiento reproducible y una frontera explícita en [staging-deployment.md](staging-deployment.md). Su aceptación se registra con [staging-e2e-checklist.md](staging-e2e-checklist.md). Ningún despliegue de la landing autoriza exponer el ERP/POS local.
+
 ## Desarrollo
 
 1. Copia `.env.example` a `.env.local`.

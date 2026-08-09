@@ -9,3 +9,7 @@
 Thumbs.db
 .idea/
 .vscode/
+
+# Credenciales y datos del despliegue comercial.
+/blue-cat-landing/deploy/staging/.env.staging
+/blue-cat-landing/deploy/staging/backups/

@@ -176,6 +176,8 @@ if (getenv('APP_ENV') !== 'test' || DB_NAME === 'erp') {
 $db = getDB();
 $tenant = $foreignTenant = [];
 try {
+    $databaseToday = (string)($db->query("SELECT DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS today")->fetch_assoc()['today'] ?? '');
+    expectDashboard($databaseToday === date('Y-m-d'), 'PHP y MySQL comparten el mismo dia operativo');
     $tenant = createDashboardTenant($db, 'A', true);
     $foreignTenant = createDashboardTenant($db, 'B', false);
     $product = 'Producto dashboard firmado ' . bin2hex(random_bytes(3));

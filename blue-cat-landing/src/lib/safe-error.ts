@@ -5,6 +5,7 @@ const internalCodes = new Set([
   "INVALID_REVIEW_TRANSITION", "PAYMENT_MISMATCH_REQUIRES_NOTE", "INVALID_QUOTE_STATE",
   "INVALID_STORAGE_KEY",
   "EVIDENCE_DIR_INVALID",
+  "COMMERCE_NOT_ENABLED",
 ]);
 
 export function safeErrorCode(error: unknown): string {

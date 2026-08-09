@@ -17,7 +17,9 @@ async function main() {
     multipleStatements: true,
   });
   try {
-    await connection.query(`CREATE DATABASE IF NOT EXISTS \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+    if (process.env.DATABASE_CREATE_ALLOWED !== "false") {
+      await connection.query(`CREATE DATABASE IF NOT EXISTS \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+    }
     await connection.query(`USE \`${database}\``);
     await connection.query(`
       CREATE TABLE IF NOT EXISTS schema_migrations (

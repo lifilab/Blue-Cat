@@ -14,7 +14,9 @@
     "test": "vitest run",
     "db:migrate": "tsx scripts/migrate.ts",
     "identity:bootstrap-operator": "tsx scripts/bootstrap-operator.ts",
-    "test:identity": "tsx scripts/test-identity-flow.ts"
+    "test:identity": "tsx scripts/test-identity-flow.ts",
+    "staging:verify-config": "tsx scripts/verify-staging-config.ts",
+    "staging:smoke": "tsx scripts/smoke-staging.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

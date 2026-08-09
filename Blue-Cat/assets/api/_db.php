@@ -1,9 +1,13 @@
 <?php
-date_default_timezone_set('America/Santiago');
 
 require_once __DIR__ . '/env_loader.php';
 $configuredEnv = getenv('BLUECAT_ENV_FILE');
 loadEnv($configuredEnv !== false && $configuredEnv !== '' ? $configuredEnv : dirname(__DIR__, 2) . '/.env');
+$appTimezone = getenv('APP_TIMEZONE') ?: 'America/Santiago';
+if (!in_array($appTimezone, timezone_identifiers_list(), true)) {
+    $appTimezone = 'America/Santiago';
+}
+date_default_timezone_set($appTimezone);
 require_once __DIR__ . '/_security.php';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -44,6 +48,11 @@ function getDB(): mysqli {
             exit;
         }
         $db->set_charset('utf8mb4');
+        $databaseOffset = (new DateTimeImmutable('now'))->format('P');
+        $escapedOffset = $db->real_escape_string($databaseOffset);
+        if (!$db->query("SET time_zone='{$escapedOffset}'")) {
+            throw new RuntimeException('No se pudo sincronizar la zona horaria de la base de datos.');
+        }
     }
     return $db;
 }
