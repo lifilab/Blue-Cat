@@ -49,6 +49,10 @@ if (($_ENV['APP_ENV'] ?? '') !== 'test' && !in_array('--allow-production', $_SER
 
 $db = new mysqli($_ENV['DB_HOST'] ?? 'localhost', $_ENV['DB_USER'] ?? '', $_ENV['DB_PASSWORD'] ?? '', $_ENV['DB_NAME'] ?? '', (int)($_ENV['DB_PORT'] ?? 3306));
 $db->set_charset('utf8mb4');
+$testTimezone = (string)($_ENV['APP_TIMEZONE'] ?? 'America/Santiago');
+if (!in_array($testTimezone, timezone_identifiers_list(), true)) $testTimezone = 'America/Santiago';
+$testOffset = (new DateTimeImmutable('now', new DateTimeZone($testTimezone)))->format('P');
+$db->query("SET time_zone='".$db->real_escape_string($testOffset)."'");
 $base = rtrim(securityTestOption('--base-url') ?? 'http://localhost/Blue-Cat/assets/api', '/');
 $suffix = bin2hex(random_bytes(6));
 $username = 'st-'.$suffix;
