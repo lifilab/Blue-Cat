@@ -13,7 +13,6 @@ Thumbs.db
 # Credenciales y datos del despliegue comercial.
 /blue-cat-landing/deploy/staging/.env.staging
 /blue-cat-landing/deploy/staging/backups/
-
 # Local agent config and scratch files
 .agents/
 .claude-flow/
