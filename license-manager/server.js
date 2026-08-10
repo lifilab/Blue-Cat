@@ -15,6 +15,32 @@ const JWT_SECRET = process.env.JWT_SECRET || 'antigravity_license_secret_key_202
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Simple in-memory rate limiter middleware to satisfy CodeQL rate limiting warnings
+const rateLimits = {};
+function customRateLimiter(windowMs, maxRequests, message) {
+  return (req, res, next) => {
+    const ip = req.headers['x-forwarded-for']?.split(',')[0] || req.ip || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    
+    if (!rateLimits[ip]) {
+      rateLimits[ip] = [];
+    }
+    
+    rateLimits[ip] = rateLimits[ip].filter(timestamp => now - timestamp < windowMs);
+    
+    if (rateLimits[ip].length >= maxRequests) {
+      return res.status(429).json({ error: message || 'Too many requests, please try again later.' });
+    }
+    
+    rateLimits[ip].push(now);
+    next();
+  };
+}
+
+const apiLimiter = customRateLimiter(15 * 60 * 1000, 200, 'Demasiadas solicitudes a la API, por favor intenta más tarde.');
+app.use('/api/', apiLimiter);
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Helper: Generador de Claves de Licencia Seguras (Formato: XXXX-XXXX-XXXX-XXXX)
@@ -402,6 +428,19 @@ exit
   });
 }
 
+function escapeHtml(value) {
+  if (!value) return '';
+  return String(value).replace(/[&<>"']/g, (char) => {
+    return {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#039;'
+    }[char] || char;
+  });
+}
+
 // Helper: Enviar Correo con el Paquete ZIP Adjunto
 async function sendLicenseEmail(data, targetEmail, hostUrl, smtpConfig = {}) {
   const nodemailer = require('nodemailer');
@@ -449,7 +488,7 @@ async function sendLicenseEmail(data, targetEmail, hostUrl, smtpConfig = {}) {
   const mailOptions = {
     from: smtpFrom,
     to: targetEmail,
-    subject: `🔐 Entrega de Tu Licencia Comercial y Software Blue-Cat ERP - ${data.name}`,
+    subject: `🔐 Entrega de Tu Licencia Comercial y Software Blue-Cat ERP - ${escapeHtml(data.name)}`,
     html: `
       <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0b0f19; color: #f3f4f6; padding: 32px; border-radius: 12px; max-width: 600px; margin: 0 auto; border: 1px solid rgba(255,255,255,0.1);">
         <div style="text-align: center; margin-bottom: 24px;">
@@ -457,24 +496,24 @@ async function sendLicenseEmail(data, targetEmail, hostUrl, smtpConfig = {}) {
             🛡️
           </div>
           <h2 style="color: #ffffff; margin-top: 12px; font-size: 22px;">¡Entrega de Licencia Comercial & Software Blue-Cat!</h2>
-          <p style="color: #9ca3af; font-size: 14px;">Hola <strong>${data.name}</strong>, gracias por adquirir Blue-Cat ERP.</p>
+          <p style="color: #9ca3af; font-size: 14px;">Hola <strong>${escapeHtml(data.name)}</strong>, gracias por adquirir Blue-Cat ERP.</p>
         </div>
 
         <div style="background: rgba(255,255,255,0.04); padding: 20px; border-left: 4px solid #3b82f6; border-radius: 6px; margin: 24px 0;">
           <p style="margin: 0; font-size: 12px; color: #9ca3af; text-transform: uppercase; letter-spacing: 1px;">TU CLAVE DE LICENCIA DE 1 USO:</p>
-          <p style="font-family: monospace; font-size: 22px; font-weight: bold; color: #f59e0b; margin: 8px 0 0 0;">${data.license_key}</p>
-          <p style="margin: 8px 0 0 0; font-size: 13px; color: #9ca3af;">Correo Registrado: <strong>${data.email}</strong></p>
+          <p style="font-family: monospace; font-size: 22px; font-weight: bold; color: #f59e0b; margin: 8px 0 0 0;">${escapeHtml(data.license_key)}</p>
+          <p style="margin: 8px 0 0 0; font-size: 13px; color: #9ca3af;">Correo Registrado: <strong>${escapeHtml(data.email)}</strong></p>
         </div>
 
         <div style="text-align: center; margin: 26px 0;">
-          <a href="${hostUrl}/api/download/bluecat-installer" 
+          <a href="${escapeHtml(hostUrl)}/api/download/bluecat-installer" 
              style="display: inline-block; padding: 14px 28px; background: linear-gradient(135deg, #10b981, #059669); color: #ffffff; text-decoration: none; font-weight: bold; border-radius: 8px; font-size: 15px; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);">
             ⬇️ Descargar Instalador Completo (BlueCat-Server-Setup.exe)
           </a>
         </div>
 
         <h3 style="color: #ffffff; font-size: 16px;"> Archivo Adjunto de Configuración:</h3>
-        <p style="font-size: 14px; color: #d1d5db;">Adjuntamos tu paquete con la clave de licencia lista: <code>Paquete_Licencia_${data.name.replace(/\s+/g, '_')}.zip</code></p>
+        <p style="font-size: 14px; color: #d1d5db;">Adjuntamos tu paquete con la clave de licencia lista: <code>Paquete_Licencia_${escapeHtml(data.name.replace(/\s+/g, '_'))}.zip</code></p>
 
         <h3 style="color: #ffffff; font-size: 16px;"> Pasos para la Instalación y Activación:</h3>
         <ol style="font-size: 14px; color: #d1d5db; line-height: 1.6;">
@@ -490,7 +529,7 @@ async function sendLicenseEmail(data, targetEmail, hostUrl, smtpConfig = {}) {
     `,
     attachments: [
       {
-        filename: `Paquete_Licencia_${data.name.replace(/\s+/g, '_')}.zip`,
+        filename: `Paquete_Licencia_${escapeHtml(data.name.replace(/\s+/g, '_'))}.zip`,
         content: zipBuffer,
         contentType: 'application/zip'
       }
@@ -522,7 +561,8 @@ app.post('/api/admin/licenses/:id/send-email', authAdminMiddleware, async (req, 
     }
 
     const destination = target_email && target_email.trim() ? target_email.trim() : data.email;
-    const hostUrl = `${req.protocol}://${req.get('host')}`;
+    const configuredPublicUrl = (process.env.PUBLIC_BASE_URL || '').trim();
+    const hostUrl = configuredPublicUrl || `${req.protocol}://${req.get('host')}`;
 
     // Consultar si hay configuración SMTP guardada en BD
     db.all(`SELECT key, value FROM settings WHERE key LIKE 'smtp_%'`, async (settingsErr, rows) => {

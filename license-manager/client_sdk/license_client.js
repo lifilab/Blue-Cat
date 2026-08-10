@@ -71,11 +71,13 @@ class NodeLicenseClient {
         this.startHeartbeat();
         return true;
       } else {
-        console.error(`\n[X] ERROR DE LICENCIA: ${response.message}`);
+        const safeMessage = String(response && response.message ? response.message : 'Error desconocido').replace(/[\r\n]/g, ' ');
+        console.error(`\n[X] ERROR DE LICENCIA: ${safeMessage}`);
         process.exit(1);
       }
     } catch (err) {
-      console.error(`\n[X] ERROR DE CONEXIÓN O LICENCIA INVÁLIDA: ${err.message}`);
+      const safeErrorMessage = String(err && err.message ? err.message : err).replace(/[\r\n]/g, ' ');
+      console.error(`\n[X] ERROR DE CONEXIÓN O LICENCIA INVÁLIDA: ${safeErrorMessage}`);
       process.exit(1);
     }
   }
