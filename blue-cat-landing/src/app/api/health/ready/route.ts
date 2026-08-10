@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { validateStagingEnvironment } from "@/config/runtime-environment";
-import { getPool } from "@/infrastructure/database/mysql";
+import { getPool } from "@/infrastructure/database/postgres";
 
 export const dynamic = "force-dynamic";
 
@@ -9,10 +9,10 @@ export async function GET() {
     return unavailable();
   }
 
-  let connection: Awaited<ReturnType<ReturnType<typeof getPool>["getConnection"]>> | undefined;
+  let connection: any = undefined;
   try {
-    connection = await getPool().getConnection();
-    await connection.query({ sql: "SELECT 1", timeout: 2_000 });
+    connection = await getPool().connect();
+    await connection.query("SELECT 1");
     return NextResponse.json(
       { status: "ready", service: "blue-cat-commercial-portal" },
       { headers: { "Cache-Control": "no-store" } },

@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Panel Administrador | Gestor de Licencias de 1 Uso & Anti-Keygens</title>
+
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Remix Icons for crisp UI icons -->
+  <link href="https://cdn.jsdelivr.net/npm/remixicon@4.2.0/fonts/remixicon.css" rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- ========================================== -->
+  <!-- 1. VISTA DE INICIO DE SESIÓN (LOGIN)       -->
+  <!-- ========================================== -->
+  <div id="login-view" class="view-container active">
+    <div class="glass-card login-card">
+      <div class="brand-header">
+        <div class="brand-icon">
+          <i class="ri-shield-keyhole-line"></i>
+        </div>
+        <h2>LicenceGuard Admin</h2>
+        <p>Sistema de Ventas y Emisión de Licencias de 1 Uso</p>
+      </div>
+
+      <form id="login-form">
+        <div class="form-group">
+          <label for="login-username"><i class="ri-user-line"></i> Usuario Administrador</label>
+          <input type="text" id="login-username" placeholder="admin" required autocomplete="username">
+        </div>
+
+        <div class="form-group">
+          <label for="login-password"><i class="ri-lock-line"></i> Contraseña</label>
+          <div class="input-password-wrapper">
+            <input type="password" id="login-password" placeholder="••••••••" required autocomplete="current-password">
+            <button type="button" class="btn-toggle-password" id="btn-toggle-pass">
+              <i class="ri-eye-line"></i>
+            </button>
+          </div>
+        </div>
+
+        <div id="login-error" class="alert-error hidden"></div>
+
+        <button type="submit" class="btn btn-primary btn-block">
+          <i class="ri-login-box-line"></i> Iniciar Sesión en el Panel
+        </button>
+
+        <div class="credentials-hint">
+          <i class="ri-information-line"></i> Credenciales por defecto: <strong>admin</strong> / <strong>admin123</strong>
+        </div>
+      </form>
+    </div>
+  </div>
+
+
+  <!-- ========================================== -->
+  <!-- 2. VISTA DE DASHBOARD PRINCIPAL            -->
+  <!-- ========================================== -->
+  <div id="dashboard-view" class="view-container">
+    
+    <!-- Navbar / Header -->
+    <header class="navbar">
+      <div class="navbar-left">
+        <div class="brand-logo">
+          <i class="ri-shield-check-line"></i>
+          <span>LicenceGuard <strong>Server</strong></span>
+        </div>
+        <div class="status-indicator">
+          <span class="pulse-dot"></span>
+          <span class="status-text">Servidor Online</span>
+        </div>
+      </div>
+
+      <div class="navbar-right">
+        <div class="user-badge">
+          <i class="ri-user-star-line"></i>
+          <span id="display-admin-username">admin</span>
+        </div>
+        <button id="btn-open-smtp-modal" class="btn btn-secondary btn-sm" title="Configurar Servidor SMTP para envío de correos">
+          <i class="ri-mail-settings-line"></i> Servidor SMTP
+        </button>
+        <button id="btn-open-change-pass" class="btn btn-secondary btn-sm" title="Cambiar Contraseña">
+          <i class="ri-key-2-line"></i> Seguridades
+        </button>
+        <button id="btn-logout" class="btn btn-danger btn-sm" title="Cerrar Sesión">
+          <i class="ri-logout-box-r-line"></i> Salir
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Body Container -->
+    <main class="dashboard-content">
+      
+      <!-- Metrics Bar -->
+      <section class="metrics-grid">
+        <div class="metric-card glass-card">
+          <div class="metric-icon blue"><i class="ri-user-user-line"></i></div>
+          <div class="metric-data">
+            <h3 id="stat-total-clients">0</h3>
+            <p>Clientes Registrados</p>
+          </div>
+        </div>
+
+        <div class="metric-card glass-card">
+          <div class="metric-icon green"><i class="ri-checkbox-circle-line"></i></div>
+          <div class="metric-data">
+            <h3 id="stat-active-licenses">0</h3>
+            <p>Licencias Activas</p>
+          </div>
+        </div>
+
+        <div class="metric-card glass-card">
+          <div class="metric-icon red"><i class="ri-close-circle-line"></i></div>
+          <div class="metric-data">
+            <h3 id="stat-suspended-licenses">0</h3>
+            <p>Suspendidas / Revocadas</p>
+          </div>
+        </div>
+
+        <div class="metric-card glass-card">
+          <div class="metric-icon purple"><i class="ri-wifi-line"></i></div>
+          <div class="metric-data">
+            <h3 id="stat-online-sessions">0</h3>
+            <p>Clientes En Vivo (Heartbeat)</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Action Toolbar & Search -->
+      <section class="toolbar-section">
+        <div class="search-box">
+          <i class="ri-search-line"></i>
+          <input type="text" id="search-input" placeholder="Buscar por cliente, correo o licencia...">
+        </div>
+
+        <div class="filter-box">
+          <select id="filter-status">
+            <option value="all">Todos los estados</option>
+            <option value="active">Licencias Activas</option>
+            <option value="suspended">Licencias Suspendidas</option>
+            <option value="online">En Vivo / Conectados</option>
+          </select>
+        </div>
+
+        <a href="/api/download/bluecat-installer" class="btn btn-secondary" title="Descargar Instalador Oficial Ejecutable BlueCat-Server-Setup.exe (292 MB)" target="_blank">
+          <i class="ri-download-line"></i> Descargar Instalador BlueCat (.exe)
+        </a>
+
+        <button id="btn-open-add-modal" class="btn btn-primary">
+          <i class="ri-add-circle-line"></i> Registrar Cliente y Licencia
+        </button>
+      </section>
+
+      <!-- Data Table -->
+      <section class="table-section glass-card">
+        <div class="table-header-title">
+          <h3><i class="ri-group-line"></i> Lista de Clientes y Gestión de Entrega</h3>
+          <span class="refresh-indicator" id="btn-refresh-data" title="Actualizar Datos">
+            <i class="ri-refresh-line"></i> Actualizar
+          </span>
+        </div>
+
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Cliente / Email</th>
+                <th>Clave de Licencia (1 Uso)</th>
+                <th>Estado de Licencia</th>
+                <th>Sesión Online (HWID/IP)</th>
+                <th>Ref. Pago</th>
+                <th>Acciones y Entrega</th>
+              </tr>
+            </thead>
+            <tbody id="clients-table-body">
+              <!-- Cargado dinámicamente desde app.js -->
+              <tr>
+                <td colspan="6" class="empty-state">
+                  <i class="ri-loader-4-line spin"></i> Cargando lista de clientes...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+
+  <!-- ========================================== -->
+  <!-- MODAL: REGISTRAR CLIENTE Y EMITIR LICENCIA -->
+  <!-- ========================================== -->
+  <div id="modal-add-client" class="modal-overlay hidden">
+    <div class="modal-content glass-card">
+      <div class="modal-header">
+        <h3><i class="ri-user-add-line"></i> Nuevo Cliente y Generación de Licencia</h3>
+        <button class="btn-close-modal" id="btn-close-add-modal"><i class="ri-close-line"></i></button>
+      </div>
+      <form id="form-add-client">
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="add-name"><i class="ri-user-3-line"></i> Nombre del Cliente *</label>
+              <input type="text" id="add-name" placeholder="Ej: Juan Pérez" required>
+            </div>
+            <div class="form-group flex-1">
+              <label for="add-email"><i class="ri-mail-line"></i> Correo Electrónico Verificador *</label>
+              <input type="email" id="add-email" placeholder="cliente@correo.com" required>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="add-phone"><i class="ri-phone-line"></i> Teléfono / WhatsApp</label>
+              <input type="text" id="add-phone" placeholder="+57 300 000 0000">
+            </div>
+            <div class="form-group flex-1">
+              <label for="add-payment"><i class="ri-bank-card-line"></i> Ref. Transferencia / Pago</label>
+              <input type="text" id="add-payment" placeholder="Ej: Transf. Nequi #84920">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="add-license-key"><i class="ri-key-line"></i> Clave de Licencia (Se genera automáticamente si está vacía)</label>
+            <div class="input-with-button">
+              <input type="text" id="add-license-key" placeholder="XXXX-XXXX-XXXX-XXXX" style="font-family: monospace; font-weight: 600;">
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-gen-random-key">
+                <i class="ri-magic-line"></i> Generar
+              </button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="add-notes"><i class="ri-file-text-line"></i> Notas del Vendedor</label>
+            <textarea id="add-notes" rows="2" placeholder="Detalles de la venta o requerimientos especiales..."></textarea>
+          </div>
+
+          <div id="add-client-error" class="alert-error hidden"></div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="btn-cancel-add">Cancelar</button>
+          <button type="submit" class="btn btn-primary">
+            <i class="ri-check-double-line"></i> Emitir Licencia y Guardar
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- MODAL: EDITAR CLIENTE                     -->
+  <!-- ========================================== -->
+  <div id="modal-edit-client" class="modal-overlay hidden">
+    <div class="modal-content glass-card">
+      <div class="modal-header">
+        <h3><i class="ri-edit-line"></i> Editar Datos de Cliente y Licencia</h3>
+        <button class="btn-close-modal" id="btn-close-edit-modal"><i class="ri-close-line"></i></button>
+      </div>
+      <form id="form-edit-client">
+        <input type="hidden" id="edit-client-id">
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="edit-name"><i class="ri-user-3-line"></i> Nombre del Cliente *</label>
+              <input type="text" id="edit-name" required>
+            </div>
+            <div class="form-group flex-1">
+              <label for="edit-email"><i class="ri-mail-line"></i> Correo Electrónico Verificador *</label>
+              <input type="email" id="edit-email" required>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="edit-phone"><i class="ri-phone-line"></i> Teléfono / WhatsApp</label>
+              <input type="text" id="edit-phone">
+            </div>
+            <div class="form-group flex-1">
+              <label for="edit-payment"><i class="ri-bank-card-line"></i> Ref. Transferencia / Pago</label>
+              <input type="text" id="edit-payment">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="edit-notes"><i class="ri-file-text-line"></i> Notas del Vendedor</label>
+            <textarea id="edit-notes" rows="2"></textarea>
+          </div>
+
+          <div id="edit-client-error" class="alert-error hidden"></div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="btn-cancel-edit">Cancelar</button>
+          <button type="submit" class="btn btn-primary">
+            <i class="ri-save-line"></i> Guardar Cambios
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- MODAL: CAMBIAR CONTRASEÑA ADMIN            -->
+  <!-- ========================================== -->
+  <div id="modal-change-pass" class="modal-overlay hidden">
+    <div class="modal-content glass-card modal-sm">
+      <div class="modal-header">
+        <h3><i class="ri-lock-password-line"></i> Cambiar Contraseña Admin</h3>
+        <button class="btn-close-modal" id="btn-close-pass-modal"><i class="ri-close-line"></i></button>
+      </div>
+      <form id="form-change-pass">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="pass-current">Contraseña Actual</label>
+            <input type="password" id="pass-current" required>
+          </div>
+          <div class="form-group">
+            <label for="pass-new">Nueva Contraseña</label>
+            <input type="password" id="pass-new" required minlength="6">
+          </div>
+          <div id="change-pass-error" class="alert-error hidden"></div>
+          <div id="change-pass-success" class="alert-success hidden"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="btn-cancel-pass">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar Cambios</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- MODAL: CONFIGURACIÓN DE CORREO SMTP        -->
+  <!-- ========================================== -->
+  <div id="modal-smtp-settings" class="modal-overlay hidden">
+    <div class="modal-content glass-card">
+      <div class="modal-header">
+        <h3><i class="ri-mail-settings-line"></i> Configuración de Servidor SMTP</h3>
+        <button class="btn-close-modal" id="btn-close-smtp-modal"><i class="ri-close-line"></i></button>
+      </div>
+      <form id="form-smtp-settings">
+        <div class="modal-body">
+          <p style="font-size:13px; color:var(--text-secondary); margin-bottom:16px;">
+            Configura el servidor SMTP para enviar automáticamente los paquetes ZIP con las licencias al correo de tus clientes (Ej: Gmail, Outlook, Mailtrap, Hostinger).
+          </p>
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="smtp-host">Servidor SMTP Host</label>
+              <input type="text" id="smtp-host" placeholder="smtp.gmail.com">
+            </div>
+            <div class="form-group flex-1">
+              <label for="smtp-port">Puerto</label>
+              <input type="text" id="smtp-port" placeholder="587">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="smtp-user">Usuario / Correo Remitente</label>
+              <input type="text" id="smtp-user" placeholder="tu-correo@gmail.com">
+            </div>
+            <div class="form-group flex-1">
+              <label for="smtp-pass">Contraseña de Aplicación / SMTP</label>
+              <input type="password" id="smtp-pass" placeholder="••••••••••••">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="smtp-from">Nombre del Remitente (De:)</label>
+            <input type="text" id="smtp-from" placeholder='"Ventas LicenceGuard" <tu-correo@gmail.com>'>
+          </div>
+
+          <div id="smtp-error" class="alert-error hidden"></div>
+          <div id="smtp-success" class="alert-success hidden"></div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="btn-cancel-smtp">Cancelar</button>
+          <button type="submit" class="btn btn-primary">
+            <i class="ri-save-line"></i> Guardar Configuración
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast Notification System -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

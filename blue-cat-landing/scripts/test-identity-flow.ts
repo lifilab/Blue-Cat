@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import type { RowDataPacket } from "mysql2";
 import { generate } from "otplib";
-import { getPool } from "../src/infrastructure/database/mysql";
+import { getPool } from "../src/infrastructure/database/postgres";
 import { authenticateAdmin } from "../src/lib/admin-auth";
 import {
   beginMfaEnrollment,
@@ -22,8 +21,8 @@ const termsVersion = process.env.CURRENT_TERMS_VERSION || "terms-2026-07";
 const privacyVersion = process.env.CURRENT_PRIVACY_VERSION || "privacy-2026-07";
 
 async function main() {
-  const [databaseRows] = await getPool().query<Array<RowDataPacket & { database_name: string }>>("SELECT DATABASE() database_name");
-  assert.match(databaseRows[0]?.database_name || "", /_test$/, "Identity integration tests require a database ending in _test.");
+  const result = await getPool().query<{ database_name: string }>("SELECT current_database() as database_name");
+  assert.match(result.rows[0]?.database_name || "", /_test$/, "Identity integration tests require a database ending in _test.");
   await resetData();
 
   const email = `owner-${Date.now()}@example.test`;
@@ -38,14 +37,14 @@ async function main() {
   }, request, randomUUID());
   assert.ok(registered.userId && registered.verificationToken);
 
-  const [users] = await getPool().query<Array<RowDataPacket & { password_hash: string; status: string }>>(
-    "SELECT password_hash,status FROM portal_users WHERE id=?",
+  const usersResult = await getPool().query<{ password_hash: string; status: string }>(
+    "SELECT password_hash,status FROM portal_users WHERE id=$1",
     [registered.userId],
   );
-  assert.equal(users[0]?.status, "pending_verification");
-  assert.equal(isArgon2idHash(users[0]?.password_hash || ""), true);
-  const [outbox] = await getPool().query<Array<RowDataPacket & { encrypted_payload: string }>>("SELECT encrypted_payload FROM email_outbox LIMIT 1");
-  assert.equal(outbox[0]?.encrypted_payload.includes(registered.verificationToken!), false, "Raw tokens must not be stored in outbox payloads.");
+  assert.equal(usersResult.rows[0]?.status, "pending_verification");
+  assert.equal(isArgon2idHash(usersResult.rows[0]?.password_hash || ""), true);
+  const outboxResult = await getPool().query<{ encrypted_payload: string }>("SELECT encrypted_payload FROM email_outbox LIMIT 1");
+  assert.equal(outboxResult.rows[0]?.encrypted_payload.includes(registered.verificationToken!), false, "Raw tokens must not be stored in outbox payloads.");
 
   assert.equal(await verifyPortalEmail(registered.verificationToken!, randomUUID()), true);
   assert.equal(await verifyPortalEmail(registered.verificationToken!, randomUUID()), false, "Verification tokens are single use.");
@@ -80,7 +79,7 @@ async function main() {
   assert.equal(await resetPortalPassword(reset.resetToken!, "BlueCat-New!2026", randomUUID()), true);
   assert.equal(await authenticatePortalRequest(authenticatedRequest), null, "Password reset revokes prior sessions.");
 
-  await getPool().execute("UPDATE portal_users SET user_type='operator',mfa_required=1 WHERE id=?", [registered.userId]);
+  await getPool().query("UPDATE portal_users SET user_type='operator',mfa_required=true WHERE id=$1", [registered.userId]);
   const operatorLogin = await loginPortal({ email, password: "BlueCat-New!2026" }, request, randomUUID());
   assert.equal(operatorLogin.status, "authenticated");
   if (operatorLogin.status !== "authenticated") throw new Error("OPERATOR_LOGIN_FAILED");
@@ -115,22 +114,20 @@ function identityRequest(sessionToken?: string, csrfToken?: string): Request {
 }
 
 async function resetData() {
-  await getPool().query("SET FOREIGN_KEY_CHECKS=0");
-  for (const table of [
-    "email_outbox",
-    "portal_consents",
-    "organization_billing_profiles",
-    "organization_memberships",
-    "organizations",
-    "portal_sessions",
-    "portal_email_tokens",
-    "portal_users",
-    "audit_events",
-    "api_rate_limits",
-  ]) {
-    await getPool().query(`TRUNCATE TABLE \`${table}\``);
-  }
-  await getPool().query("SET FOREIGN_KEY_CHECKS=1");
+  await getPool().query(
+    `TRUNCATE TABLE 
+      email_outbox,
+      portal_consents,
+      organization_billing_profiles,
+      organization_memberships,
+      organizations,
+      portal_sessions,
+      portal_email_tokens,
+      portal_users,
+      audit_events,
+      api_rate_limits
+     CASCADE`
+  );
 }
 
 main().catch(async (error) => {
@@ -138,3 +135,4 @@ main().catch(async (error) => {
   await getPool().end();
   process.exitCode = 1;
 });
+

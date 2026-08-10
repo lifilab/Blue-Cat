@@ -109,6 +109,31 @@ if ($accion === 'csrf' && $method === 'GET') {
     json(['ok'=>true,'csrf_token'=>securityCsrfToken()]);
 }
 
+if ($accion === 'estado_licencia') {
+    require_once __DIR__ . '/_license_guard.php';
+    $status = checkLicenseStatusOnline();
+    json([
+        'ok' => true,
+        'license' => $status
+    ]);
+}
+
+if ($accion === 'activar_licencia' && $method === 'POST') {
+    require_once __DIR__ . '/_license_guard.php';
+    $email = trim((string)($_POST['email'] ?? ''));
+    $licenseKey = trim((string)($_POST['license_key'] ?? ''));
+    if ($email === '' || $licenseKey === '') {
+        authError('Correo electrónico y clave de licencia son obligatorios.', 400);
+    }
+
+    $res = activateLicenseOnline($email, $licenseKey);
+    if ($res['ok']) {
+        authOk($res['message'], ['license' => $res]);
+    } else {
+        authError($res['message'], 400);
+    }
+}
+
 if ($accion === 'logout' && $method === 'POST') {
     $uid=getSessionUserId();
     if ($uid) securityRevokeCurrentSession($conn, $uid);

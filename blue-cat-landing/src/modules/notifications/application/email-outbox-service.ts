@@ -1,9 +1,8 @@
 import { randomUUID } from "node:crypto";
-import type { RowDataPacket } from "mysql2";
-import { getPool } from "@/infrastructure/database/mysql";
+import { getPool } from "@/infrastructure/database/postgres";
 import { decryptPrivatePayload } from "@/modules/identity/domain/secure-values";
 
-interface OutboxRow extends RowDataPacket {
+interface OutboxRow {
   id: string;
   recipient: string;
   template_key: "verify_email" | "reset_password";
@@ -33,22 +32,22 @@ export async function dispatchEmailOutbox(batchSize = 10): Promise<OutboxDispatc
       const payload = decryptPrivatePayload<EmailPayload>(job.encrypted_payload);
       const message = renderEmail(job.template_key, payload);
       const providerMessageId = await sendEmail(job.recipient, message.subject, message.html, message.text);
-      await getPool().execute(
+      await getPool().query(
         `UPDATE email_outbox
-         SET status='sent',provider_message_id=?,sent_at=CURRENT_TIMESTAMP(6),
+         SET status='sent',provider_message_id=$1,sent_at=CURRENT_TIMESTAMP,
              encrypted_payload='purged',locked_at=NULL,locked_by=NULL,last_error_code=NULL
-         WHERE id=? AND status='processing'`,
+         WHERE id=$2 AND status='processing'`,
         [providerMessageId, job.id],
       );
       result.sent += 1;
     } catch (error) {
       const dead = job.attempts >= 5;
       const delayMinutes = Math.min(60, 2 ** Math.max(0, job.attempts - 1));
-      await getPool().execute(
+      await getPool().query(
         `UPDATE email_outbox
-         SET status=?,available_at=DATE_ADD(CURRENT_TIMESTAMP(6),INTERVAL ? MINUTE),
-             locked_at=NULL,locked_by=NULL,last_error_code=?
-         WHERE id=?`,
+         SET status=$1,available_at=CURRENT_TIMESTAMP + ($2 || ' minutes')::interval,
+             locked_at=NULL,locked_by=NULL,last_error_code=$3
+         WHERE id=$4`,
         [dead ? "dead" : "failed", delayMinutes, safeErrorCode(error), job.id],
       );
       if (dead) result.dead += 1;
@@ -59,35 +58,35 @@ export async function dispatchEmailOutbox(batchSize = 10): Promise<OutboxDispatc
 }
 
 async function claimJobs(limit: number): Promise<OutboxRow[]> {
-  const connection = await getPool().getConnection();
+  const connection = await getPool().connect();
   const workerId = `worker-${randomUUID()}`;
   try {
-    await connection.beginTransaction();
-    const [rows] = await connection.query<OutboxRow[]>(
+    await connection.query("BEGIN");
+    const result = await connection.query<OutboxRow>(
       `SELECT id,recipient,template_key,encrypted_payload,attempts
        FROM email_outbox
        WHERE (
-         status IN ('pending','failed') AND available_at<=CURRENT_TIMESTAMP(6)
+         status IN ('pending','failed') AND available_at<=CURRENT_TIMESTAMP
        ) OR (
-         status='processing' AND locked_at<DATE_SUB(CURRENT_TIMESTAMP(6),INTERVAL 15 MINUTE)
+         status='processing' AND locked_at<CURRENT_TIMESTAMP - INTERVAL '15 minutes'
        )
        ORDER BY created_at ASC
-       LIMIT ? FOR UPDATE SKIP LOCKED`,
+       LIMIT $1 FOR UPDATE SKIP LOCKED`,
       [limit],
     );
+    const rows = result.rows;
     if (rows.length) {
-      const ids = rows.map(() => "?").join(",");
       await connection.query(
         `UPDATE email_outbox
-         SET status='processing',attempts=attempts+1,locked_at=CURRENT_TIMESTAMP(6),locked_by=?
-         WHERE id IN (${ids})`,
-        [workerId, ...rows.map((row) => row.id)],
+         SET status='processing',attempts=attempts+1,locked_at=CURRENT_TIMESTAMP,locked_by=$1
+         WHERE id = ANY($2::uuid[])`,
+        [workerId, rows.map((row) => row.id)],
       );
     }
-    await connection.commit();
+    await connection.query("COMMIT");
     return rows.map((row) => ({ ...row, attempts: Number(row.attempts) + 1 }));
   } catch (error) {
-    await connection.rollback();
+    await connection.query("ROLLBACK");
     throw error;
   } finally {
     connection.release();
@@ -154,3 +153,4 @@ function safeErrorCode(error: unknown): string {
   if (error instanceof Error) return error.message.replace(/[^A-Z0-9_-]/gi, "_").slice(0, 80) || "EMAIL_FAILED";
   return "EMAIL_FAILED";
 }
+

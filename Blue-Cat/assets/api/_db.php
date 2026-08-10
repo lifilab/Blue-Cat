@@ -9,6 +9,7 @@ if (!in_array($appTimezone, timezone_identifiers_list(), true)) {
 }
 date_default_timezone_set($appTimezone);
 require_once __DIR__ . '/_security.php';
+require_once __DIR__ . '/_license_guard.php';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Blue-Cat ERP v1.0 — Core Database Helper
