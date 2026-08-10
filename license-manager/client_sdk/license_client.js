@@ -27,8 +27,8 @@ class NodeLicenseClient {
       try {
         const config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
         this.serverUrl = config.server_url || this.serverUrl;
-        this.email = config.email;
-        this.licenseKey = config.license_key;
+        this.email = config.email ? String(config.email).replace(/[^\w@.-]/g, '') : null;
+        this.licenseKey = config.license_key ? String(config.license_key).replace(/[^a-zA-Z0-9-]/g, '') : null;
       } catch (e) {
         console.error('[!] Error al leer license_config.json');
       }
