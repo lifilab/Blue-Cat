@@ -10,7 +10,7 @@ function createPool(): Pool {
     connectionString: databaseUrl,
     max: 8,
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 2000,
+    connectionTimeoutMillis: 10000,
     ssl: databaseUrl.includes('localhost') || databaseUrl.includes('127.0.0.1')
       ? false
       : { rejectUnauthorized: false }

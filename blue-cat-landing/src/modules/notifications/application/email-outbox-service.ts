@@ -166,4 +166,3 @@ function safeErrorCode(error: unknown): string {
   if (error instanceof Error) return error.message.replace(/[^A-Z0-9_-]/gi, "_").slice(0, 80) || "EMAIL_FAILED";
   return "EMAIL_FAILED";
 }
-
