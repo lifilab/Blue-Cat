@@ -52,10 +52,9 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .brand { display: inline-flex; align-items: center; gap: .68rem; font-weight: 790; letter-spacing: -.025em; }
 .brand img { width: 2.35rem; height: 2.35rem; object-fit: contain; }
 .desktop-nav { display: flex; align-items: center; gap: 1rem; margin-left: auto; }
-.header-auth { display: flex; align-items: center; gap: .8rem; padding-left: .15rem; }
-.header-auth a:last-child { color: var(--blue); }
 .desktop-nav .button { min-height: 2.8rem; padding: .72rem 1rem; }
 .desktop-nav a { color: #405066; font-size: .93rem; font-weight: 650; }
+.desktop-nav .account-access-link { color: var(--blue); }
 .desktop-nav a:hover { color: var(--blue); }
 .menu-button { display: none; margin-left: auto; width: 2.75rem; height: 2.75rem; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: .75rem; background: white; }
 .mobile-nav { display: none; padding: 0 0 1rem; }

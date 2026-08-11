@@ -17,10 +17,7 @@ export function SiteHeader() {
         </Link>
         <nav className="desktop-nav" aria-label="Navegación principal">
           {navigation.map((item) => <Link key={item.href} href={item.href}>{item.label}</Link>)}
-          <div className="header-auth" role="group" aria-label="Acceso de clientes">
-            <Link href="/ingresar">Iniciar sesión</Link>
-            <Link href="/crear-cuenta">Crear cuenta</Link>
-          </div>
+          <Link className="account-access-link" href="/ingresar">Iniciar sesión o crear cuenta</Link>
           <Link className="button button-primary" href="/comprar">Solicitar licencia</Link>
         </nav>
         <button className="menu-button" type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-controls="mobile-navigation" aria-label={open ? "Cerrar menú" : "Abrir menú"}>
@@ -29,8 +26,7 @@ export function SiteHeader() {
       </div>
       <nav id="mobile-navigation" className={`container mobile-nav ${open ? "open" : ""}`} aria-label="Navegación móvil">
         {navigation.map((item) => <Link key={item.href} href={item.href} onClick={() => setOpen(false)}>{item.label}</Link>)}
-        <Link href="/ingresar" onClick={() => setOpen(false)}>Iniciar sesión</Link>
-        <Link href="/crear-cuenta" onClick={() => setOpen(false)}>Crear cuenta</Link>
+        <Link href="/ingresar" onClick={() => setOpen(false)}>Iniciar sesión o crear cuenta</Link>
         <Link href="/comprar" onClick={() => setOpen(false)}>Solicitar licencia</Link>
       </nav>
     </header>
