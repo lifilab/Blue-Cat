@@ -332,9 +332,13 @@ app.get('/api/admin/licenses/:id/package', authAdminMiddleware, (req, res) => {
 
 // Endpoint Público/Admin: Descargar Instalador Oficial Ejecutable BlueCat-Server-Setup.exe
 app.get('/api/download/bluecat-installer', (req, res) => {
-  const installerPath = path.join(__dirname, '..', 'Blue-Cat', 'packaging', 'windows', 'output', 'BlueCat-Server-Setup.exe');
-  if (fs.existsSync(installerPath)) {
-    res.download(installerPath, 'BlueCat-Server-Setup.exe');
+  const localInstallerPath = path.join(__dirname, 'public', 'BlueCat-Server-Setup.exe');
+  const parentInstallerPath = path.join(__dirname, '..', 'Blue-Cat', 'packaging', 'windows', 'output', 'BlueCat-Server-Setup.exe');
+  
+  if (fs.existsSync(localInstallerPath)) {
+    res.download(localInstallerPath, 'BlueCat-Server-Setup.exe');
+  } else if (fs.existsSync(parentInstallerPath)) {
+    res.download(parentInstallerPath, 'BlueCat-Server-Setup.exe');
   } else {
     res.status(404).json({ error: 'El instalador ejecutable BlueCat-Server-Setup.exe no fue encontrado en el servidor.' });
   }
@@ -549,7 +553,9 @@ app.post('/api/admin/licenses/:id/send-email', authAdminMiddleware, async (req, 
 
     const destination = target_email && target_email.trim() ? target_email.trim() : data.email;
     const configuredPublicUrl = (process.env.PUBLIC_BASE_URL || '').trim();
-    const hostUrl = configuredPublicUrl || `http://localhost:${PORT}`;
+    const protocol = req.headers['x-forwarded-proto'] || 'http';
+    const host = req.headers['x-forwarded-host'] || req.headers.host;
+    const hostUrl = configuredPublicUrl || `${protocol}://${host}`;
 
     // Consultar si hay configuración SMTP guardada en BD
     db.all(`SELECT key, value FROM settings WHERE key LIKE 'smtp_%'`, async (settingsErr, rows) => {
