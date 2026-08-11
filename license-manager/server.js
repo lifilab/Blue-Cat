@@ -589,7 +589,7 @@ app.get('/api/admin/smtp-settings', authAdminMiddleware, (req, res) => {
 
 app.post('/api/admin/smtp-settings', authAdminMiddleware, (req, res) => {
   const { host, port, user, pass, from } = req.body;
-  const stmt = db.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`);
+  const stmt = db.prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`);
 
   stmt.run('smtp_host', host || '');
   stmt.run('smtp_port', port || '587');

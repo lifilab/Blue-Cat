@@ -35,11 +35,6 @@ function translateSql(sql) {
   translated = translated.replace(/datetime\(s\.last_heartbeat\)/gi, 's.last_heartbeat');
   translated = translated.replace(/datetime\('now',\s*'-2 minutes'\)/gi, "NOW() - INTERVAL '2 minutes'");
   
-  // Reemplazar INSERT OR REPLACE
-  if (translated.toUpperCase().includes('INSERT OR REPLACE INTO settings')) {
-    translated = 'INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value';
-  }
-  
   // Agregar prefijo de esquema 'licensing.' a todas las tablas conocidas
   translated = translated.replace(/(?<!licensing\.)\b(admins|clients|licenses|sessions|settings)\b/g, 'licensing.$1');
 
