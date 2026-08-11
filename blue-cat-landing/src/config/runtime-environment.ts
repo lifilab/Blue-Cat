@@ -86,7 +86,9 @@ function validateDatabaseUrl(value: string | undefined, errors: string[]): void 
   try {
     if (!value) throw new Error("missing");
     const url = new URL(value);
-    if (url.protocol !== "mysql:") errors.push("DATABASE_URL_MUST_USE_MYSQL");
+    if (url.protocol !== "postgresql:" && url.protocol !== "postgres:") {
+      errors.push("DATABASE_URL_MUST_USE_POSTGRES");
+    }
     if (!url.hostname || !url.username || !url.password || !url.pathname.slice(1)) {
       errors.push("DATABASE_URL_MISSING_CREDENTIALS_OR_DATABASE");
     }

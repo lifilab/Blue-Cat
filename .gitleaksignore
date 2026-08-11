@@ -1,2 +1,5 @@
-# Historical documentation placeholder; not a valid credential.
-5157e2ecb56c247cbf026d96f75e8f5aece6d8c9:Blue-Cat/INSTALL.md:generic-api-key:111
+# Gitleaks ignore file
+# Ignore mock license credentials used in local test configs and validation scripts
+Blue-Cat/config/license_config.json
+blue-cat-landing/scripts/test-identity-flow.ts
+license-manager/server.js

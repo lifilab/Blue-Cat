@@ -25,18 +25,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
-      mysql:
-        image: mysql:8.4
+      postgres:
+        image: postgres:15
         env:
-          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
-          MYSQL_DATABASE: blue_cat_identity_test
+          POSTGRES_DB: blue_cat_identity_test
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports:
-          - 3306:3306
+          - 5432:5432
         options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1"
-          --health-interval=5s
-          --health-timeout=5s
-          --health-retries=20
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
 
     defaults:
       run:
@@ -45,7 +45,7 @@ jobs:
     env:
       NODE_ENV: test
       NEXT_PUBLIC_SITE_URL: http://127.0.0.1:3000
-      DATABASE_URL: mysql://root@127.0.0.1:3306/blue_cat_identity_test
+      DATABASE_URL: postgresql://postgres@127.0.0.1:5432/blue_cat_identity_test?options=-csearch_path%3Dlanding
       DATABASE_TIMEZONE: local
       CURRENT_TERMS_VERSION: terms-ci
       CURRENT_PRIVACY_VERSION: privacy-ci
@@ -58,7 +58,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
-        with:
+         with:
           node-version: 22
           cache: npm
           cache-dependency-path: blue-cat-landing/package-lock.json
@@ -85,7 +85,10 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
-      - run: npm run db:migrate
+      - name: Initialize database schema
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          PGPASSWORD="" psql -h 127.0.0.1 -U postgres -d blue_cat_identity_test -f ../supabase/init_supabase.sql
       - run: npm run test:identity
       - run: npm run build
       - run: npm audit --audit-level=high

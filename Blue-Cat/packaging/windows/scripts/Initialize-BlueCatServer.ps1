@@ -71,6 +71,13 @@ $paths = @{
 }
 foreach ($path in $paths.Values) { New-Item -ItemType Directory -Path $path -Force | Out-Null }
 
+# Copiar configuración de licencia de 1 uso si existe
+$sourceLicConfig = Join-Path $app 'config\license_config.json'
+$targetLicConfig = Join-Path $paths.Config 'license_config.json'
+if (Test-Path -LiteralPath $sourceLicConfig -PathType Leaf) {
+    Copy-Item -LiteralPath $sourceLicConfig -Destination $targetLicConfig -Force
+}
+
 $caddyExe = Join-Path $runtime 'caddy\caddy.exe'
 $phpExe = Join-Path $runtime 'php\php.exe'
 $phpCgiExe = Join-Path $runtime 'php\php-cgi.exe'

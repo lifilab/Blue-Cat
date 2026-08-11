@@ -1,0 +1,30 @@
+SET NAMES utf8mb4;
+
+CREATE TABLE IF NOT EXISTS producto_precio_historial (
+  id_historial BIGINT AUTO_INCREMENT PRIMARY KEY,
+  id_cuenta INT NOT NULL,
+  id_producto INT NOT NULL,
+  id_user INT NOT NULL,
+  costo_anterior DECIMAL(12,2) NOT NULL DEFAULT 0,
+  costo_nuevo DECIMAL(12,2) NOT NULL DEFAULT 0,
+  precio_venta_anterior DECIMAL(12,2) NOT NULL DEFAULT 0,
+  precio_venta_nuevo DECIMAL(12,2) NOT NULL DEFAULT 0,
+  costo_informado DECIMAL(12,2) NOT NULL DEFAULT 0,
+  costo_neto DECIMAL(12,2) NOT NULL DEFAULT 0,
+  impuesto_monto DECIMAL(12,2) NOT NULL DEFAULT 0,
+  costo_total DECIMAL(12,2) NOT NULL DEFAULT 0,
+  id_impuesto INT DEFAULT NULL,
+  tasa_impuesto DECIMAL(5,2) NOT NULL DEFAULT 0,
+  modo_entrada ENUM('NETO','TOTAL') NOT NULL DEFAULT 'NETO',
+  base_costo ENUM('NETO','TOTAL') NOT NULL DEFAULT 'NETO',
+  tipo_documento ENUM('SIN_DOCUMENTO','FACTURA','BOLETA','GUIA','OTRO') NOT NULL DEFAULT 'SIN_DOCUMENTO',
+  numero_documento VARCHAR(80) DEFAULT NULL,
+  motivo VARCHAR(180) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_precio_historial_cuenta_fecha (id_cuenta, created_at),
+  INDEX idx_precio_historial_producto_fecha (id_producto, created_at),
+  CONSTRAINT fk_precio_historial_cuenta FOREIGN KEY (id_cuenta) REFERENCES cuenta(id_cuenta),
+  CONSTRAINT fk_precio_historial_producto FOREIGN KEY (id_producto) REFERENCES producto(id_producto),
+  CONSTRAINT fk_precio_historial_usuario FOREIGN KEY (id_user) REFERENCES usuario(id_user),
+  CONSTRAINT fk_precio_historial_impuesto FOREIGN KEY (id_impuesto) REFERENCES impuesto(id_impuesto)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
