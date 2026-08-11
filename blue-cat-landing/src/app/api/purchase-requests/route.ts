@@ -4,10 +4,15 @@ import { purchaseRequestSchema } from "@/modules/purchases/domain/purchase-reque
 import { createPurchaseRequest } from "@/modules/purchases/infrastructure/mysql-purchase-repository";
 import { clientRateLimitKey, enforceRateLimit, isSameOrigin } from "@/lib/http-security";
 import { safeErrorCode } from "@/lib/safe-error";
+import { isIdentityContext, requireIdentitySession } from "@/modules/identity/infrastructure/identity-http";
 
 export async function POST(request: Request) {
   const requestId = randomUUID();
   try {
+    const context = await requireIdentitySession(request, { csrf: true });
+    if (!isIdentityContext(context)) return context;
+    const principal = context.principal;
+
     if (!isSameOrigin(request)) return NextResponse.json({ error: { code: "INVALID_ORIGIN", message: "Origen de solicitud no permitido." }, requestId }, { status: 403 });
     const contentType = request.headers.get("content-type") ?? "";
     if (!contentType.includes("application/json")) return NextResponse.json({ error: { code: "UNSUPPORTED_MEDIA_TYPE", message: "Formato de solicitud no permitido." }, requestId }, { status: 415 });
@@ -21,6 +26,11 @@ export async function POST(request: Request) {
     const parsed = purchaseRequestSchema.safeParse(body);
     if (!parsed.success) return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Revisa los datos ingresados.", fields: parsed.error.flatten().fieldErrors }, requestId }, { status: 422 });
     if (parsed.data.website) return NextResponse.json({ error: { code: "REQUEST_REJECTED", message: "No fue posible procesar la solicitud." }, requestId }, { status: 400 });
+
+    if (parsed.data.email !== principal.email) {
+      return NextResponse.json({ error: { code: "EMAIL_MISMATCH", message: "El correo de la solicitud debe coincidir con el de tu cuenta." }, requestId }, { status: 403 });
+    }
+
     const result = await createPurchaseRequest(parsed.data, requestId, idempotencyKey);
     return NextResponse.json({ data: result, requestId }, { status: result.duplicate ? 200 : 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {

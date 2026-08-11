@@ -2,7 +2,7 @@ import Link from "next/link";
 import { siteConfig } from "@/config/site";
 
 const groups = [
-  { title: "Producto", links: [["Producto", "/producto"], ["Módulos", "/modulos"], ["Tutoriales", "/tutoriales"], ["Actualizaciones", "/actualizaciones"]] },
+  { title: "Producto", links: [["Producto", "/producto"], ["Módulos", "/modulos"], ["Actualizaciones", "/actualizaciones"]] },
   { title: "Comercial", links: [["Licencias", "/licencias"], ["Cloud Sync", "/cloud-sync"], ["Comprar", "/comprar"], ["Contacto", "/contacto"]] },
   { title: "Legal", links: [["Privacidad", "/privacidad"], ["Términos", "/terminos"], ["Licencia", "/licencia"], ["Preguntas frecuentes", "/preguntas-frecuentes"]] },
 ] as const;
