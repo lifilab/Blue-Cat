@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { PoolClient } from "pg";
 import { validateStagingEnvironment } from "@/config/runtime-environment";
 import { getPool } from "@/infrastructure/database/postgres";
 
@@ -9,7 +10,7 @@ export async function GET() {
     return unavailable();
   }
 
-  let connection: any = undefined;
+  let connection: PoolClient | undefined;
   try {
     connection = await getPool().connect();
     await connection.query("SELECT 1");

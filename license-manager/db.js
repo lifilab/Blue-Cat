@@ -5,19 +5,14 @@ require('dotenv').config();
 // Obtener la URL de conexión de la variable de entorno
 const connectionString = process.env.DATABASE_URL;
 
-if (!connectionString) {
-  console.error("ERROR: La variable de entorno DATABASE_URL no está configurada.");
-  process.exit(1);
-}
-
 // Configurar el Pool de conexión de PostgreSQL
 // Habilitar SSL para conexiones remotas a Supabase
-const pool = new Pool({
+const pool = connectionString ? new Pool({
   connectionString: connectionString,
   ssl: connectionString.includes('localhost') || connectionString.includes('127.0.0.1')
     ? false
     : { rejectUnauthorized: false }
-});
+}) : null;
 
 // Función de traducción de consultas SQLite a PostgreSQL
 function translateSql(sql) {
@@ -36,7 +31,7 @@ function translateSql(sql) {
   translated = translated.replace(/datetime\('now',\s*'-2 minutes'\)/gi, "NOW() - INTERVAL '2 minutes'");
   
   // Agregar prefijo de esquema 'licensing.' a todas las tablas conocidas
-  translated = translated.replace(/(?<!licensing\.)\b(admins|clients|licenses|sessions|settings)\b/g, 'licensing.$1');
+  translated = translated.replace(/(?<!licensing\.)\b(admins|clients|licenses|sessions|settings|download_tokens)\b/g, 'licensing.$1');
 
   return translated;
 }
@@ -142,6 +137,9 @@ const db = {
 
 // Función autoejecutable para inicializar los esquemas y tablas de licensing
 async function initDb() {
+  if (!pool) {
+    throw new Error("La variable de entorno DATABASE_URL no está configurada.");
+  }
   let client;
   try {
     client = await pool.connect();
@@ -208,32 +206,64 @@ async function initDb() {
       )
     `);
 
-    // Crear usuario admin inicial si no existe
-    const defaultUsername = process.env.ADMIN_USERNAME || 'admin';
-    const res = await client.query("SELECT * FROM admins WHERE username = $1 LIMIT 1", [defaultUsername]);
-    if (res.rowCount === 0) {
-      const defaultPassword = process.env.ADMIN_PASSWORD || 'admin123';
-      const hash = bcrypt.hashSync(defaultPassword, 10);
-      await client.query("INSERT INTO admins (username, password_hash) VALUES ($1, $2)", [defaultUsername, hash]);
-      console.log("=========================================");
-      console.log("Usuario Administrador Inicial Creado:");
-      console.log("Usuario: [REDACTED]");
-      console.log("Contraseña: (Configurada vía variable de entorno o por defecto)");
-      console.log("=========================================");
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS download_tokens (
+        id SERIAL PRIMARY KEY,
+        token_hash VARCHAR(64) UNIQUE NOT NULL,
+        client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+        license_id INTEGER NOT NULL REFERENCES licenses(id) ON DELETE CASCADE,
+        portal_user_id UUID,
+        expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+        used_at TIMESTAMP WITH TIME ZONE DEFAULT NULL,
+        ip_hash CHAR(64),
+        user_agent_hash CHAR(64),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await client.query(`
+      ALTER TABLE download_tokens
+      ADD COLUMN IF NOT EXISTS portal_user_id UUID,
+      ADD COLUMN IF NOT EXISTS ip_hash CHAR(64),
+      ADD COLUMN IF NOT EXISTS user_agent_hash CHAR(64)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_download_tokens_lookup
+      ON download_tokens (token_hash, expires_at)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_download_tokens_license_created
+      ON download_tokens (license_id, created_at DESC)
+    `);
+
+    // El bootstrap es opcional, pero nunca utiliza credenciales conocidas por defecto.
+    const bootstrapUsername = (process.env.ADMIN_USERNAME || '').trim();
+    const bootstrapPassword = process.env.ADMIN_PASSWORD || '';
+    if (Boolean(bootstrapUsername) !== Boolean(bootstrapPassword) || (bootstrapPassword && bootstrapPassword.length < 12)) {
+      throw new Error('ADMIN_USERNAME y ADMIN_PASSWORD deben configurarse juntos con una contraseña de al menos 12 caracteres.');
     }
-    
+    if (bootstrapUsername && bootstrapPassword) {
+      const res = await client.query("SELECT id FROM admins WHERE username = $1 LIMIT 1", [bootstrapUsername]);
+      if (res.rowCount === 0) {
+        const hash = bcrypt.hashSync(bootstrapPassword, 10);
+        await client.query("INSERT INTO admins (username, password_hash) VALUES ($1, $2)", [bootstrapUsername, hash]);
+        console.log("Usuario administrador inicial creado desde variables de entorno.");
+      }
+    }
+
     // Asegurar que todas las conexiones del pool utilicen el esquema licensing por defecto
     await pool.query("SET search_path TO licensing");
     
     console.log("Base de datos de validación inicializada correctamente.");
   } catch (err) {
     console.error("Error al inicializar la base de datos:", err);
+    throw err;
   } finally {
     if (client) client.release();
   }
 }
 
-// Lanzar inicialización asíncrona
-initDb();
+// Exponer la inicialización para que la API pueda responder 503 mientras la BD no esté lista.
+db.ready = initDb();
+db.ready.catch(() => {});
 
 module.exports = db;

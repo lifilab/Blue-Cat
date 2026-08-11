@@ -252,14 +252,14 @@ document.addEventListener('DOMContentLoaded', () => {
               </a>
 
               <button class="btn btn-secondary btn-sm" 
-                      onclick="copyInstallerLink()" 
-                      title="Copiar Enlace Directo de Descarga del Instalador BlueCat-Server-Setup.exe">
-                <i class="ri-file-download-line"></i> Copiar Enlace EXE
+                      onclick="copyClientPortalLink()"
+                      title="Copiar enlace seguro del Portal de Clientes">
+                <i class="ri-shield-user-line"></i> Copiar Portal
               </button>
 
               <button class="btn btn-secondary btn-sm" 
                       onclick="sendEmailToClient(${client.license_id}, '${escapeHtml(client.email)}')" 
-                      title="Enviar Paquete ZIP e Instalador EXE por Correo al Cliente">
+                      title="Enviar acceso seguro al Portal de Clientes">
                 <i class="ri-send-plane-line"></i> Enviar Correo
               </button>
 
@@ -521,22 +521,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Copiar Enlace Directo del Instalador EXE
-  window.copyInstallerLink = () => {
-    const url = `${window.location.origin}/api/download/bluecat-installer`;
-    navigator.clipboard.writeText(url).then(() => {
-      showToast('¡Enlace directo del Instalador BlueCat (.exe) copiado al portapapeles!', 'success');
-    }).catch(() => {
-      prompt('Copia el enlace de descarga para enviarlo al cliente:', url);
-    });
+  // Copiar enlace seguro del Portal de Clientes
+  window.copyClientPortalLink = async () => {
+    try {
+      const response = await fetch('/api/admin/portal-url', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'No fue posible obtener el portal.');
+      await navigator.clipboard.writeText(data.portal_url);
+      showToast('Enlace del Portal de Clientes copiado al portapapeles.', 'success');
+    } catch (err) {
+      showToast(err.message || 'No fue posible copiar el enlace del portal.', 'error');
+    }
   };
-
   // Enviar Licencia por Correo
   window.sendEmailToClient = async (licenseId, defaultEmail) => {
-    const targetEmail = prompt('Confirmar o ingresar correo electrónico del cliente para enviar el paquete ZIP:', defaultEmail);
+    const targetEmail = prompt('Confirmar o ingresar el correo del cliente para enviar su acceso al portal:', defaultEmail);
     if (!targetEmail || !targetEmail.trim()) return;
 
-    showToast(`Enviando paquete ZIP a ${targetEmail.trim()}...`, 'info');
+    showToast(`Enviando acceso al portal a ${targetEmail.trim()}...`, 'info');
     try {
       const res = await fetch(`/api/admin/licenses/${licenseId}/send-email`, {
         method: 'POST',

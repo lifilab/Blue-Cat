@@ -31,7 +31,7 @@ jobs:
       - name: Inventory UI preserves decimal quantities
         run: php Blue-Cat/scripts/test-inventory-ui-contract.php
       - name: License manager security contract
-        run: node license-manager/test_security_contract.js
+        run: npm test --prefix license-manager
       - name: Secret patterns
         shell: bash
         run: |

@@ -159,7 +159,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .portal-welcome h1 { margin: .5rem 0 .25rem; font-size: clamp(2rem, 5vw, 3.3rem); letter-spacing: -.05em; }
 .portal-welcome p { margin: 0; color: #d6e8fb; }
 .portal-welcome .eyebrow { color: #7de2f1; }
-.portal-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+.portal-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
 .portal-grid .card { display: grid; align-content: start; gap: .9rem; }
 .portal-grid .button { margin-top: .4rem; justify-self: start; }
 .portal-notice { display: flex; align-items: flex-start; gap: 1rem; }
@@ -177,6 +177,22 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .organization-card dl div { padding-top: .7rem; border-top: 1px solid var(--line); }
 .organization-card dt { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; }
 .organization-card dd { margin: .25rem 0 0; font-weight: 650; }
+.license-list { display: grid; gap: 1rem; }
+.license-card { display: grid; gap: 1rem; }
+.license-card-heading { display: flex; align-items: center; gap: .9rem; }
+.license-card-heading h3 { margin: .35rem 0 0; font-size: 1.4rem; }
+.license-card dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: .8rem; margin: 0; }
+.license-card dl div { padding: .8rem; border: 1px solid var(--line); border-radius: .75rem; background: #f7f9fb; }
+.license-card dt { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; }
+.license-card dd { margin: .3rem 0 0; font-weight: 650; overflow-wrap: anywhere; }
+.license-card code { color: #8a5600; }
+.license-card .button { justify-self: start; }
+.license-help { max-width: 720px; margin: 0; font-size: .82rem; line-height: 1.55; }
+.status-active { color: #11633c; background: #e7f8ef; }
+.status-inactive { color: #8f2020; background: #fff0f0; }
+.installer-notice { overflow-wrap: anywhere; color: #14532d; background: #ecfdf3; }
+.network-license-note { display: flex; align-items: flex-start; gap: .8rem; }
+.network-license-note p { margin: .3rem 0 0; }
 .secret-code, .uri-code { display: block; max-width: 100%; overflow-wrap: anywhere; padding: .8rem; border-radius: .6rem; background: #eef3f7; }
 .uri-code { margin-top: .5rem; font-size: .72rem; }
 .recovery-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: .45rem; }
@@ -239,7 +255,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .footer-grid > div:first-child { grid-column: 1 / -1; }
   .footer-bottom { flex-direction: column; }
   .portal-section-heading, .auth-links, .form-actions { align-items: stretch; flex-direction: column; }
-  .organization-card dl, .recovery-grid { grid-template-columns: 1fr; }
+  .organization-card dl, .license-card dl, .recovery-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 390px) {
   .container { width: min(100% - 1.15rem, 1160px); }
