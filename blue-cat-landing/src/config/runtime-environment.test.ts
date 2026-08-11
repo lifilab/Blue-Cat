@@ -77,4 +77,12 @@ describe("validateStagingEnvironment", () => {
       "STAGING_SECRETS_MUST_BE_UNIQUE",
     ]));
   });
+
+  it("rejects direct Supabase database hosts in deployed environments", () => {
+    const environment = validEnvironment();
+    environment.DATABASE_URL = `postgresql://postgres:${"d".repeat(40)}@db.ujrgeegybvibtjqxnxna.supabase.co:5432/postgres`;
+    const result = validateStagingEnvironment(environment);
+
+    expect(result.errors).toContain("DATABASE_URL_MUST_USE_SUPABASE_POOLER");
+  });
 });
