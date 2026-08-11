@@ -34,7 +34,14 @@ export async function POST(request: Request) {
       }
     }
     return NextResponse.json(
-      { data: { accepted: true, message: "Si el correo puede registrarse, recibirás un enlace de verificación." }, requestId },
+      {
+        data: {
+          accepted: true,
+          verificationToken: registration.verificationToken,
+          message: "Si el correo puede registrarse, recibirás un enlace de verificación.",
+        },
+        requestId,
+      },
       { status: 202, headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
