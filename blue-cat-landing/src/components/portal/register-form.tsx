@@ -28,7 +28,6 @@ export function RegisterForm({ termsVersion, privacyVersion }: { termsVersion: s
       const payload = await response.json() as { error?: { message?: string } };
       if (!response.ok) throw new Error(payload.error?.message || "No pudimos crear la cuenta.");
       setStatus("sent");
-      event.currentTarget.reset();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "No pudimos crear la cuenta.");
       setStatus("idle");
