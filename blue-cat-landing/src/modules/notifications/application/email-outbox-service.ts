@@ -105,7 +105,12 @@ async function sendEmail(jobId: string, recipient: string, subject: string, html
   const apiKey = process.env.RESEND_API_KEY?.trim() || "";
   let from = process.env.EMAIL_FROM?.trim() || "";
   if (!apiKey.startsWith("re_")) throw new Error("EMAIL_PROVIDER_NOT_CONFIGURED");
-  if (!from.includes("@") || from.includes("tu-dominio") || from.includes("example.com") || from.includes("example.invalid")) {
+  const extractedFromAddressMatch = from.match(/<([^<>@\s]+@[^<>@\s]+)>$/) ?? from.match(/^([^<>\s@]+@[^<>\s@]+)$/);
+  const extractedFromAddress = extractedFromAddressMatch?.[1] ?? extractedFromAddressMatch?.[0] ?? "";
+  const fromParts = extractedFromAddress.toLowerCase().split("@");
+  const fromDomain = fromParts.length === 2 ? fromParts[1] : "";
+  const blockedDomains = new Set(["tu-dominio.cl", "example.com", "example.invalid", "localhost"]);
+  if (!fromDomain || blockedDomains.has(fromDomain) || fromDomain.includes("tu-dominio")) {
     from = "Blue Cat <onboarding@resend.dev>";
   }
   const response = await fetch("https://api.resend.com/emails", {
