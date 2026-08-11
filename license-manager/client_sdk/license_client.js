@@ -76,7 +76,10 @@ class NodeLicenseClient {
         process.exit(1);
       }
     } catch (err) {
-      const safeErrorMessage = String(err && err.message ? err.message : err).replace(/[^a-zA-Z0-9\s:.-]/g, '');
+      const safeErrorMessage = String(err && err.message ? err.message : err)
+        .replace(/[\r\n]+/g, ' ')
+        .replace(/[\x00-\x1F\x7F]/g, '')
+        .replace(/[^a-zA-Z0-9 .:-]/g, '');
       console.error(`\n[X] ERROR DE CONEXIÓN O LICENCIA INVÁLIDA: ${safeErrorMessage}`);
       process.exit(1);
     }
