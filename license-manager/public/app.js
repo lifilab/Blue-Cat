@@ -515,6 +515,12 @@ document.addEventListener('DOMContentLoaded', () => {
       changePassSuccess.textContent = data.message;
       changePassSuccess.classList.remove('hidden');
       setTimeout(closePassModal, 1500);
+    } catch (err) {
+      changePassError.textContent = err.message;
+      changePassError.classList.remove('hidden');
+    }
+  });
+
   // Copiar Enlace Directo del Instalador EXE
   window.copyInstallerLink = () => {
     const url = `${window.location.origin}/api/download/bluecat-installer`;
@@ -524,8 +530,6 @@ document.addEventListener('DOMContentLoaded', () => {
       prompt('Copia el enlace de descarga para enviarlo al cliente:', url);
     });
   };
-    }
-  });
 
   // Enviar Licencia por Correo
   window.sendEmailToClient = async (licenseId, defaultEmail) => {
