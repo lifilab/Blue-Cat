@@ -93,6 +93,9 @@ function validateDatabaseUrl(value: string | undefined, errors: string[]): void 
       errors.push("DATABASE_URL_MISSING_CREDENTIALS_OR_DATABASE");
     }
     if (["localhost", "127.0.0.1", "::1"].includes(url.hostname)) errors.push("DATABASE_URL_MUST_NOT_BE_LOCALHOST");
+    if (url.hostname.startsWith("db.") && url.hostname.endsWith(".supabase.co")) {
+      errors.push("DATABASE_URL_MUST_USE_SUPABASE_POOLER");
+    }
   } catch {
     errors.push("DATABASE_URL_INVALID");
   }
