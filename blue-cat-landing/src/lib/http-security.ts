@@ -23,12 +23,12 @@ export async function enforceRateLimit(scope: string, identifier: string, maximu
   const expiresAt = new Date((windowNumber + 1) * windowSeconds * 1000);
   
   await pool.query(
-    "INSERT INTO api_rate_limits (scope, key_hash, request_count, expires_at) VALUES ($1, $2, 1, $3) ON CONFLICT (scope, key_hash) DO UPDATE SET request_count = api_rate_limits.request_count + 1",
+    "INSERT INTO landing.api_rate_limits (scope, key_hash, request_count, expires_at) VALUES ($1, $2, 1, $3) ON CONFLICT (scope, key_hash) DO UPDATE SET request_count = api_rate_limits.request_count + 1",
     [scope, keyHash, expiresAt],
   );
   
   const result = await pool.query<{ request_count: number }>(
-    "SELECT request_count FROM api_rate_limits WHERE scope = $1 AND key_hash = $2 LIMIT 1",
+    "SELECT request_count FROM landing.api_rate_limits WHERE scope = $1 AND key_hash = $2 LIMIT 1",
     [scope, keyHash],
   );
   

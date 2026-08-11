@@ -52,7 +52,7 @@ export async function issuePortalSession(
   const agent = request.headers.get("user-agent")?.slice(0, 512) ?? "unknown";
   
   await getPool().query(
-    `INSERT INTO portal_sessions
+    `INSERT INTO landing.portal_sessions
       (id,user_id,session_token_hash,csrf_token_hash,session_version,auth_level,ip_hash,user_agent_hash,expires_at,idle_expires_at)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
     [
@@ -78,8 +78,8 @@ export async function authenticatePortalRequest(request: Request): Promise<Porta
   const result = await getPool().query<SessionRow>(
     `SELECT s.id session_id,s.user_id,u.email,u.display_name,u.user_type,u.status user_status,
       u.email_verified_at,u.mfa_required,u.mfa_enabled,s.auth_level,s.csrf_token_hash
-     FROM portal_sessions s
-     INNER JOIN portal_users u ON u.id=s.user_id
+     FROM landing.portal_sessions s
+     INNER JOIN landing.portal_users u ON u.id=s.user_id
      WHERE s.session_token_hash=$1
        AND s.revoked_at IS NULL
        AND s.expires_at>CURRENT_TIMESTAMP
@@ -93,7 +93,7 @@ export async function authenticatePortalRequest(request: Request): Promise<Porta
   if (!row) return null;
   
   await getPool().query(
-    `UPDATE portal_sessions
+    `UPDATE landing.portal_sessions
      SET last_seen_at=CURRENT_TIMESTAMP,
          idle_expires_at=LEAST(expires_at, CURRENT_TIMESTAMP + INTERVAL '30 minutes')
      WHERE id=$1 AND last_seen_at<CURRENT_TIMESTAMP - INTERVAL '2 minutes'`,
@@ -122,14 +122,14 @@ export function requireRequestCsrf(request: Request, principal: PortalPrincipal)
 
 export async function revokePortalSession(sessionId: string, reason = "LOGOUT"): Promise<void> {
   await getPool().query(
-    "UPDATE portal_sessions SET revoked_at=CURRENT_TIMESTAMP,revoke_reason=$1 WHERE id=$2 AND revoked_at IS NULL",
+    "UPDATE landing.portal_sessions SET revoked_at=CURRENT_TIMESTAMP,revoke_reason=$1 WHERE id=$2 AND revoked_at IS NULL",
     [reason, sessionId],
   );
 }
 
 export async function revokeAllUserSessions(userId: string, reason: string): Promise<void> {
   await getPool().query(
-    "UPDATE portal_sessions SET revoked_at=CURRENT_TIMESTAMP,revoke_reason=$1 WHERE user_id=$2 AND revoked_at IS NULL",
+    "UPDATE landing.portal_sessions SET revoked_at=CURRENT_TIMESTAMP,revoke_reason=$1 WHERE user_id=$2 AND revoked_at IS NULL",
     [reason, userId],
   );
 }
