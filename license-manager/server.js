@@ -10,6 +10,7 @@ const fs = require('fs');
 const db = require('./db');
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3050;
 const JWT_SECRET = process.env.JWT_SECRET || 'antigravity_license_secret_key_2026_super_secure';
 

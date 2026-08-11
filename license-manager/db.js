@@ -40,6 +40,9 @@ function translateSql(sql) {
     translated = 'INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value';
   }
   
+  // Agregar prefijo de esquema 'licensing.' a todas las tablas conocidas
+  translated = translated.replace(/(?<!licensing\.)\b(admins|clients|licenses|sessions|settings)\b/g, 'licensing.$1');
+
   return translated;
 }
 
