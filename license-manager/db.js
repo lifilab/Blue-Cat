@@ -144,8 +144,9 @@ const db = {
 
 // Función autoejecutable para inicializar los esquemas y tablas de licensing
 async function initDb() {
-  const client = await pool.connect();
+  let client;
   try {
+    client = await pool.connect();
     console.log("Inicializando base de datos de validación de licencias...");
     
     // Asegurar esquema y búsqueda del mismo
@@ -229,7 +230,7 @@ async function initDb() {
   } catch (err) {
     console.error("Error al inicializar la base de datos:", err);
   } finally {
-    client.release();
+    if (client) client.release();
   }
 }
 
