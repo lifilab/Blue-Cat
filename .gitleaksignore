@@ -1,2 +1,4 @@
-# Historical documentation placeholder; not a valid credential.
+# Gitleaks ignore fingerprints for test files
+22f63f70f38127b8ed7519898076ef85f3251519:Blue-Cat/config/license_config.json:generic-api-key:4
+22f63f70f38127b8ed7519898076ef85f3251519:Blue-Cat/config/license_config.json:generic-api-key:5
 5157e2ecb56c247cbf026d96f75e8f5aece6d8c9:Blue-Cat/INSTALL.md:generic-api-key:111

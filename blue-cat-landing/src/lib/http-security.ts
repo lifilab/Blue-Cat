@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import type { Pool } from "mysql2/promise";
-import { getPool } from "@/infrastructure/database/mysql";
+import { Pool } from "pg";
+import { getPool } from "@/infrastructure/database/postgres";
 
 export function isSameOrigin(request: Request): boolean {
   const origin = request.headers.get("origin");
@@ -21,13 +21,17 @@ export async function enforceRateLimit(scope: string, identifier: string, maximu
   const windowNumber = Math.floor(Date.now() / (windowSeconds * 1000));
   const keyHash = createHash("sha256").update(`${identifier}|${windowNumber}`).digest("hex");
   const expiresAt = new Date((windowNumber + 1) * windowSeconds * 1000);
-  await pool.execute(
-    "INSERT INTO api_rate_limits (scope, key_hash, request_count, expires_at) VALUES (?, ?, 1, ?) ON DUPLICATE KEY UPDATE request_count = request_count + 1",
+  
+  await pool.query(
+    "INSERT INTO api_rate_limits (scope, key_hash, request_count, expires_at) VALUES ($1, $2, 1, $3) ON CONFLICT (scope, key_hash) DO UPDATE SET request_count = api_rate_limits.request_count + 1",
     [scope, keyHash, expiresAt],
   );
-  const [rows] = await pool.query<Array<{ request_count: number } & import("mysql2").RowDataPacket>>(
-    "SELECT request_count FROM api_rate_limits WHERE scope = ? AND key_hash = ? LIMIT 1",
+  
+  const result = await pool.query<{ request_count: number }>(
+    "SELECT request_count FROM api_rate_limits WHERE scope = $1 AND key_hash = $2 LIMIT 1",
     [scope, keyHash],
   );
-  return (rows[0]?.request_count ?? maximum + 1) <= maximum;
+  
+  return (result.rows[0]?.request_count ?? maximum + 1) <= maximum;
 }
+
