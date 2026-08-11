@@ -38,17 +38,23 @@ class LicenseManagerClient:
             try:
                 with open(self.config_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    self.server_url = data.get("server_url", "http://localhost:3050")
+                    self.server_url = data.get("server_url")
                     self.email = data.get("email")
                     self.license_key = data.get("license_key")
             except Exception as e:
                 print(f"[!] Error leyendo license_config.json: {e}")
         
+        if not self.server_url:
+            raise ValueError("license_config.json no contiene la URL oficial del servidor")
+        parsed_server = urllib.parse.urlparse(self.server_url)
+        if parsed_server.scheme != "https" or not parsed_server.netloc:
+            raise ValueError("La URL del servidor de licencias debe usar HTTPS")
+        self.server_url = f"https://{parsed_server.netloc}"
         if not self.email or not self.license_key:
             print("=================================================")
             print("  CONFIGURACIÓN DE LICENCIA DEL CLIENTE")
             print("=================================================")
-            self.server_url = self.server_url or input("URL del Servidor [http://localhost:3050]: ").strip() or "http://localhost:3050"
+
             self.email = input("Tu Correo Electrónico Registrado: ").strip()
             self.license_key = input("Tu Clave de Licencia (XXXX-XXXX-XXXX-XXXX): ").strip()
 

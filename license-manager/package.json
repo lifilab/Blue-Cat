@@ -6,7 +6,8 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "test": "node test_security_contract.js && node test_config.js"
   },
   "dependencies": {
     "archiver": "^7.0.1",

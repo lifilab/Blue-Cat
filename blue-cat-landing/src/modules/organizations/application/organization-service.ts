@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { getPool } from "@/infrastructure/database/postgres";
 import type { OrganizationInput, UpdateBillingInput } from "@/modules/identity/domain/identity-input";
 import type { PortalPrincipal } from "@/modules/identity/infrastructure/portal-session";
+import { getCustomerLicenses } from "@/modules/licenses/application/customer-license-service";
 
 interface UserStateRow {
   status: string;
@@ -122,6 +123,7 @@ export async function getPortalOverview(principal: PortalPrincipal) {
      ORDER BY o.created_at ASC`,
     [principal.userId],
   );
+  const licenses = await getCustomerLicenses(principal);
   return {
     account: {
       id: principal.userId,
@@ -134,6 +136,7 @@ export async function getPortalOverview(principal: PortalPrincipal) {
       authLevel: principal.authLevel,
     },
     organizations: result.rows,
+    licenses,
   };
 }
 

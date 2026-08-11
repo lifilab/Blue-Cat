@@ -3,12 +3,7 @@
   "builds": [
     {
       "src": "server.js",
-      "use": "@vercel/node",
-      "config": {
-        "includeFiles": [
-          "public/BlueCat-Server-Setup.exe"
-        ]
-      }
+      "use": "@vercel/node"
     },
     {
       "src": "public/**",

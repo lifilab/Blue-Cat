@@ -4,6 +4,7 @@
  */
 
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -13,7 +14,7 @@ const CONFIG_FILE = path.join(__dirname, 'license_config.json');
 
 class NodeLicenseClient {
   constructor() {
-    this.serverUrl = 'http://localhost:3050';
+    this.serverUrl = null;
     this.email = null;
     this.licenseKey = null;
     this.sessionToken = null;
@@ -26,7 +27,7 @@ class NodeLicenseClient {
     if (fs.existsSync(CONFIG_FILE)) {
       try {
         const config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-        this.serverUrl = config.server_url || this.serverUrl;
+        this.serverUrl = config.server_url || null;
         this.email = config.email ? String(config.email).replace(/[^\w@.-]/g, '') : null;
         this.licenseKey = config.license_key ? String(config.license_key).replace(/[^a-zA-Z0-9-]/g, '') : null;
       } catch (e) {
@@ -45,6 +46,15 @@ class NodeLicenseClient {
       this.licenseKey = await question('Tu Clave de Licencia (XXXX-XXXX-XXXX-XXXX): ');
       rl.close();
     }
+
+    if (!this.serverUrl) {
+      throw new Error('license_config.json no contiene la URL oficial del servidor.');
+    }
+    const server = new URL(this.serverUrl);
+    if (server.protocol !== 'https:') {
+      throw new Error('La URL del servidor de licencias debe usar HTTPS.');
+    }
+    this.serverUrl = server.origin;
 
     return this.verifyAndStart();
   }
@@ -122,7 +132,8 @@ class NodeLicenseClient {
       const url = new URL(this.serverUrl + endpoint);
       const postData = JSON.stringify(data);
 
-      const req = http.request(
+      const transport = url.protocol === 'https:' ? https : http;
+      const req = transport.request(
         url,
         {
           method: 'POST',

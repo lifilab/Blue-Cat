@@ -8,11 +8,15 @@ const jwt = require('jsonwebtoken');
 const archiver = require('archiver');
 const fs = require('fs');
 const db = require('./db');
+const { getClientPortalUrl, getPublicBaseUrl } = require('./config');
 
 const app = express();
 app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3050;
-const JWT_SECRET = process.env.JWT_SECRET || 'antigravity_license_secret_key_2026_super_secure';
+const configuredJwtSecret = process.env.JWT_SECRET || '';
+const JWT_SECRET = configuredJwtSecret.length >= 32
+  ? configuredJwtSecret
+  : (process.env.NODE_ENV === 'production' ? null : 'development-only-license-secret-change-me');
 
 app.use(cors());
 app.use(express.json());
@@ -26,7 +30,24 @@ const apiLimiter = rateLimit({
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
   message: { error: 'Demasiadas solicitudes a la API, por favor intenta más tarde.' }
 });
+const adminLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiados intentos de inicio de sesión. Intenta nuevamente en 15 minutos.' }
+});
 app.use('/api/', apiLimiter);
+
+app.use('/api/', async (_req, res, next) => {
+  try {
+    await db.ready;
+    next();
+  } catch (error) {
+    console.error("Base de datos no disponible:", error.message);
+    return res.status(503).json({ error: 'Servicio temporalmente no disponible.' });
+  }
+});
 
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -48,6 +69,9 @@ function generateSessionToken(licenseKey, hwid) {
 
 // Middleware de Autenticación de Administrador
 function authAdminMiddleware(req, res, next) {
+  if (!JWT_SECRET) {
+    return res.status(503).json({ error: 'Autenticación no configurada.' });
+  }
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'No autorizado. Se requiere token de administrador.' });
@@ -56,6 +80,9 @@ function authAdminMiddleware(req, res, next) {
   const token = authHeader.split(' ')[1];
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
+    if (decoded.role !== 'admin') {
+      throw new Error('invalid admin role');
+    }
     req.admin = decoded;
     next();
   } catch (err) {
@@ -68,7 +95,10 @@ function authAdminMiddleware(req, res, next) {
 // ==========================================
 
 // Login de Admin
-app.post('/api/admin/login', (req, res) => {
+app.post('/api/admin/login', adminLoginLimiter, (req, res) => {
+  if (!JWT_SECRET) {
+    return res.status(503).json({ error: 'Autenticación no configurada.' });
+  }
   const { username, password } = req.body;
   if (!username || !password) {
     return res.status(400).json({ error: 'Usuario y contraseña son requeridos.' });
@@ -85,7 +115,7 @@ app.post('/api/admin/login', (req, res) => {
     }
 
     const token = jwt.sign(
-      { id: admin.id, username: admin.username },
+      { id: admin.id, username: admin.username, role: 'admin' },
       JWT_SECRET,
       { expiresIn: '24h' }
     );
@@ -120,6 +150,14 @@ app.post('/api/admin/change-password', authAdminMiddleware, (req, res) => {
   });
 });
 
+// URL canónica del portal público (nunca derivada del Host de la solicitud)
+app.get('/api/admin/portal-url', authAdminMiddleware, (_req, res) => {
+  try {
+    return res.json({ portal_url: getClientPortalUrl() });
+  } catch (_configErr) {
+    return res.status(503).json({ error: 'PUBLIC_BASE_URL no está configurada correctamente.' });
+  }
+});
 // Métricas y Estadísticas del Dashboard
 app.get('/api/admin/stats', authAdminMiddleware, (req, res) => {
   db.get(`
@@ -294,7 +332,12 @@ app.get('/api/admin/licenses/:id/package', authAdminMiddleware, (req, res) => {
       return res.status(404).json({ error: 'Licencia o cliente no encontrado.' });
     }
 
-    const hostUrl = `${req.protocol}://${req.get('host')}`;
+    let hostUrl;
+    try {
+      hostUrl = getPublicBaseUrl().toString().replace(/\/$/, '');
+    } catch (_configErr) {
+      return res.status(503).json({ error: 'PUBLIC_BASE_URL no está configurada correctamente.' });
+    }
     const clientConfig = {
       server_url: hostUrl,
       email: data.email,
@@ -328,20 +371,6 @@ app.get('/api/admin/licenses/:id/package', authAdminMiddleware, (req, res) => {
 
     archive.finalize();
   });
-});
-
-// Endpoint Público/Admin: Descargar Instalador Oficial Ejecutable BlueCat-Server-Setup.exe
-app.get('/api/download/bluecat-installer', (req, res) => {
-  const localInstallerPath = path.join(__dirname, 'public', 'BlueCat-Server-Setup.exe');
-  const parentInstallerPath = path.join(__dirname, '..', 'Blue-Cat', 'packaging', 'windows', 'output', 'BlueCat-Server-Setup.exe');
-  
-  if (fs.existsSync(localInstallerPath)) {
-    res.download(localInstallerPath, 'BlueCat-Server-Setup.exe');
-  } else if (fs.existsSync(parentInstallerPath)) {
-    res.download(parentInstallerPath, 'BlueCat-Server-Setup.exe');
-  } else {
-    res.status(404).json({ error: 'El instalador ejecutable BlueCat-Server-Setup.exe no fue encontrado en el servidor.' });
-  }
 });
 
 // Helper: Generar buffer ZIP en memoria
@@ -432,10 +461,9 @@ function escapeHtml(value) {
   });
 }
 
-// Helper: Enviar Correo con el Paquete ZIP Adjunto
-async function sendLicenseEmail(data, targetEmail, hostUrl, smtpConfig = {}) {
+// Helper: Enviar correo con acceso al Portal de Clientes
+async function sendLicenseEmail(data, targetEmail, portalUrl, smtpConfig = {}) {
   const nodemailer = require('nodemailer');
-  const zipBuffer = await createZipBuffer(data, hostUrl);
 
   let smtpHost = smtpConfig.host || process.env.SMTP_HOST || '';
   const smtpPort = parseInt(smtpConfig.port || process.env.SMTP_PORT || '587');
@@ -443,7 +471,6 @@ async function sendLicenseEmail(data, targetEmail, hostUrl, smtpConfig = {}) {
   const smtpPass = (smtpConfig.pass || process.env.SMTP_PASS || '').trim();
   const smtpFrom = (smtpConfig.from || process.env.SMTP_FROM || '').trim() || `"Ventas LicenceGuard" <${smtpUser || 'noreply@licenceguard.com'}>`;
 
-  // Auto-detectar servidor SMTP para Gmail y Outlook si el campo Host quedó vacío
   if (!smtpHost && smtpUser) {
     if (smtpUser.includes('@gmail.com')) {
       smtpHost = 'smtp.gmail.com';
@@ -454,7 +481,6 @@ async function sendLicenseEmail(data, targetEmail, hostUrl, smtpConfig = {}) {
 
   let transporter;
   let testPreviewUrl = null;
-
   if (smtpHost && smtpUser && smtpPass) {
     transporter = nodemailer.createTransport({
       host: smtpHost,
@@ -463,78 +489,58 @@ async function sendLicenseEmail(data, targetEmail, hostUrl, smtpConfig = {}) {
       auth: { user: smtpUser, pass: smtpPass }
     });
   } else {
-    // Si aún no se han guardado credenciales SMTP reales, creamos una cuenta de prueba Ethereal
     const testAccount = await nodemailer.createTestAccount();
     transporter = nodemailer.createTransport({
       host: 'smtp.ethereal.email',
       port: 587,
       secure: false,
-      auth: {
-        user: testAccount.user,
-        pass: testAccount.pass
-      }
+      auth: { user: testAccount.user, pass: testAccount.pass }
     });
   }
 
   const mailOptions = {
     from: smtpFrom,
     to: targetEmail,
-    subject: `🔐 Entrega de Tu Licencia Comercial y Software Blue-Cat ERP - ${escapeHtml(data.name)}`,
+    subject: 'Tu licencia Blue-Cat ya está disponible',
     html: `
       <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0b0f19; color: #f3f4f6; padding: 32px; border-radius: 12px; max-width: 600px; margin: 0 auto; border: 1px solid rgba(255,255,255,0.1);">
         <div style="text-align: center; margin-bottom: 24px;">
-          <div style="width: 50px; height: 50px; background: linear-gradient(135deg, #3b82f6, #8b5cf6); border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; font-size: 24px; color: #fff;">
-            🛡️
-          </div>
-          <h2 style="color: #ffffff; margin-top: 12px; font-size: 22px;">¡Entrega de Licencia Comercial & Software Blue-Cat!</h2>
+          <div style="width: 50px; height: 50px; background: linear-gradient(135deg, #3b82f6, #8b5cf6); border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; font-size: 24px; color: #fff;">🛡️</div>
+          <h2 style="color: #ffffff; margin-top: 12px; font-size: 22px;">Tu licencia Blue-Cat está disponible</h2>
           <p style="color: #9ca3af; font-size: 14px;">Hola <strong>${escapeHtml(data.name)}</strong>, gracias por adquirir Blue-Cat ERP.</p>
         </div>
 
         <div style="background: rgba(255,255,255,0.04); padding: 20px; border-left: 4px solid #3b82f6; border-radius: 6px; margin: 24px 0;">
-          <p style="margin: 0; font-size: 12px; color: #9ca3af; text-transform: uppercase; letter-spacing: 1px;">TU CLAVE DE LICENCIA DE 1 USO:</p>
-          <p style="font-family: monospace; font-size: 22px; font-weight: bold; color: #f59e0b; margin: 8px 0 0 0;">${escapeHtml(data.license_key)}</p>
-          <p style="margin: 8px 0 0 0; font-size: 13px; color: #9ca3af;">Correo Registrado: <strong>${escapeHtml(data.email)}</strong></p>
+          <p style="margin: 0; font-size: 12px; color: #9ca3af; text-transform: uppercase; letter-spacing: 1px;">CUENTA DEL PORTAL</p>
+          <p style="margin: 10px 0 0; font-size: 13px; color: #9ca3af;">Correo registrado: <strong>${escapeHtml(data.email)}</strong></p>
         </div>
 
         <div style="text-align: center; margin: 26px 0;">
-          <a href="${escapeHtml(hostUrl)}/api/download/bluecat-installer" 
+          <a href="${escapeHtml(portalUrl)}"
              style="display: inline-block; padding: 14px 28px; background: linear-gradient(135deg, #10b981, #059669); color: #ffffff; text-decoration: none; font-weight: bold; border-radius: 8px; font-size: 15px; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);">
-            ⬇️ Descargar Instalador Completo (BlueCat-Server-Setup.exe)
+            Ingresar o crear cuenta
           </a>
         </div>
 
-        <h3 style="color: #ffffff; font-size: 16px;"> Archivo Adjunto de Configuración:</h3>
-        <p style="font-size: 14px; color: #d1d5db;">Adjuntamos tu paquete con la clave de licencia lista: <code>Paquete_Licencia_${escapeHtml(data.name.replace(/\s+/g, '_'))}.zip</code></p>
-
-        <h3 style="color: #ffffff; font-size: 16px;"> Pasos para la Instalación y Activación:</h3>
-        <ol style="font-size: 14px; color: #d1d5db; line-height: 1.6;">
-          <li>Haz clic en el botón superior para descargar el instalador ejecutable <code>BlueCat-Server-Setup.exe</code>.</li>
-          <li>Ejecuta el instalador e instala Blue-Cat ERP en tu computador.</li>
-          <li>Descomprime el archivo ZIP adjunto y ejecuta <code>Instalar_Licencia_en_BlueCat</code> o ingresa tu correo y clave cuando la aplicación abra.</li>
-          <li>El sistema se activará automáticamente mediante la verificación en línea con el servidor.</li>
-        </ol>
+        <p style="font-size: 14px; color: #d1d5db; line-height: 1.6;">
+          Ingresa o crea tu cuenta usando exactamente el correo registrado y verifica el correo si el portal lo solicita. Allí podrás revisar la licencia del servidor del negocio y descargar el instalador oficial mediante un enlace temporal. Los equipos de POS, bodega y oficina se conectan a ese servidor con sus propios usuarios.
+        </p>
+        <p style="font-size: 12px; color: #9ca3af; line-height: 1.5;">
+          Por seguridad, no compartas tu contraseña. Blue-Cat nunca enviará enlaces de descarga desde localhost ni solicitará credenciales fuera del dominio oficial.
+        </p>
 
         <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 30px 0;">
         <p style="color: #6b7280; font-size: 12px; text-align: center; margin: 0;">Sistema de Gestión de Licencias &copy; 2026 LicenceGuard</p>
       </div>
-    `,
-    attachments: [
-      {
-        filename: `Paquete_Licencia_${escapeHtml(data.name.replace(/\s+/g, '_'))}.zip`,
-        content: zipBuffer,
-        contentType: 'application/zip'
-      }
-    ]
+    `
   };
 
   const info = await transporter.sendMail(mailOptions);
-  if (!smtpHost) {
-    testPreviewUrl = nodemailer.getTestMessageUrl(info);
-  }
+  if (!smtpHost) testPreviewUrl = nodemailer.getTestMessageUrl(info);
   return { info, testPreviewUrl };
 }
 
-// Endpoint: Enviar Paquete ZIP por Correo al Cliente
+// Endpoint: Enviar acceso al Portal de Clientes por correo
 app.post('/api/admin/licenses/:id/send-email', authAdminMiddleware, async (req, res) => {
   const licenseId = req.params.id;
   const { target_email } = req.body;
@@ -552,11 +558,12 @@ app.post('/api/admin/licenses/:id/send-email', authAdminMiddleware, async (req, 
     }
 
     const destination = target_email && target_email.trim() ? target_email.trim() : data.email;
-    const configuredPublicUrl = (process.env.PUBLIC_BASE_URL || '').trim();
-    const protocol = req.headers['x-forwarded-proto'] || 'http';
-    const host = req.headers['x-forwarded-host'] || req.headers.host;
-    const hostUrl = configuredPublicUrl || `${protocol}://${host}`;
-
+    let portalUrl;
+    try {
+      portalUrl = getClientPortalUrl();
+    } catch (_configErr) {
+      return res.status(503).json({ error: 'PUBLIC_BASE_URL debe configurarse con el dominio HTTPS oficial.' });
+    }
     // Consultar si hay configuración SMTP guardada en BD
     db.all(`SELECT key, value FROM settings WHERE key LIKE 'smtp_%'`, async (settingsErr, rows) => {
       const smtpConfig = {};
@@ -565,12 +572,12 @@ app.post('/api/admin/licenses/:id/send-email', authAdminMiddleware, async (req, 
       }
 
       try {
-        const sendResult = await sendLicenseEmail(data, destination, hostUrl, smtpConfig);
+        const sendResult = await sendLicenseEmail(data, destination, portalUrl, smtpConfig);
         const isTestMode = !smtpConfig.user || !smtpConfig.pass;
         res.json({
           message: isTestMode 
-            ? `Paquete generado en MODO PRUEBA (Ethereal). Para entregarlo a bandejas reales de Gmail como ${destination}, configura tu Servidor SMTP.`
-            : `Paquete de licencia enviado con éxito por correo real a ${destination}`,
+            ? `Correo de acceso generado en MODO PRUEBA (Ethereal). Para entregarlo a ${destination}, configura tu servidor SMTP.`
+            : `Acceso al portal enviado con éxito a ${destination}`,
           destination,
           is_test_mode: isTestMode,
           preview_url: sendResult.testPreviewUrl || null

@@ -9,7 +9,7 @@ function validEnvironment(): NodeJS.ProcessEnv {
     STAGING_HOST: "staging.blue-cat.test",
     DEPLOYMENT_COMMIT: "a".repeat(40),
     PORTAL_IMAGE_TAG: "a".repeat(40),
-    DATABASE_URL: `mysql://portal:${"d".repeat(40)}@database:3306/blue_cat_portal`,
+    DATABASE_URL: `postgresql://portal:${"d".repeat(40)}@database:5432/blue_cat_portal`,
     DATABASE_CREATE_ALLOWED: "false",
     IDENTITY_DATA_KEY: Buffer.alloc(32, 7).toString("base64"),
     IDENTITY_HASH_PEPPER: "h".repeat(64),
