@@ -38,12 +38,12 @@ async function main() {
   assert.ok(registered.userId && registered.verificationToken);
 
   const usersResult = await getPool().query<{ password_hash: string; status: string }>(
-    "SELECT password_hash,status FROM portal_users WHERE id=$1",
+    "SELECT password_hash,status FROM landing.portal_users WHERE id=$1",
     [registered.userId],
   );
   assert.equal(usersResult.rows[0]?.status, "pending_verification");
   assert.equal(isArgon2idHash(usersResult.rows[0]?.password_hash || ""), true);
-  const outboxResult = await getPool().query<{ encrypted_payload: string }>("SELECT encrypted_payload FROM email_outbox LIMIT 1");
+  const outboxResult = await getPool().query<{ encrypted_payload: string }>("SELECT encrypted_payload FROM landing.email_outbox LIMIT 1");
   assert.equal(outboxResult.rows[0]?.encrypted_payload.includes(registered.verificationToken!), false, "Raw tokens must not be stored in outbox payloads.");
 
   assert.equal(await verifyPortalEmail(registered.verificationToken!, randomUUID()), true);
@@ -79,7 +79,7 @@ async function main() {
   assert.equal(await resetPortalPassword(reset.resetToken!, "BlueCat-New!2026", randomUUID()), true);
   assert.equal(await authenticatePortalRequest(authenticatedRequest), null, "Password reset revokes prior sessions.");
 
-  await getPool().query("UPDATE portal_users SET user_type='operator',mfa_required=true WHERE id=$1", [registered.userId]);
+  await getPool().query("UPDATE landing.portal_users SET user_type='operator',mfa_required=true WHERE id=$1", [registered.userId]);
   const operatorLogin = await loginPortal({ email, password: "BlueCat-New!2026" }, request, randomUUID());
   assert.equal(operatorLogin.status, "authenticated");
   if (operatorLogin.status !== "authenticated") throw new Error("OPERATOR_LOGIN_FAILED");

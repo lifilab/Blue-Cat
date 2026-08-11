@@ -18,7 +18,7 @@ async function main() {
   try {
     await connection.query("BEGIN");
     const result = await connection.query<{ id: string; user_type: string }>(
-      "SELECT id,user_type FROM portal_users WHERE normalized_email=$1 LIMIT 1 FOR UPDATE",
+      "SELECT id,user_type FROM landing.portal_users WHERE normalized_email=$1 LIMIT 1 FOR UPDATE",
       [normalizedEmail],
     );
     const existing = result.rows[0];
@@ -26,26 +26,26 @@ async function main() {
     const userId = existing?.id || randomUUID();
     if (existing) {
       await connection.query(
-        `UPDATE portal_users
+        `UPDATE landing.portal_users
          SET email=$1,display_name=$2,password_hash=$3,status='active',email_verified_at=COALESCE(email_verified_at,CURRENT_TIMESTAMP),
              password_changed_at=CURRENT_TIMESTAMP,session_version=session_version+1,mfa_required=true
          WHERE id=$4`,
         [emailInput, name, passwordHash, userId],
       );
       await connection.query(
-        "UPDATE portal_sessions SET revoked_at=CURRENT_TIMESTAMP,revoke_reason='OPERATOR_BOOTSTRAP' WHERE user_id=$1 AND revoked_at IS NULL",
+        "UPDATE landing.portal_sessions SET revoked_at=CURRENT_TIMESTAMP,revoke_reason='OPERATOR_BOOTSTRAP' WHERE user_id=$1 AND revoked_at IS NULL",
         [userId],
       );
     } else {
       await connection.query(
-        `INSERT INTO portal_users
+        `INSERT INTO landing.portal_users
           (id,email,normalized_email,display_name,password_hash,user_type,status,email_verified_at,mfa_required)
          VALUES ($1,$2,$3,$4,$5,'operator','active',CURRENT_TIMESTAMP,true)`,
         [userId, emailInput, normalizedEmail, name, passwordHash],
       );
     }
     await connection.query(
-      `INSERT INTO audit_events
+      `INSERT INTO landing.audit_events
         (request_id,aggregate_type,aggregate_id,event_type,metadata_json)
        VALUES ($1,'portal_user',$2,'operator_bootstrapped',$3)`,
       [randomUUID(), userId, JSON.stringify({ email: normalizedEmail, existing: Boolean(existing) })],

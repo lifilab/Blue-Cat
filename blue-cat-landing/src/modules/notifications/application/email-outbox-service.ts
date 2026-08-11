@@ -33,7 +33,7 @@ export async function dispatchEmailOutbox(batchSize = 10): Promise<OutboxDispatc
       const message = renderEmail(job.template_key, payload);
       const providerMessageId = await sendEmail(job.recipient, message.subject, message.html, message.text);
       await getPool().query(
-        `UPDATE email_outbox
+        `UPDATE landing.email_outbox
          SET status='sent',provider_message_id=$1,sent_at=CURRENT_TIMESTAMP,
              encrypted_payload='purged',locked_at=NULL,locked_by=NULL,last_error_code=NULL
          WHERE id=$2 AND status='processing'`,
@@ -44,7 +44,7 @@ export async function dispatchEmailOutbox(batchSize = 10): Promise<OutboxDispatc
       const dead = job.attempts >= 5;
       const delayMinutes = Math.min(60, 2 ** Math.max(0, job.attempts - 1));
       await getPool().query(
-        `UPDATE email_outbox
+        `UPDATE landing.email_outbox
          SET status=$1,available_at=CURRENT_TIMESTAMP + ($2 || ' minutes')::interval,
              locked_at=NULL,locked_by=NULL,last_error_code=$3
          WHERE id=$4`,
@@ -64,7 +64,7 @@ async function claimJobs(limit: number): Promise<OutboxRow[]> {
     await connection.query("BEGIN");
     const result = await connection.query<OutboxRow>(
       `SELECT id,recipient,template_key,encrypted_payload,attempts
-       FROM email_outbox
+       FROM landing.email_outbox
        WHERE (
          status IN ('pending','failed') AND available_at<=CURRENT_TIMESTAMP
        ) OR (
@@ -77,7 +77,7 @@ async function claimJobs(limit: number): Promise<OutboxRow[]> {
     const rows = result.rows;
     if (rows.length) {
       await connection.query(
-        `UPDATE email_outbox
+        `UPDATE landing.email_outbox
          SET status='processing',attempts=attempts+1,locked_at=CURRENT_TIMESTAMP,locked_by=$1
          WHERE id = ANY($2::uuid[])`,
         [workerId, rows.map((row) => row.id)],
