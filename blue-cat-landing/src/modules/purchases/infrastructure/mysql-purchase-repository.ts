@@ -47,7 +47,7 @@ export async function createPurchaseRequest(input: PurchaseRequestInput, request
   try {
     await connection.query("BEGIN");
     const existingResult = await connection.query<ExistingRequestRow>(
-      "SELECT tracking_id, request_hash, status, expected_amount_minor, currency, offer_expires_at FROM purchase_requests WHERE idempotency_key_hash = $1 LIMIT 1",
+      "SELECT tracking_id, request_hash, status, expected_amount_minor, currency, offer_expires_at FROM landing.purchase_requests WHERE idempotency_key_hash = $1 LIMIT 1",
       [idempotencyHash]
     );
     const existing = existingResult.rows;
@@ -57,17 +57,17 @@ export async function createPurchaseRequest(input: PurchaseRequestInput, request
       return existingResultMapping(existing[0], accessToken);
     }
     const customerResult = await connection.query<{ id: string }>(
-      "INSERT INTO customers (business_name, contact_name, email, phone, country, city, tax_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+      "INSERT INTO landing.customers (business_name, contact_name, email, phone, country, city, tax_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
       [input.businessName, input.contactName, input.email, input.phone, input.country, input.city, input.taxId || null],
     );
     const customerId = customerResult.rows[0].id;
     const id = trackingId();
     await connection.query(
-      "INSERT INTO purchase_requests (tracking_id, customer_id, plan_id, estimated_branches, wants_cloud_sync, message, status, request_hash, idempotency_key_hash, tracking_token_hash, tracking_token_expires_at, expected_amount_minor, currency, offer_version, offer_expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+      "INSERT INTO landing.purchase_requests (tracking_id, customer_id, plan_id, estimated_branches, wants_cloud_sync, message, status, request_hash, idempotency_key_hash, tracking_token_hash, tracking_token_expires_at, expected_amount_minor, currency, offer_version, offer_expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
       [id, customerId, input.planId, input.estimatedBranches, input.wantsCloudSync, input.message || null, status, hash, idempotencyHash, tokenHash, tokenExpiresAt, offer?.amountMinor ?? null, offer?.currency ?? null, offer?.version ?? null, offer?.expiresAt ?? null],
     );
     await connection.query(
-      "INSERT INTO audit_events (request_id, aggregate_type, aggregate_id, event_type, metadata_json) VALUES ($1, 'purchase_request', $2, 'purchase_submitted', $3)",
+      "INSERT INTO landing.audit_events (request_id, aggregate_type, aggregate_id, event_type, metadata_json) VALUES ($1, 'purchase_request', $2, 'purchase_submitted', $3)",
       [requestId, id, JSON.stringify({ planId: input.planId, wantsCloudSync: input.wantsCloudSync, status, offerVersion: offer?.version ?? null })],
     );
     await connection.query("COMMIT");
@@ -77,7 +77,7 @@ export async function createPurchaseRequest(input: PurchaseRequestInput, request
     // Código de violación de clave única en Postgres: '23505'
     if (error && typeof error === "object" && "code" in error && error.code === "23505") {
       const existingResult = await connection.query<ExistingRequestRow>(
-        "SELECT tracking_id, request_hash, status, expected_amount_minor, currency, offer_expires_at FROM purchase_requests WHERE idempotency_key_hash = $1 LIMIT 1",
+        "SELECT tracking_id, request_hash, status, expected_amount_minor, currency, offer_expires_at FROM landing.purchase_requests WHERE idempotency_key_hash = $1 LIMIT 1",
         [idempotencyHash]
       );
       const existing = existingResult.rows;

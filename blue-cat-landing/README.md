@@ -22,7 +22,7 @@ Abre `http://localhost:3000`. Laragon es opcional: Next.js se ejecuta con Node y
 
 Antes de migrar, configura en `.env.local`:
 
-- `DATABASE_URL`: base exclusiva del portal.
+- `DATABASE_URL`: conexión PostgreSQL. En Supabase desplegado usa el pooler (puerto 6543), nunca el host directo `db.PROJECT_REF.supabase.co`; el portal mantiene sus tablas en el esquema `landing`.
 - `IDENTITY_DATA_KEY`: exactamente 32 bytes codificados en Base64.
 - `IDENTITY_HASH_PEPPER`: secreto aleatorio de 32 caracteres o más.
 - `OUTBOX_WORKER_TOKEN`: secreto aleatorio de 32 caracteres o más.

@@ -19,16 +19,7 @@ function createPool(): Pool {
 
 export function getPool(): Pool {
   if (!globalDatabase.blueCatPool) {
-    const pool = createPool();
-    
-    // Configurar el esquema landing automáticamente para todas las conexiones del pool
-    pool.on('connect', (client) => {
-      client.query('SET search_path TO landing').catch(err => {
-        console.error("Error al establecer search_path en la conexión:", err);
-      });
-    });
-    
-    globalDatabase.blueCatPool = pool;
+    globalDatabase.blueCatPool = createPool();
   }
   return globalDatabase.blueCatPool;
 }

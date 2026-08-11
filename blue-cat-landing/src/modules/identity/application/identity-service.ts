@@ -66,7 +66,7 @@ export async function registerPortalAccount(
   try {
     await connection.query("BEGIN");
     const existingResult = await connection.query<UserRow>(
-      "SELECT id,status FROM portal_users WHERE normalized_email=$1 LIMIT 1 FOR UPDATE",
+      "SELECT id,status FROM landing.portal_users WHERE normalized_email=$1 LIMIT 1 FOR UPDATE",
       [email],
     );
     const existing = existingResult.rows;
@@ -75,7 +75,7 @@ export async function registerPortalAccount(
       return { accepted: true };
     }
     await connection.query(
-      `INSERT INTO portal_users
+      `INSERT INTO landing.portal_users
         (id,email,normalized_email,display_name,password_hash,user_type,status)
        VALUES ($1,$2,$3,$4,$5,'customer','pending_verification')`,
       [userId, input.email.trim(), email, input.displayName, passwordHash],
@@ -84,7 +84,7 @@ export async function registerPortalAccount(
     await recordConsent(connection, userId, "privacy", input.privacyVersion, true, request);
     await recordConsent(connection, userId, "marketing", marketingVersion(), input.marketingConsent, request);
     await connection.query(
-      `INSERT INTO portal_email_tokens (id,user_id,token_type,token_hash,expires_at)
+      `INSERT INTO landing.portal_email_tokens (id,user_id,token_type,token_hash,expires_at)
        VALUES ($1,$2,'verify_email',$3,$4)`,
       [randomUUID(), userId, tokenHash, expiresAt],
     );
@@ -122,7 +122,7 @@ export async function resendVerificationEmail(
 ): Promise<{ accepted: true; verificationToken?: string }> {
   const email = normalizeEmail(emailInput);
   const result = await getPool().query<UserRow>(
-    "SELECT * FROM portal_users WHERE normalized_email=$1 LIMIT 1",
+    "SELECT * FROM landing.portal_users WHERE normalized_email=$1 LIMIT 1",
     [email],
   );
   const user = result.rows[0];
@@ -134,11 +134,11 @@ export async function resendVerificationEmail(
   try {
     await connection.query("BEGIN");
     await connection.query(
-      "UPDATE portal_email_tokens SET used_at=CURRENT_TIMESTAMP WHERE user_id=$1 AND token_type='verify_email' AND used_at IS NULL",
+      "UPDATE landing.portal_email_tokens SET used_at=CURRENT_TIMESTAMP WHERE user_id=$1 AND token_type='verify_email' AND used_at IS NULL",
       [user.id],
     );
     await connection.query(
-      "INSERT INTO portal_email_tokens (id,user_id,token_type,token_hash,expires_at) VALUES ($1,$2,'verify_email',$3,CURRENT_TIMESTAMP + INTERVAL '24 hours')",
+      "INSERT INTO landing.portal_email_tokens (id,user_id,token_type,token_hash,expires_at) VALUES ($1,$2,'verify_email',$3,CURRENT_TIMESTAMP + INTERVAL '24 hours')",
       [randomUUID(), user.id, tokenHash],
     );
     await queueEmail(connection, {
@@ -169,7 +169,7 @@ export async function verifyPortalEmail(token: string, requestId: string): Promi
     await connection.query("BEGIN");
     const result = await connection.query<TokenRow>(
       `SELECT id,user_id,expires_at
-       FROM portal_email_tokens
+       FROM landing.portal_email_tokens
        WHERE token_hash=$1 AND token_type='verify_email' AND used_at IS NULL
        LIMIT 1 FOR UPDATE`,
       [hashToken(token)],
@@ -179,9 +179,9 @@ export async function verifyPortalEmail(token: string, requestId: string): Promi
       await connection.query("ROLLBACK");
       return false;
     }
-    await connection.query("UPDATE portal_email_tokens SET used_at=CURRENT_TIMESTAMP WHERE id=$1", [row.id]);
+    await connection.query("UPDATE landing.portal_email_tokens SET used_at=CURRENT_TIMESTAMP WHERE id=$1", [row.id]);
     await connection.query(
-      `UPDATE portal_users
+      `UPDATE landing.portal_users
        SET status='active',email_verified_at=COALESCE(email_verified_at,CURRENT_TIMESTAMP),
            failed_login_count=0,locked_until=NULL
        WHERE id=$1 AND status<>'disabled'`,
@@ -205,7 +205,7 @@ export async function loginPortal(
 ): Promise<LoginResult> {
   const email = normalizeEmail(input.email);
   const result = await getPool().query<UserRow>(
-    "SELECT * FROM portal_users WHERE normalized_email=$1 LIMIT 1",
+    "SELECT * FROM landing.portal_users WHERE normalized_email=$1 LIMIT 1",
     [email],
   );
   const user = result.rows[0];
@@ -227,7 +227,7 @@ export async function loginPortal(
     authLevel = "mfa";
   }
   await getPool().query(
-    `UPDATE portal_users
+    `UPDATE landing.portal_users
      SET failed_login_count=0,locked_until=NULL,status='active',last_login_at=CURRENT_TIMESTAMP
      WHERE id=$1`,
     [user.id],
@@ -252,7 +252,7 @@ export async function loginPortal(
 export async function issueAccountRecoveryChallenge(emailInput: string, requestId: string): Promise<{ accepted: true; resetToken?: string }> {
   const email = normalizeEmail(emailInput);
   const result = await getPool().query<UserRow>(
-    "SELECT * FROM portal_users WHERE normalized_email=$1 AND status<>'disabled' LIMIT 1",
+    "SELECT * FROM landing.portal_users WHERE normalized_email=$1 AND status<>'disabled' LIMIT 1",
     [email],
   );
   const user = result.rows[0];
@@ -263,11 +263,11 @@ export async function issueAccountRecoveryChallenge(emailInput: string, requestI
   try {
     await connection.query("BEGIN");
     await connection.query(
-      "UPDATE portal_email_tokens SET used_at=CURRENT_TIMESTAMP WHERE user_id=$1 AND token_type='reset_password' AND used_at IS NULL",
+      "UPDATE landing.portal_email_tokens SET used_at=CURRENT_TIMESTAMP WHERE user_id=$1 AND token_type='reset_password' AND used_at IS NULL",
       [user.id],
     );
     await connection.query(
-      "INSERT INTO portal_email_tokens (id,user_id,token_type,token_hash,expires_at) VALUES ($1,$2,'reset_password',$3,CURRENT_TIMESTAMP + INTERVAL '30 minutes')",
+      "INSERT INTO landing.portal_email_tokens (id,user_id,token_type,token_hash,expires_at) VALUES ($1,$2,'reset_password',$3,CURRENT_TIMESTAMP + INTERVAL '30 minutes')",
       [randomUUID(), user.id, tokenHash],
     );
     await queueEmail(connection, {
@@ -299,7 +299,7 @@ export async function resetPortalPassword(token: string, password: string, reque
   try {
     await connection.query("BEGIN");
     const result = await connection.query<TokenRow>(
-      `SELECT id,user_id,expires_at FROM portal_email_tokens
+      `SELECT id,user_id,expires_at FROM landing.portal_email_tokens
        WHERE token_hash=$1 AND token_type='reset_password' AND used_at IS NULL
        LIMIT 1 FOR UPDATE`,
       [hashToken(token)],
@@ -310,16 +310,16 @@ export async function resetPortalPassword(token: string, password: string, reque
       return false;
     }
     userId = row.user_id;
-    await connection.query("UPDATE portal_email_tokens SET used_at=CURRENT_TIMESTAMP WHERE id=$1", [row.id]);
+    await connection.query("UPDATE landing.portal_email_tokens SET used_at=CURRENT_TIMESTAMP WHERE id=$1", [row.id]);
     await connection.query(
-      `UPDATE portal_users
+      `UPDATE landing.portal_users
        SET password_hash=$1,password_changed_at=CURRENT_TIMESTAMP,session_version=session_version+1,
            status=CASE WHEN status='disabled' THEN 'disabled' ELSE 'active' END
        WHERE id=$2`,
       [passwordHash, userId],
     );
     await connection.query(
-      "UPDATE portal_sessions SET revoked_at=CURRENT_TIMESTAMP,revoke_reason='PASSWORD_RESET' WHERE user_id=$1 AND revoked_at IS NULL",
+      "UPDATE landing.portal_sessions SET revoked_at=CURRENT_TIMESTAMP,revoke_reason='PASSWORD_RESET' WHERE user_id=$1 AND revoked_at IS NULL",
       [userId],
     );
     await audit(connection, requestId, "portal_user", userId, "password_reset_completed", {});
@@ -337,7 +337,7 @@ export async function beginMfaEnrollment(principal: PortalPrincipal, requestId: 
   if (!principal.emailVerified) throw new Error("EMAIL_NOT_VERIFIED");
   const enrollment = createMfaEnrollment(principal.email);
   await getPool().query(
-    "UPDATE portal_users SET mfa_secret_ciphertext=$1,mfa_recovery_hashes=$2,mfa_enabled=FALSE WHERE id=$3",
+    "UPDATE landing.portal_users SET mfa_secret_ciphertext=$1,mfa_recovery_hashes=$2,mfa_enabled=FALSE WHERE id=$3",
     [enrollment.encryptedSecret, JSON.stringify(enrollment.recoveryHashes), principal.userId],
   );
   await audit(getPool(), requestId, "portal_user", principal.userId, "mfa_enrollment_started", {});
@@ -349,10 +349,10 @@ export async function beginMfaEnrollment(principal: PortalPrincipal, requestId: 
 }
 
 export async function confirmMfaEnrollment(principal: PortalPrincipal, code: string, requestId: string): Promise<boolean> {
-  const result = await getPool().query<UserRow>("SELECT * FROM portal_users WHERE id=$1 LIMIT 1", [principal.userId]);
+  const result = await getPool().query<UserRow>("SELECT * FROM landing.portal_users WHERE id=$1 LIMIT 1", [principal.userId]);
   const user = result.rows[0];
   if (!user?.mfa_secret_ciphertext || !await verifyMfaCode(user.mfa_secret_ciphertext, code)) return false;
-  await getPool().query("UPDATE portal_users SET mfa_enabled=TRUE WHERE id=$1", [principal.userId]);
+  await getPool().query("UPDATE landing.portal_users SET mfa_enabled=TRUE WHERE id=$1", [principal.userId]);
   await revokeAllUserSessions(principal.userId, "MFA_ENABLED");
   await audit(getPool(), requestId, "portal_user", principal.userId, "mfa_enabled", {});
   return true;
@@ -362,7 +362,7 @@ async function registerFailedLogin(user: UserRow, requestId: string): Promise<vo
   const failures = Math.min(20, Number(user.failed_login_count || 0) + 1);
   const lockMinutes = failures >= 5 ? Math.min(60, 15 * Math.max(1, failures - 4)) : 0;
   await getPool().query(
-    `UPDATE portal_users
+    `UPDATE landing.portal_users
      SET failed_login_count=$1,
          locked_until=CASE WHEN $2=0 THEN NULL ELSE CURRENT_TIMESTAMP + ($3 || ' minutes')::interval END,
          status=CASE WHEN $4=0 THEN status ELSE 'locked' END
@@ -385,7 +385,7 @@ async function recordConsent(
     || "unknown";
   const agent = request.headers.get("user-agent")?.slice(0, 512) || "unknown";
   await connection.query(
-    `INSERT INTO portal_consents
+    `INSERT INTO landing.portal_consents
       (id,user_id,consent_type,document_version,granted,ip_hash,user_agent_hash)
      VALUES ($1,$2,$3,$4,$5,$6,$7)`,
     [randomUUID(), userId, type, version, granted, privacyHash(address), privacyHash(agent)],
@@ -404,7 +404,7 @@ async function queueEmail(
 ): Promise<void> {
   const deduplicationKey = hashToken(`${input.template}|${input.userId}|${input.tokenHash}`);
   await connection.query(
-    `INSERT INTO email_outbox
+    `INSERT INTO landing.email_outbox
       (id,user_id,recipient,template_key,encrypted_payload,deduplication_key)
      VALUES ($1,$2,$3,$4,$5,$6)`,
     [
@@ -429,7 +429,7 @@ async function audit(
   metadata: Record<string, unknown>,
 ): Promise<void> {
   await executor.query(
-    `INSERT INTO audit_events
+    `INSERT INTO landing.audit_events
       (request_id,aggregate_type,aggregate_id,event_type,metadata_json)
      VALUES ($1,$2,$3,$4,$5)`,
     [requestId, aggregateType, aggregateId, eventType, JSON.stringify(metadata)],
