@@ -72,11 +72,11 @@ export function SiteHeader() {
               >
                 <LogOut size={15} /> Salir
               </button>
+              <Link className="button button-request-license" href="/comprar">Solicitar licencia</Link>
             </>
           ) : (
-            <Link className="account-access-link" href="/ingresar">Iniciar sesión o crear cuenta</Link>
+            <Link className="account-access-link" href="/ingresar">Ingresar</Link>
           )}
-          <Link className="button button-primary" href="/comprar">Solicitar licencia</Link>
         </nav>
         <button className="menu-button" type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-controls="mobile-navigation" aria-label={open ? "Cerrar menú" : "Abrir menú"}>
           {open ? <X size={20} /> : <Menu size={20} />}
@@ -109,11 +109,13 @@ export function SiteHeader() {
             >
               <LogOut size={16} /> Cerrar sesión
             </button>
+            <Link className="button button-request-license" href="/comprar" onClick={() => setOpen(false)} style={{ marginTop: "0.8rem" }}>
+              Solicitar licencia
+            </Link>
           </>
         ) : (
-          <Link href="/ingresar" onClick={() => setOpen(false)}>Iniciar sesión o crear cuenta</Link>
+          <Link href="/ingresar" onClick={() => setOpen(false)}>Ingresar</Link>
         )}
-        <Link href="/comprar" onClick={() => setOpen(false)}>Solicitar licencia</Link>
       </nav>
     </header>
   );
