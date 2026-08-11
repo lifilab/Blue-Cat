@@ -95,16 +95,16 @@ async function claimJobs(limit: number, jobId?: string): Promise<OutboxRow[]> {
 }
 
 async function sendEmail(jobId: string, recipient: string, subject: string, html: string, text: string): Promise<string> {
-  const provider = process.env.EMAIL_PROVIDER?.trim().toLowerCase() || (process.env.NODE_ENV === "production" ? "" : "console");
+  const apiKey = process.env.RESEND_API_KEY?.trim() || "";
+  const configuredProvider = process.env.EMAIL_PROVIDER?.trim().toLowerCase();
+  const provider = configuredProvider || (apiKey.startsWith("re_") ? "resend" : process.env.NODE_ENV === "production" ? "" : "console");
   if (provider === "console") {
     if (process.env.NODE_ENV === "production") throw new Error("CONSOLE_EMAIL_FORBIDDEN");
     console.info(JSON.stringify({ level: "info", event: "email_dispatched_console", recipient, subject }));
     return `console-${randomUUID()}`;
   }
-  if (provider !== "resend") throw new Error("EMAIL_PROVIDER_NOT_CONFIGURED");
-  const apiKey = process.env.RESEND_API_KEY?.trim() || "";
+  if (provider !== "resend" || !apiKey.startsWith("re_")) throw new Error("EMAIL_PROVIDER_NOT_CONFIGURED");
   let from = process.env.EMAIL_FROM?.trim() || "";
-  if (!apiKey.startsWith("re_")) throw new Error("EMAIL_PROVIDER_NOT_CONFIGURED");
   const extractedFromAddressMatch = from.match(/<([^<>@\s]+@[^<>@\s]+)>$/) ?? from.match(/^([^<>\s@]+@[^<>\s@]+)$/);
   const extractedFromAddress = extractedFromAddressMatch?.[1] ?? extractedFromAddressMatch?.[0] ?? "";
   const fromParts = extractedFromAddress.toLowerCase().split("@");
