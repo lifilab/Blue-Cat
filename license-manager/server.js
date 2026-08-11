@@ -16,24 +16,24 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Simple in-memory rate limiter middleware to satisfy CodeQL rate limiting warnings
-const rateLimits = {};
+const rateLimits = new Map();
 function customRateLimiter(windowMs, maxRequests, message) {
   return (req, res, next) => {
     const ip = req.headers['x-forwarded-for']?.split(',')[0] || req.ip || req.socket.remoteAddress || 'unknown';
     const now = Date.now();
     
-    if (!rateLimits[ip]) {
-      rateLimits[ip] = [];
+    if (!rateLimits.has(ip)) {
+      rateLimits.set(ip, []);
     }
     
-    rateLimits[ip] = rateLimits[ip].filter(timestamp => now - timestamp < windowMs);
+    const timestamps = rateLimits.get(ip).filter(timestamp => now - timestamp < windowMs);
+    rateLimits.set(ip, timestamps);
     
-    if (rateLimits[ip].length >= maxRequests) {
+    if (timestamps.length >= maxRequests) {
       return res.status(429).json({ error: message || 'Too many requests, please try again later.' });
     }
     
-    rateLimits[ip].push(now);
+    timestamps.push(now);
     next();
   };
 }

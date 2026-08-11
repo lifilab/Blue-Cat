@@ -53,7 +53,7 @@ jobs:
             echo "STAGING_HOST=staging.blue-cat.test"
             echo "DEPLOYMENT_COMMIT=0000000000000000000000000000000000000001"
             echo "PORTAL_IMAGE_TAG=0000000000000000000000000000000000000001"
-            echo "DATABASE_URL=mysql://portal:$database_password@database:3306/blue_cat_portal"
+            echo "DATABASE_URL=postgresql://portal:$database_password@database:5432/blue_cat_portal?options=-csearch_path%3Dlanding"
             echo "DATABASE_CREATE_ALLOWED=false"
             echo "IDENTITY_DATA_KEY=$identity_key"
             echo "IDENTITY_HASH_PEPPER=$identity_pepper"
