@@ -103,8 +103,11 @@ async function sendEmail(jobId: string, recipient: string, subject: string, html
   }
   if (provider !== "resend") throw new Error("EMAIL_PROVIDER_NOT_CONFIGURED");
   const apiKey = process.env.RESEND_API_KEY?.trim() || "";
-  const from = process.env.EMAIL_FROM?.trim() || "";
-  if (!apiKey.startsWith("re_") || !from.includes("@")) throw new Error("EMAIL_PROVIDER_NOT_CONFIGURED");
+  let from = process.env.EMAIL_FROM?.trim() || "";
+  if (!apiKey.startsWith("re_")) throw new Error("EMAIL_PROVIDER_NOT_CONFIGURED");
+  if (!from.includes("@") || from.includes("tu-dominio") || from.includes("example.com") || from.includes("example.invalid")) {
+    from = "Blue Cat <onboarding@resend.dev>";
+  }
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
@@ -115,7 +118,11 @@ async function sendEmail(jobId: string, recipient: string, subject: string, html
     body: JSON.stringify({ from, to: [recipient], subject, html, text }),
     signal: AbortSignal.timeout(10_000),
   });
-  if (!response.ok) throw new Error(`EMAIL_PROVIDER_${response.status}`);
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => "");
+    console.error(JSON.stringify({ level: "error", event: "resend_api_failed", status: response.status, body: errorBody }));
+    throw new Error(`EMAIL_PROVIDER_${response.status}`);
+  }
   const payload = await response.json() as { id?: string };
   if (!payload.id) throw new Error("EMAIL_PROVIDER_INVALID_RESPONSE");
   return payload.id;
