@@ -4,6 +4,7 @@ import { z } from "zod";
 import { clientRateLimitKey, enforceRateLimit } from "@/lib/http-security";
 import { resendVerificationEmail } from "@/modules/identity/application/identity-service";
 import { enforceIdentityOrigin, identityError, identityException, readIdentityJson } from "@/modules/identity/infrastructure/identity-http";
+import { dispatchEmailOutbox } from "@/modules/notifications/application/email-outbox-service";
 
 const inputSchema = z.object({
   email: z.email().max(190),
@@ -20,7 +21,13 @@ export async function POST(request: Request) {
     }
     const parsed = inputSchema.safeParse(await readIdentityJson(request));
     if (!parsed.success) return identityError(422, "VALIDATION_ERROR", "Revisa el correo y la contraseña.", requestId);
-    await resendVerificationEmail(parsed.data.email, parsed.data.password, requestId);
+    const resend = await resendVerificationEmail(parsed.data.email, parsed.data.password, requestId);
+    if (resend.outboxId) {
+      const delivery = await dispatchEmailOutbox(1, resend.outboxId);
+      if (delivery.sent !== 1) {
+        console.error(JSON.stringify({ level: "error", event: "verification_email_redelivery_deferred", requestId }));
+      }
+    }
     return NextResponse.json(
       { data: { accepted: true, message: "Si la cuenta está pendiente, enviaremos un nuevo enlace." }, requestId },
       { status: 202, headers: { "Cache-Control": "no-store" } },

@@ -8,20 +8,48 @@ import { useForm } from "react-hook-form";
 import { useState } from "react";
 import { licensePlans } from "@/config/commercial";
 import { purchaseRequestSchema, type CreatedPurchaseRequest, type PurchaseRequestFormInput, type PurchaseRequestInput } from "@/modules/purchases/domain/purchase-request";
+import { readPortalCsrf } from "@/lib/portal-client";
 
 interface ApiError { error?: { message?: string; trackingId?: string }; }
 
-export function PurchaseRequestForm({ initialPlan, initialCloud }: { initialPlan: "pyme" | "enterprise"; initialCloud: boolean }) {
+export function PurchaseRequestForm({
+  initialPlan,
+  initialCloud,
+  userEmail,
+  userDisplayName,
+}: {
+  initialPlan: "pyme" | "enterprise";
+  initialCloud: boolean;
+  userEmail: string;
+  userDisplayName: string;
+}) {
   const router = useRouter();
   const [idempotencyKey] = useState(() => crypto.randomUUID());
   const { register, handleSubmit, formState: { errors, isSubmitting }, setError } = useForm<PurchaseRequestFormInput, unknown, PurchaseRequestInput>({
     resolver: zodResolver(purchaseRequestSchema),
-    defaultValues: { planId: initialPlan, estimatedBranches: 1, wantsCloudSync: initialCloud, acceptsTerms: false, acceptsPrivacy: false, website: "" },
+    defaultValues: {
+      planId: initialPlan,
+      estimatedBranches: 1,
+      wantsCloudSync: initialCloud,
+      acceptsTerms: false,
+      acceptsPrivacy: false,
+      website: "",
+      email: userEmail,
+      contactName: userDisplayName,
+    },
   });
 
   async function onSubmit(values: PurchaseRequestInput) {
     try {
-      const response = await fetch("/api/purchase-requests", { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey }, body: JSON.stringify(values) });
+      const response = await fetch("/api/purchase-requests", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": idempotencyKey,
+          "X-CSRF-Token": readPortalCsrf(),
+        },
+        body: JSON.stringify(values),
+      });
       const payload = await response.json() as { data?: CreatedPurchaseRequest } & ApiError;
       if (!response.ok || !payload.data) throw new Error(payload.error?.message ?? "No pudimos registrar la solicitud.");
       router.push(`/seguimiento/${encodeURIComponent(payload.data.trackingId)}#token=${payload.data.accessToken}`);
@@ -34,7 +62,7 @@ export function PurchaseRequestForm({ initialPlan, initialCloud }: { initialPlan
     <div className="form-grid">
       <Field label="Nombre o razón social" error={errors.businessName?.message}><input autoComplete="organization" aria-invalid={Boolean(errors.businessName)} {...register("businessName")}/></Field>
       <Field label="Nombre del contacto" error={errors.contactName?.message}><input autoComplete="name" aria-invalid={Boolean(errors.contactName)} {...register("contactName")}/></Field>
-      <Field label="Correo" error={errors.email?.message}><input type="email" autoComplete="email" aria-invalid={Boolean(errors.email)} {...register("email")}/></Field>
+      <Field label="Correo" error={errors.email?.message}><input type="email" readOnly style={{ backgroundColor: "var(--soft)", color: "var(--muted)", cursor: "not-allowed" }} autoComplete="email" aria-invalid={Boolean(errors.email)} {...register("email")}/></Field>
       <Field label="Teléfono" error={errors.phone?.message}><input type="tel" autoComplete="tel" aria-invalid={Boolean(errors.phone)} {...register("phone")}/></Field>
       <Field label="País" error={errors.country?.message}><input autoComplete="country-name" aria-invalid={Boolean(errors.country)} {...register("country")}/></Field>
       <Field label="Ciudad" error={errors.city?.message}><input autoComplete="address-level2" aria-invalid={Boolean(errors.city)} {...register("city")}/></Field>

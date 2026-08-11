@@ -24,14 +24,14 @@ export interface OutboxDispatchResult {
   dead: number;
 }
 
-export async function dispatchEmailOutbox(batchSize = 10): Promise<OutboxDispatchResult> {
-  const jobs = await claimJobs(Math.max(1, Math.min(25, batchSize)));
+export async function dispatchEmailOutbox(batchSize = 10, jobId?: string): Promise<OutboxDispatchResult> {
+  const jobs = await claimJobs(Math.max(1, Math.min(25, batchSize)), jobId);
   const result: OutboxDispatchResult = { claimed: jobs.length, sent: 0, failed: 0, dead: 0 };
   for (const job of jobs) {
     try {
       const payload = decryptPrivatePayload<EmailPayload>(job.encrypted_payload);
       const message = renderEmail(job.template_key, payload);
-      const providerMessageId = await sendEmail(job.recipient, message.subject, message.html, message.text);
+      const providerMessageId = await sendEmail(job.id, job.recipient, message.subject, message.html, message.text);
       await getPool().query(
         `UPDATE landing.email_outbox
          SET status='sent',provider_message_id=$1,sent_at=CURRENT_TIMESTAMP,
@@ -57,7 +57,7 @@ export async function dispatchEmailOutbox(batchSize = 10): Promise<OutboxDispatc
   return result;
 }
 
-async function claimJobs(limit: number): Promise<OutboxRow[]> {
+async function claimJobs(limit: number, jobId?: string): Promise<OutboxRow[]> {
   const connection = await getPool().connect();
   const workerId = `worker-${randomUUID()}`;
   try {
@@ -65,14 +65,15 @@ async function claimJobs(limit: number): Promise<OutboxRow[]> {
     const result = await connection.query<OutboxRow>(
       `SELECT id,recipient,template_key,encrypted_payload,attempts
        FROM landing.email_outbox
-       WHERE (
-         status IN ('pending','failed') AND available_at<=CURRENT_TIMESTAMP
-       ) OR (
-         status='processing' AND locked_at<CURRENT_TIMESTAMP - INTERVAL '15 minutes'
-       )
+       WHERE ($2::uuid IS NULL OR id=$2::uuid)
+         AND ((
+           status IN ('pending','failed') AND available_at<=CURRENT_TIMESTAMP
+         ) OR (
+           status='processing' AND locked_at<CURRENT_TIMESTAMP - INTERVAL '15 minutes'
+         ))
        ORDER BY created_at ASC
        LIMIT $1 FOR UPDATE SKIP LOCKED`,
-      [limit],
+      [limit, jobId ?? null],
     );
     const rows = result.rows;
     if (rows.length) {
@@ -93,7 +94,7 @@ async function claimJobs(limit: number): Promise<OutboxRow[]> {
   }
 }
 
-async function sendEmail(recipient: string, subject: string, html: string, text: string): Promise<string> {
+async function sendEmail(jobId: string, recipient: string, subject: string, html: string, text: string): Promise<string> {
   const provider = process.env.EMAIL_PROVIDER?.trim().toLowerCase() || (process.env.NODE_ENV === "production" ? "" : "console");
   if (provider === "console") {
     if (process.env.NODE_ENV === "production") throw new Error("CONSOLE_EMAIL_FORBIDDEN");
@@ -109,7 +110,7 @@ async function sendEmail(recipient: string, subject: string, html: string, text:
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
-      "Idempotency-Key": `bluecat-${randomUUID()}`,
+      "Idempotency-Key": `bluecat-outbox-${jobId}`,
     },
     body: JSON.stringify({ from, to: [recipient], subject, html, text }),
     signal: AbortSignal.timeout(10_000),

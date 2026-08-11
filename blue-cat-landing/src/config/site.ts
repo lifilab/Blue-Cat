@@ -12,5 +12,4 @@ export const navigation = [
   { href: "/modulos", label: "Módulos" },
   { href: "/licencias", label: "Licencias" },
   { href: "/cloud-sync", label: "Cloud Sync" },
-  { href: "/tutoriales", label: "Tutoriales" },
 ] as const;

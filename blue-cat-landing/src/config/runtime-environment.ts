@@ -24,7 +24,8 @@ export function validateStagingEnvironment(
 
   const secretNames = ["IDENTITY_HASH_PEPPER", "OUTBOX_WORKER_TOKEN", "PURCHASE_TOKEN_SECRET"] as const;
   for (const name of secretNames) validateSecret(name, environment[name], errors);
-  const secrets = secretNames.map((name) => environment[name]?.trim()).filter(Boolean);
+  if (environment.CRON_SECRET) validateSecret("CRON_SECRET", environment.CRON_SECRET, errors);
+  const secrets = [...secretNames.map((name) => environment[name]?.trim()), environment.CRON_SECRET?.trim()].filter(Boolean);
   if (new Set(secrets).size !== secrets.length) errors.push("STAGING_SECRETS_MUST_BE_UNIQUE");
 
   if (environment.EMAIL_PROVIDER !== "resend") errors.push("EMAIL_PROVIDER_MUST_BE_RESEND");

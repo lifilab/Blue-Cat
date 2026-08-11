@@ -38,7 +38,7 @@ export function RegisterForm({ termsVersion, privacyVersion }: { termsVersion: s
     return <div className="form-card auth-card" role="status">
       <span className="status">Solicitud recibida</span>
       <h2>Revisa tu correo</h2>
-      <p className="muted">Te enviaremos un enlace de un solo uso. Debes verificarlo antes de ingresar o crear tu organización.</p>
+      <p className="muted">Enviamos un enlace de un solo uso. Revisa también Spam o Promociones. Debes verificarlo antes de ingresar o crear tu organización.</p>
       <Link className="button button-primary" href="/ingresar">Ir a ingresar</Link>
     </div>;
   }

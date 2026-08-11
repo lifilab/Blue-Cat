@@ -54,7 +54,7 @@ export async function registerPortalAccount(
   input: RegisterInput,
   request: Request,
   requestId: string,
-): Promise<{ accepted: true; verificationToken?: string; userId?: string }> {
+): Promise<{ accepted: true; verificationToken?: string; userId?: string; outboxId?: string }> {
   assertCurrentLegalVersions(input.termsVersion, input.privacyVersion);
   const email = normalizeEmail(input.email);
   const passwordHash = await hashPassword(input.password);
@@ -88,7 +88,7 @@ export async function registerPortalAccount(
        VALUES ($1,$2,'verify_email',$3,$4)`,
       [randomUUID(), userId, tokenHash, expiresAt],
     );
-    await queueEmail(connection, {
+    const outboxId = await queueEmail(connection, {
       userId,
       recipient: email,
       template: "verify_email",
@@ -105,7 +105,7 @@ export async function registerPortalAccount(
       privacyVersion: input.privacyVersion,
     });
     await connection.query("COMMIT");
-    return { accepted: true, verificationToken, userId };
+    return { accepted: true, verificationToken, userId, outboxId };
   } catch (error) {
     await connection.query("ROLLBACK");
     if (isDuplicateEntry(error)) return { accepted: true };
@@ -119,7 +119,7 @@ export async function resendVerificationEmail(
   emailInput: string,
   password: string,
   requestId: string,
-): Promise<{ accepted: true; verificationToken?: string }> {
+): Promise<{ accepted: true; verificationToken?: string; outboxId?: string }> {
   const email = normalizeEmail(emailInput);
   const result = await getPool().query<UserRow>(
     "SELECT * FROM landing.portal_users WHERE normalized_email=$1 LIMIT 1",
@@ -141,7 +141,7 @@ export async function resendVerificationEmail(
       "INSERT INTO landing.portal_email_tokens (id,user_id,token_type,token_hash,expires_at) VALUES ($1,$2,'verify_email',$3,CURRENT_TIMESTAMP + INTERVAL '24 hours')",
       [randomUUID(), user.id, tokenHash],
     );
-    await queueEmail(connection, {
+    const outboxId = await queueEmail(connection, {
       userId: user.id,
       recipient: user.email,
       template: "verify_email",
@@ -154,7 +154,7 @@ export async function resendVerificationEmail(
     });
     await audit(connection, requestId, "portal_user", user.id, "verification_email_reissued", {});
     await connection.query("COMMIT");
-    return { accepted: true, verificationToken };
+    return { accepted: true, verificationToken, outboxId };
   } catch (error) {
     await connection.query("ROLLBACK");
     throw error;
@@ -401,14 +401,15 @@ async function queueEmail(
     tokenHash: string;
     payload: Record<string, unknown>;
   },
-): Promise<void> {
+): Promise<string> {
+  const outboxId = randomUUID();
   const deduplicationKey = hashToken(`${input.template}|${input.userId}|${input.tokenHash}`);
   await connection.query(
     `INSERT INTO landing.email_outbox
       (id,user_id,recipient,template_key,encrypted_payload,deduplication_key)
      VALUES ($1,$2,$3,$4,$5,$6)`,
     [
-      randomUUID(),
+      outboxId,
       input.userId,
       input.recipient,
       input.template,
@@ -416,6 +417,7 @@ async function queueEmail(
       deduplicationKey,
     ],
   );
+  return outboxId;
 }
 
 type SqlExecutor = PoolClient | ReturnType<typeof getPool>;

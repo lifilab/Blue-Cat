@@ -14,6 +14,7 @@ function validEnvironment(): NodeJS.ProcessEnv {
     IDENTITY_DATA_KEY: Buffer.alloc(32, 7).toString("base64"),
     IDENTITY_HASH_PEPPER: "h".repeat(64),
     OUTBOX_WORKER_TOKEN: "o".repeat(64),
+    CRON_SECRET: "c".repeat(64),
     PURCHASE_TOKEN_SECRET: "p".repeat(64),
     EMAIL_PROVIDER: "resend",
     RESEND_API_KEY: `re_${"r".repeat(32)}`,
@@ -68,11 +69,13 @@ describe("validateStagingEnvironment", () => {
     environment.IDENTITY_DATA_KEY = "not-base64";
     environment.IDENTITY_HASH_PEPPER = "x".repeat(32);
     environment.OUTBOX_WORKER_TOKEN = "x".repeat(32);
+    environment.CRON_SECRET = "short";
     environment.PURCHASE_TOKEN_SECRET = "short";
     const result = validateStagingEnvironment(environment);
 
     expect(result.errors).toEqual(expect.arrayContaining([
       "IDENTITY_DATA_KEY_MUST_BE_32_BYTES",
+      "CRON_SECRET_INVALID",
       "PURCHASE_TOKEN_SECRET_INVALID",
       "STAGING_SECRETS_MUST_BE_UNIQUE",
     ]));

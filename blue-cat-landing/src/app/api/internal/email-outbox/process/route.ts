@@ -3,15 +3,34 @@ import { NextResponse } from "next/server";
 import { requiredSecret } from "@/modules/identity/domain/secure-values";
 import { dispatchEmailOutbox } from "@/modules/notifications/application/email-outbox-service";
 
+export async function GET(request: Request) {
+  return processEmailOutbox(request, "CRON_SECRET");
+}
+
 export async function POST(request: Request) {
+  return processEmailOutbox(request, "OUTBOX_WORKER_TOKEN");
+}
+
+async function processEmailOutbox(request: Request, secretName: "CRON_SECRET" | "OUTBOX_WORKER_TOKEN") {
   let expected: string;
   try {
-    expected = requiredSecret("OUTBOX_WORKER_TOKEN", 32);
+    expected = requiredSecret(secretName, 32);
   } catch {
-    return NextResponse.json(
-      { error: { code: "SERVICE_NOT_CONFIGURED", message: "Servicio no configurado." } },
-      { status: 503, headers: { "Cache-Control": "no-store" } },
-    );
+    if (secretName === "CRON_SECRET") {
+      try {
+        expected = requiredSecret("OUTBOX_WORKER_TOKEN", 32);
+      } catch {
+        return NextResponse.json(
+          { error: { code: "SERVICE_NOT_CONFIGURED", message: "Servicio no configurado." } },
+          { status: 503, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+    } else {
+      return NextResponse.json(
+        { error: { code: "SERVICE_NOT_CONFIGURED", message: "Servicio no configurado." } },
+        { status: 503, headers: { "Cache-Control": "no-store" } },
+      );
+    }
   }
   const authorization = request.headers.get("authorization") ?? "";
   const provided = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
