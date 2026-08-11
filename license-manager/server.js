@@ -67,22 +67,6 @@ function authAdminMiddleware(req, res, next) {
 // RUTAS DEL PANEL DE ADMINISTRACIÓN
 // ==========================================
 
-// Ruta temporal para inicializar/restablecer credenciales de admin vía body (POST)
-app.post('/api/admin/setup', (req, res) => {
-  const username = req.body.username || 'admin';
-  const password = req.body.password || 'admin123';
-  const hash = bcrypt.hashSync(password, 10);
-  
-  db.run(`DELETE FROM admins WHERE username = ?`, [username], (delErr) => {
-    db.run(`INSERT INTO admins (username, password_hash) VALUES (?, ?)`, [username, hash], (insErr) => {
-      if (insErr) {
-        return res.status(500).json({ error: 'Error al inicializar admin: ' + insErr.message });
-      }
-      res.json({ message: 'Credenciales de administrador inicializadas con éxito.', username });
-    });
-  });
-});
-
 // Login de Admin
 app.post('/api/admin/login', (req, res) => {
   const { username, password } = req.body;
