@@ -22,7 +22,7 @@ export function validateStagingEnvironment(
   validateDatabaseUrl(environment.DATABASE_URL, errors);
   validateDataKey(environment.IDENTITY_DATA_KEY, errors);
 
-  const secretNames = ["IDENTITY_HASH_PEPPER", "OUTBOX_WORKER_TOKEN", "PURCHASE_TOKEN_SECRET"] as const;
+  const secretNames = ["IDENTITY_HASH_PEPPER", "OUTBOX_WORKER_TOKEN", "CRON_SECRET", "PURCHASE_TOKEN_SECRET"] as const;
   for (const name of secretNames) validateSecret(name, environment[name], errors);
   const secrets = secretNames.map((name) => environment[name]?.trim()).filter(Boolean);
   if (new Set(secrets).size !== secrets.length) errors.push("STAGING_SECRETS_MUST_BE_UNIQUE");

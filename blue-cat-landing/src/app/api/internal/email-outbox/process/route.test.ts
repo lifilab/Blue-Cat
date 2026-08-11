@@ -1,14 +1,24 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { POST } from "./route";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-const originalToken = process.env.OUTBOX_WORKER_TOKEN;
+const mocks = vi.hoisted(() => ({
+  dispatchEmailOutbox: vi.fn(),
+}));
+
+vi.mock("@/modules/notifications/application/email-outbox-service", () => ({
+  dispatchEmailOutbox: mocks.dispatchEmailOutbox,
+}));
+
+import { GET, POST } from "./route";
+
+const originalWorkerToken = process.env.OUTBOX_WORKER_TOKEN;
+const originalCronSecret = process.env.CRON_SECRET;
 
 afterEach(() => {
-  if (originalToken === undefined) {
-    delete process.env.OUTBOX_WORKER_TOKEN;
-  } else {
-    process.env.OUTBOX_WORKER_TOKEN = originalToken;
-  }
+  if (originalWorkerToken === undefined) delete process.env.OUTBOX_WORKER_TOKEN;
+  else process.env.OUTBOX_WORKER_TOKEN = originalWorkerToken;
+  if (originalCronSecret === undefined) delete process.env.CRON_SECRET;
+  else process.env.CRON_SECRET = originalCronSecret;
+  mocks.dispatchEmailOutbox.mockReset();
 });
 
 describe("email outbox worker authentication", () => {
@@ -32,5 +42,19 @@ describe("email outbox worker authentication", () => {
     }));
 
     expect(response.status).toBe(401);
+    expect(mocks.dispatchEmailOutbox).not.toHaveBeenCalled();
+  });
+
+  it("accepts a Vercel cron request only with CRON_SECRET", async () => {
+    process.env.CRON_SECRET = "test-only-cron-secret-at-least-32-characters";
+    mocks.dispatchEmailOutbox.mockResolvedValue({ claimed: 1, sent: 1, failed: 0, dead: 0 });
+
+    const response = await GET(new Request("http://localhost/api/internal/email-outbox/process", {
+      headers: { Authorization: `Bearer ${process.env.CRON_SECRET}` },
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ data: { claimed: 1, sent: 1 } });
+    expect(mocks.dispatchEmailOutbox).toHaveBeenCalledOnce();
   });
 });

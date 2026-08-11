@@ -75,7 +75,7 @@ export function SiteHeader() {
               <Link className="button button-request-license" href="/comprar">Solicitar licencia</Link>
             </>
           ) : (
-            <Link className="account-access-link" href="/ingresar">Ingresar</Link>
+            <Link className="account-access-link" href="/ingresar">Iniciar sesión o crear cuenta</Link>
           )}
         </nav>
         <button className="menu-button" type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-controls="mobile-navigation" aria-label={open ? "Cerrar menú" : "Abrir menú"}>
@@ -114,7 +114,7 @@ export function SiteHeader() {
             </Link>
           </>
         ) : (
-          <Link href="/ingresar" onClick={() => setOpen(false)}>Ingresar</Link>
+          <Link href="/ingresar" onClick={() => setOpen(false)}>Iniciar sesión o crear cuenta</Link>
         )}
       </nav>
     </header>

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { clientRateLimitKey, enforceRateLimit } from "@/lib/http-security";
 import { registerPortalAccount } from "@/modules/identity/application/identity-service";
 import { registerInputSchema } from "@/modules/identity/domain/identity-input";
+import { dispatchEmailOutbox } from "@/modules/notifications/application/email-outbox-service";
 import {
   enforceIdentityOrigin,
   identityError,
@@ -25,7 +26,13 @@ export async function POST(request: Request) {
         { status: 422, headers: { "Cache-Control": "no-store" } },
       );
     }
-    await registerPortalAccount(parsed.data, request, requestId);
+    const registration = await registerPortalAccount(parsed.data, request, requestId);
+    if (registration.outboxId) {
+      const delivery = await dispatchEmailOutbox(1, registration.outboxId);
+      if (delivery.sent !== 1) {
+        console.error(JSON.stringify({ level: "error", event: "verification_email_delivery_deferred", requestId }));
+      }
+    }
     return NextResponse.json(
       { data: { accepted: true, message: "Si el correo puede registrarse, recibirás un enlace de verificación." }, requestId },
       { status: 202, headers: { "Cache-Control": "no-store" } },
