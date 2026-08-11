@@ -16,10 +16,21 @@ async function processEmailOutbox(request: Request, secretName: "CRON_SECRET" | 
   try {
     expected = requiredSecret(secretName, 32);
   } catch {
-    return NextResponse.json(
-      { error: { code: "SERVICE_NOT_CONFIGURED", message: "Servicio no configurado." } },
-      { status: 503, headers: { "Cache-Control": "no-store" } },
-    );
+    if (secretName === "CRON_SECRET") {
+      try {
+        expected = requiredSecret("OUTBOX_WORKER_TOKEN", 32);
+      } catch {
+        return NextResponse.json(
+          { error: { code: "SERVICE_NOT_CONFIGURED", message: "Servicio no configurado." } },
+          { status: 503, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+    } else {
+      return NextResponse.json(
+        { error: { code: "SERVICE_NOT_CONFIGURED", message: "Servicio no configurado." } },
+        { status: 503, headers: { "Cache-Control": "no-store" } },
+      );
+    }
   }
   const authorization = request.headers.get("authorization") ?? "";
   const provided = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
