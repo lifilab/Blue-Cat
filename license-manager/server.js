@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 const path = require('path');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
@@ -16,29 +17,14 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-const rateLimits = new Map();
-function customRateLimiter(windowMs, maxRequests, message) {
-  return (req, res, next) => {
-    const ip = req.headers['x-forwarded-for']?.split(',')[0] || req.ip || req.socket.remoteAddress || 'unknown';
-    const now = Date.now();
-    
-    if (!rateLimits.has(ip)) {
-      rateLimits.set(ip, []);
-    }
-    
-    const timestamps = rateLimits.get(ip).filter(timestamp => now - timestamp < windowMs);
-    rateLimits.set(ip, timestamps);
-    
-    if (timestamps.length >= maxRequests) {
-      return res.status(429).json({ error: message || 'Too many requests, please try again later.' });
-    }
-    
-    timestamps.push(now);
-    next();
-  };
-}
-
-const apiLimiter = customRateLimiter(15 * 60 * 1000, 200, 'Demasiadas solicitudes a la API, por favor intenta más tarde.');
+// Standard rate limiter to satisfy CodeQL's rate limiting rules
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 200, // Limit each IP to 200 requests per windowMs
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  message: { error: 'Demasiadas solicitudes a la API, por favor intenta más tarde.' }
+});
 app.use('/api/', apiLimiter);
 
 app.use(express.static(path.join(__dirname, 'public')));
@@ -562,7 +548,7 @@ app.post('/api/admin/licenses/:id/send-email', authAdminMiddleware, async (req, 
 
     const destination = target_email && target_email.trim() ? target_email.trim() : data.email;
     const configuredPublicUrl = (process.env.PUBLIC_BASE_URL || '').trim();
-    const hostUrl = configuredPublicUrl || `${req.protocol}://${req.get('host')}`;
+    const hostUrl = configuredPublicUrl || `http://localhost:${PORT}`;
 
     // Consultar si hay configuración SMTP guardada en BD
     db.all(`SELECT key, value FROM settings WHERE key LIKE 'smtp_%'`, async (settingsErr, rows) => {
