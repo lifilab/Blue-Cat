@@ -30,6 +30,8 @@ jobs:
         run: php Blue-Cat/scripts/test-sales-immutability-ui.php
       - name: Inventory UI preserves decimal quantities
         run: php Blue-Cat/scripts/test-inventory-ui-contract.php
+      - name: License manager security contract
+        run: node license-manager/test_security_contract.js
       - name: Secret patterns
         shell: bash
         run: |
