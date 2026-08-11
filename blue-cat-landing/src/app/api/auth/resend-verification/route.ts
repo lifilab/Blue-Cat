@@ -29,7 +29,14 @@ export async function POST(request: Request) {
       }
     }
     return NextResponse.json(
-      { data: { accepted: true, message: "Si la cuenta está pendiente, enviaremos un nuevo enlace." }, requestId },
+      {
+        data: {
+          accepted: true,
+          verificationToken: resend.verificationToken,
+          message: "Si la cuenta está pendiente, enviaremos un nuevo enlace.",
+        },
+        requestId,
+      },
       { status: 202, headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

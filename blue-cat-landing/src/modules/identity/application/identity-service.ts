@@ -449,7 +449,12 @@ function marketingVersion(): string {
 }
 
 function siteUrl(): string {
-  return new URL(process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000").origin;
+  const raw = process.env.NEXT_PUBLIC_SITE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
+  try {
+    return new URL(raw.startsWith("http") ? raw : `https://${raw}`).origin;
+  } catch {
+    return "http://localhost:3000";
+  }
 }
 
 function isDuplicateEntry(error: unknown): boolean {
