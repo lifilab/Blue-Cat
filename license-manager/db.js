@@ -219,7 +219,7 @@ async function initDb() {
       await client.query("INSERT INTO admins (username, password_hash) VALUES ($1, $2)", [defaultUsername, hash]);
       console.log("=========================================");
       console.log("Usuario Administrador Inicial Creado:");
-      console.log(`Usuario: ${defaultUsername}`);
+      console.log("Usuario: [REDACTED]");
       console.log("Contraseña: (Configurada vía variable de entorno o por defecto)");
       console.log("=========================================");
     }
