@@ -211,15 +211,16 @@ async function initDb() {
     `);
 
     // Crear usuario admin inicial si no existe
-    const res = await client.query("SELECT * FROM admins WHERE username = 'admin' LIMIT 1");
+    const defaultUsername = process.env.ADMIN_USERNAME || 'admin';
+    const res = await client.query("SELECT * FROM admins WHERE username = $1 LIMIT 1", [defaultUsername]);
     if (res.rowCount === 0) {
-      const defaultPassword = 'admin123';
+      const defaultPassword = process.env.ADMIN_PASSWORD || 'admin123';
       const hash = bcrypt.hashSync(defaultPassword, 10);
-      await client.query("INSERT INTO admins (username, password_hash) VALUES ($1, $2)", ['admin', hash]);
+      await client.query("INSERT INTO admins (username, password_hash) VALUES ($1, $2)", [defaultUsername, hash]);
       console.log("=========================================");
       console.log("Usuario Administrador Inicial Creado:");
-      console.log("Usuario: admin");
-      console.log("Contraseña: admin123");
+      console.log("Usuario: [REDACTED]");
+      console.log("Contraseña: (Configurada vía variable de entorno o por defecto)");
       console.log("=========================================");
     }
     
