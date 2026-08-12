@@ -124,6 +124,17 @@ export async function getPortalOverview(principal: PortalPrincipal) {
     [principal.userId],
   );
   const licenses = await getCustomerLicenses(principal);
+  const requestsResult = await getPool().query(
+    `SELECT pr.tracking_id as "trackingId", pr.plan_id as "planId", pr.status, 
+            pr.expected_amount_minor as "expectedAmountMinor", pr.currency, 
+            pr.offer_expires_at as "offerExpiresAt", pr.created_at as "createdAt"
+     FROM landing.purchase_requests pr
+     JOIN landing.customers c ON c.id = pr.customer_id
+     WHERE c.email = $1
+     ORDER BY pr.created_at DESC`,
+    [principal.email],
+  );
+
   return {
     account: {
       id: principal.userId,
@@ -137,6 +148,7 @@ export async function getPortalOverview(principal: PortalPrincipal) {
     },
     organizations: result.rows,
     licenses,
+    purchaseRequests: requestsResult.rows,
   };
 }
 

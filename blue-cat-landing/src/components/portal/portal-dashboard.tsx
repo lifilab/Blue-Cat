@@ -36,6 +36,15 @@ interface PortalOverview {
     expiresAt: string | null;
     issuedAt: string;
   }>;
+  purchaseRequests: Array<{
+    trackingId: string;
+    planId: string;
+    status: string;
+    expectedAmountMinor: number | null;
+    currency: string | null;
+    offerExpiresAt: string | null;
+    createdAt: string;
+  }>;
 }
 
 interface InstallerGrant {
@@ -114,7 +123,7 @@ export function PortalDashboard() {
       {downloadError && <p className="form-status" role="alert">{downloadError}</p>}
       {downloadNotice && <p className="notice installer-notice" role="status">{downloadNotice}</p>}
       {overview.licenses.length === 0
-        ? <div className="empty-portal"><KeyRound size={30}/><h3>No encontramos una licencia para este correo</h3><p>Si ya compraste Blue-Cat, ingresa con el mismo correo registrado en la compra o contacta a soporte.</p></div>
+        ? <div className="empty-portal"><KeyRound size={30}/><h3>No encontramos una licencia para este correo</h3><p>Si ya compraste Blue-Cat, ingresa con el mismo correo registrado en la compra o contacta a soporte.</p><Link className="button button-primary" href="/comprar" style={{marginTop:"1rem"}}>Solicitar cotización de licencia</Link></div>
         : <div className="license-list">{overview.licenses.map((license) => {
           const active = license.downloadAllowed;
           return <article className="card license-card" key={license.id}>
@@ -137,6 +146,11 @@ export function PortalDashboard() {
       <div className="portal-section-heading"><div><span className="eyebrow">Perfil comercial</span><h2>Mis organizaciones</h2></div><Link className="button button-primary" href="/portal/organizacion/nueva">Crear organización</Link></div>
       {overview.organizations.length === 0 ? <div className="empty-portal"><Building2 size={30}/><h3>Comienza por tu organización</h3><p>Define la razón social y el perfil de facturación que usaremos en futuros pedidos.</p></div> :
         <div className="grid-2">{overview.organizations.map((organization) => <article className="card organization-card" key={organization.id}><span className="status">{organization.status}</span><h3>{organization.tradingName || organization.legalName}</h3><p>{organization.legalName}</p><dl><div><dt>Rol</dt><dd>{organization.role}</dd></div><div><dt>Ubicación</dt><dd>{organization.city}, {organization.country}</dd></div><div><dt>Facturación</dt><dd>{organization.billingEmail || "Pendiente"}</dd></div><div><dt>Moneda</dt><dd>{organization.currency || "CLP"}</dd></div></dl></article>)}</div>}
+    </section>
+    <section className="portal-section">
+      <div className="portal-section-heading"><div><span className="eyebrow">Historial</span><h2>Mis cotizaciones y pagos</h2></div><Link className="button button-secondary" href="/comprar">Nueva solicitud</Link></div>
+      {!overview.purchaseRequests || overview.purchaseRequests.length === 0 ? <div className="empty-portal"><Building2 size={30}/><h3>Aún no has solicitado cotizaciones</h3><p>Cuando envíes una solicitud de licencia, podrás hacer seguimiento del pago y el estado aquí.</p></div> :
+        <div className="grid-2">{overview.purchaseRequests.map((req) => <article className="card organization-card" key={req.trackingId}><span className="status status-active">{req.status.replace(/_/g, " ")}</span><h3>{req.trackingId}</h3><p>Plan: {req.planId}</p><dl><div><dt>Fecha</dt><dd>{new Intl.DateTimeFormat("es-CL", { dateStyle: "medium" }).format(new Date(req.createdAt))}</dd></div><div><dt>Monto</dt><dd>{req.expectedAmountMinor ? `${req.currency} ${req.expectedAmountMinor}` : "Pendiente"}</dd></div><div><dt>Vencimiento</dt><dd>{req.offerExpiresAt ? new Intl.DateTimeFormat("es-CL", { dateStyle: "medium" }).format(new Date(req.offerExpiresAt)) : "N/A"}</dd></div></dl><Link className="button button-secondary" style={{width:"100%",marginTop:"1rem",textAlign:"center"}} href={`/informar-pago/${encodeURIComponent(req.trackingId)}`}>Ver seguimiento / pago</Link></article>)}</div>}
     </section>
   </div>;
 }
