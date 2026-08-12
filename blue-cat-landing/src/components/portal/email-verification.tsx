@@ -33,7 +33,7 @@ export function EmailVerification() {
 
   return <div className="form-card auth-card" aria-live="polite">
     <span className="eyebrow">Verificación de correo</span>
-    {!token && <><h2>Falta el token</h2><p className="muted">Abre el enlace completo recibido por correo.</p></>}
+    {!token && state === "loading" && <><h2>Falta el token</h2><p className="muted">Abre el enlace completo recibido por correo.</p></>}
     {token && state === "loading" && <><h2>Verificando…</h2><p className="muted">Estamos validando el enlace de un solo uso.</p></>}
     {state === "verified" && <><h2>Cuenta verificada</h2><p className="muted">Tu correo quedó confirmado. Ya puedes ingresar y crear tu organización.</p><Link className="button button-primary" href="/ingresar">Ingresar</Link></>}
     {state === "error" && <><h2>Enlace no disponible</h2><p className="form-status" role="alert">{message}</p><Link className="button button-secondary" href="/ingresar">Volver al acceso</Link></>}
