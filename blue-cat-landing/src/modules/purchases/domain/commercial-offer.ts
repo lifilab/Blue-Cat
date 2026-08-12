@@ -15,9 +15,17 @@ function positiveInteger(value: string | undefined): number | null {
   return Number.isSafeInteger(number) && number > 0 ? number : null;
 }
 
+export function getBankInstructions(): string {
+  return process.env.BANK_TRANSFER_INSTRUCTIONS?.trim() || `Titular: Pablo Hugo Millones Guerra
+RUT: 19.130.038-6
+Banco: Mercado Pago
+Tipo de cuenta: Cuenta Vista
+N° de cuenta: 1096731087`;
+}
+
 export function getDirectOffer(planId: "pyme" | "enterprise"): DirectOffer | null {
   if (!commerceEnabled()) return null;
-  if (!process.env.BANK_TRANSFER_INSTRUCTIONS?.trim()) return null;
+  if (!getBankInstructions()) return null;
   const amountMinor = positiveInteger(planId === "pyme" ? process.env.PYME_PRICE_MINOR : process.env.ENTERPRISE_PRICE_MINOR);
   const currency = (process.env.COMMERCIAL_CURRENCY ?? "CLP").trim().toUpperCase();
   const version = (process.env.OFFER_VERSION ?? "").trim();

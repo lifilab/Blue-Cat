@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { clientRateLimitKey, enforceRateLimit } from "@/lib/http-security";
 import { safeErrorCode } from "@/lib/safe-error";
 import { getPurchaseStatus } from "@/modules/purchases/infrastructure/mysql-purchase-access-repository";
+import { getBankInstructions } from "@/modules/purchases/domain/commercial-offer";
 
 const trackingPattern = /^BC-\d{4}-[A-F0-9]{10}$/;
 
@@ -16,7 +17,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ trac
     if (!await enforceRateLimit("purchase-status", `${clientRateLimitKey(request)}|${trackingId}`, 60, 3600)) return NextResponse.json({ error: { code: "RATE_LIMITED", message: "Demasiadas consultas. Espera antes de volver a intentar." }, requestId }, { status: 429, headers: { "Cache-Control": "no-store", "Retry-After": "3600" } });
     const status = await getPurchaseStatus(trackingId, accessToken);
     if (!status) return NextResponse.json({ error: { code: "INVALID_ACCESS", message: "El enlace de seguimiento no es válido o expiró." }, requestId }, { status: 401, headers: { "Cache-Control": "no-store" } });
-    const bankInstructions = status.status === "pending_payment" && !status.offerExpired ? process.env.BANK_TRANSFER_INSTRUCTIONS : undefined;
+    const bankInstructions = status.status === "pending_payment" && !status.offerExpired ? getBankInstructions() : undefined;
     return NextResponse.json({ data: { ...status, bankInstructions }, requestId }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const code = safeErrorCode(error);
