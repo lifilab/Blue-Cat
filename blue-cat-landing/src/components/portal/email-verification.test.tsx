@@ -28,4 +28,26 @@ describe("EmailVerification", () => {
     }));
     expect(window.location.hash).toBe("");
   });
+
+  it("does not show missing-token message after successful verification", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: { verified: true } }),
+    }));
+    window.history.replaceState(null, "", "/verificar-correo#token=one-time-token");
+
+    render(<EmailVerification />);
+
+    await screen.findByRole("heading", { name: "Cuenta verificada" });
+    expect(screen.queryByText("Falta el token")).not.toBeInTheDocument();
+  });
+
+  it("shows missing-token message when no token is present in the URL", () => {
+    window.history.replaceState(null, "", "/verificar-correo");
+
+    render(<EmailVerification />);
+
+    expect(screen.getByRole("heading", { name: "Falta el token" })).toBeInTheDocument();
+  });
 });
+
